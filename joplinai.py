@@ -94,6 +94,12 @@ CONFIG = {
     / "data"
     / "joplin_process_state.json",  # 处理状态文件路径
     "log_level": logging.INFO,  # 日志级别
+    "enable_deepseek_embed": False,  # 是否用DeepSeek嵌入替代本地嵌入（增强向量质量）
+    "enable_deepseek_summary": False,  # 是否用DeepSeek生成摘要（增强笔记元数据）
+    "enable_deepseek_tags": False,  # 是否用DeepSeek提取标签（增强笔记标签）
+    "deepseek_api_key": getcfpoptionvalue("joplinai", "deepseek", "token"),
+    "deepseek_chat_model": "deepseek-chat",  # 修正模型名称
+    "deepseek_embed_model": "deepseek-embedding",
 }
 
 
@@ -229,7 +235,12 @@ class VectorDBManager:
             )
 
     def upsert_note(
-        self, note_id: str, text: str, embedding: List[float], tags: List[str]
+        self,
+        note_id: str,
+        text: str,
+        embedding: List[float],
+        tags: List[str],
+        metadatas: List[Dict],
     ):
         """插入/更新笔记向量数据"""
         self.collection.upsert(
@@ -304,43 +315,56 @@ def split_text(text: str, chunk_size: int) -> List[str]:
 
 
 # %% [markdown]
-# #### get_merged_embedding(text: str, model_name: str, chunk_size: int, max_context: int) -> List[float]
+# #### get_merged_embedding(text: str, model_name: str, config: Dict) -> List[float]
 
 # %%
-def get_merged_embedding(text: str, model_name: str) -> List[float]:
-    """极端保守的分块策略（每块不超过1000字符）"""
-    CHUNK_SIZE = 800  # 留出安全余量
-    chunks = [text[i : i + CHUNK_SIZE] for i in range(0, len(text), CHUNK_SIZE)]
+def get_merged_embedding(text: str, model_name: str, config: Dict) -> List[float]:
+    """合并嵌入生成（本地嵌入为主，DeepSeek嵌入为增强选项）"""
+    if config["enable_deepseek_embed"] and config["deepseek_api_key"]:
+        # 优先用DeepSeek增强嵌入
+        log.info("使用DeepSeek增强嵌入")
+        from deepseek_enhancer import get_deepseek_embedding
 
-    if not chunks:
-        return []
+        return get_deepseek_embedding(
+            text, model=config.get("deepseek_embed_model", "deepseek-embedding")
+        )
+    else:
+        # 默认用本地Ollama嵌入（保留您已优化的分块逻辑）
+        log.info("使用本地Ollama嵌入")
+        """极端保守的分块策略（每块不超过1000字符）"""
+        # CHUNK_SIZE = 800  # 留出安全余量
+        CHUNK_SIZE = get_model_max_context(model_name)
+        chunks = [text[i : i + CHUNK_SIZE] for i in range(0, len(text), CHUNK_SIZE)]
 
-    log.info(f"文本分块: {len(chunks)}块（每块{CHUNK_SIZE}字符）")
+        if not chunks:
+            return []
 
-    # 顺序处理（避免并发问题）
-    embeddings = []
-    for chunk in chunks:
-        emb = get_ollama_embedding(chunk, model_name)
-        if emb:
-            embeddings.append(emb)
+        log.info(f"文本分块: {len(chunks)}块（每块{CHUNK_SIZE}字符）")
 
-    if not embeddings:
-        return []
+        # 顺序处理（避免并发问题）
+        embeddings = []
+        for chunk in chunks:
+            emb = get_ollama_embedding(chunk, model_name)
+            if emb:
+                embeddings.append(emb)
 
-    # 简单平均合并
-    return [sum(dim) / len(embeddings) for dim in zip(*embeddings)]
+        if not embeddings:
+            return []
+
+        # 简单平均合并
+        return [sum(dim) / len(embeddings) for dim in zip(*embeddings)]
 
 
 # %% [markdown]
-# #### concurrent_generate_embeddings( texts: List[str], model_name: str, max_context: int, concurrency_type: str, max_workers: int, ) -> List[List[float]]
+# #### concurrent_generate_embeddings( texts: List[str], model_name: str, concurrency_type: str, max_workers: int, config, Dict) -> List[List[float]]
 
 # %%
 def concurrent_generate_embeddings(
     texts: List[str],
     model_name: str,
-    max_context: int,
     concurrency_type: str,
     max_workers: int,
+    config: Dict,
 ) -> List[List[float]]:
     """并发生成多个文本的嵌入（支持多线程/多进程）"""
     if concurrency_type == "thread":
@@ -354,7 +378,7 @@ def concurrent_generate_embeddings(
     with executor_class(max_workers=max_workers) as executor:
         # 提交任务（注意：多进程需确保函数可序列化，避免lambda）
         future_to_text = {
-            executor.submit(get_ollama_embedding, text, model_name, max_context): text
+            executor.submit(get_ollama_embedding, text, model_name): text
             for text in texts
         }
         for future in as_completed(future_to_text):
@@ -371,10 +395,13 @@ def concurrent_generate_embeddings(
 # ### 笔记处理核心逻辑（增量更新+入库）
 
 # %% [markdown]
-# #### process_single_note note, vector_db: VectorDBManager, model_name: str, chunk_size: int, max_context: int) -> bool
+# #### process_single_note(note, vector_db: VectorDBManager, model_name: str, config: Dict) -> bool
 
 # %%
-def process_single_note(note, vector_db: VectorDBManager, model_name: str) -> bool:
+@timethis
+def process_single_note(
+    note, vector_db: VectorDBManager, model_name: str, config: Dict
+) -> bool:
     """处理单条笔记（清理→嵌入→入库），返回是否成功"""
     try:
         # 获取笔记完整信息（含更新时间）
@@ -394,16 +421,52 @@ def process_single_note(note, vector_db: VectorDBManager, model_name: str) -> bo
         text = f"{note.title}\n{cleaned_body}"
 
         # 生成嵌入
-        embedding = get_merged_embedding(text, model_name)
+        # embedding = get_merged_embedding(text, model_name, config)
+        embedding = concurrent_generate_embeddings(
+            text, model_name, config["concurrency_type"], config["max_workers"], config
+        )
         if not embedding:  # 嵌入生成失败
             log.error(f"笔记 {note.id} 嵌入生成失败，跳过")
             return False
 
         # 获取标签
-        tags = get_tag_titles(note.id)  # 项目函数：获取笔记标签列表
+        local_tags = get_tag_titles(note.id)  # 项目函数：获取笔记标签列表
+        # -------------------------- DeepSeek增强加工（可选） --------------------------
+        enhanced_metadata = {}
+        enhanced_metadata["note_id"] = note_id
+        if config["enable_deepseek_summary"] and config["deepseek_api_key"]:
+            from deepseek_enhancer import deepseek_process_note
 
-        # 入库（Upsert：存在则更新，不存在则新增）
-        vector_db.upsert_note(note.id, text, embedding, tags)
+            summary = deepseek_process_note(
+                text,
+                task="summary",
+                model=config.get("deepseek_chat_model", "deepseek-chat"),
+            )
+            enhanced_metadata["summary"] = summary or ""  # 存入摘要
+
+        if config["enable_deepseek_tags"] and config["deepseek_api_key"]:
+            tags_str = deepseek_process_note(
+                text,
+                task="tags",
+                model=config.get("deepseek_chat_model", "deepseek-chat"),
+            )
+            deepseek_tags = [t.strip() for t in tags_str.split(",")] if tags_str else []
+            # 合并本地标签与DeepSeek标签（去重）
+            enhanced_tags = list(set(local_tags + deepseek_tags))
+        else:
+            enhanced_tags = local_tags
+
+        enhanced_metadata["tags"] = ",".join(enhanced_tags)
+        print(enhanced_metadata)
+
+        # ------ 入库（本地向量库+增强元数据），存在则更新，不存在则新增 ------
+        vector_db.upsert_note(
+            note_id=note.id,
+            text=text,
+            embedding=embedding,
+            tags=enhanced_tags,
+            metadatas=[enhanced_metadata],
+        )
         log.info(f"笔记 {note.id} 处理完成（标题: {note.title[:20]}...）")
         return True
 
@@ -472,9 +535,7 @@ def process_notes_incremental(notebook_title: str, config: Dict):
 
             # 处理笔记
             success = process_single_note(
-                note=note,
-                vector_db=vector_db,
-                model_name=model_name,
+                note=note, vector_db=vector_db, model_name=model_name, config=config
             )
 
             if success:
@@ -496,9 +557,6 @@ def process_notes_incremental(notebook_title: str, config: Dict):
 
 # %% [markdown]
 # ### 主流程入口
-
-# %% [markdown]
-# #### main()
 
 # %% [markdown]
 # #### parse_args()
@@ -524,8 +582,29 @@ def parse_args():
         default=CONFIG["max_workers"],
         help=f"并发数（默认：{CONFIG['max_workers']}）",
     )
+    parser.add_argument(
+        "--enable_deepseek_embed",
+        action="store_true",
+        default=CONFIG["enable_deepseek_embed"],
+        help=f"开启deepseek嵌入支持（默认：{CONFIG['enable_deepseek_embed']}）",
+    )
+    parser.add_argument(
+        "--enable_deepseek_summary",
+        action="store_true",
+        default=CONFIG["enable_deepseek_summary"],
+        help=f"开启deepseek摘要支持（默认：{CONFIG['enable_deepseek_summary']}）",
+    )
+    parser.add_argument(
+        "--enable_deepseek_tags",
+        action="store_true",
+        default=CONFIG["enable_deepseek_tags"],
+        help=f"开启deepseek标签支持（默认：{CONFIG['enable_deepseek_tags']}）",
+    )
     return parser.parse_args()
 
+
+# %% [markdown]
+# #### main()
 
 # %%
 @timethis
@@ -537,9 +616,18 @@ def main():
     dynamic_config["embedding_model"] = args.model
     dynamic_config["notebook_title"] = args.notebook
     dynamic_config["max_workers"] = args.workers
+    dynamic_config["enable_deepseek_embed"] = args.enable_deepseek_embed
+    dynamic_config["enable_deepseek_summary"] = args.enable_deepseek_summary
+    dynamic_config["enable_deepseek_tags"] = args.enable_deepseek_tags
 
     log.info(
-        f"动态配置：模型={dynamic_config['embedding_model']}, 笔记本={dynamic_config['notebook_title']}, 并发数={dynamic_config['max_workers']}"
+        f"动态配置：模型={dynamic_config['embedding_model']}, \
+        笔记本={dynamic_config['notebook_title']}, \
+        并发数={dynamic_config['max_workers']}， \
+        使能deepseek嵌入模型为{dynamic_config['enable_deepseek_embed']}， \
+        使能deepseek摘要功能为{dynamic_config['enable_deepseek_summary']}， \
+        使能deepseek标签功能为{dynamic_config['enable_deepseek_tags']}， \
+        "
     )
     log.info("===== 启动Joplin笔记向量化处理 =====")
     try:
