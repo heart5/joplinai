@@ -433,7 +433,7 @@ def process_single_note(
         local_tags = get_tag_titles(note.id)  # 项目函数：获取笔记标签列表
         # -------------------------- DeepSeek增强加工（可选） --------------------------
         enhanced_metadata = {}
-        enhanced_metadata["note_id"] = note_id
+        enhanced_metadata["note_id"] = note.id
         if config["enable_deepseek_summary"] and config["deepseek_api_key"]:
             from deepseek_enhancer import deepseek_process_note
 
