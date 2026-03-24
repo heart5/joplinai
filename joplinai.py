@@ -87,31 +87,31 @@ CONFIG = {
     "embedding_model": "qwen:1.8b",  # 嵌入模型（Ollama本地模型，优先选nomic-embed-text）
     "chunk_size": 2000,  # 文本分块大小（字符数，根据模型上下文调整，nomic支持8192）
     "max_context": 4000,  # 模型最大上下文（字符数，nomic-embed-text为8192）
-    "concurrency_type": "process",  # 并发类型："thread"（多线程，I/O密集型）/"process"（多进程，CPU密集型）
-    "max_workers": 4,  # 并发数（线程/进程数）
+    "concurrency_type": "thread",  # 固定使用多线程，移除 process 选项
+    "max_workers": min(
+        16, (os.cpu_count() or 1) * 2
+    ),  # 动态设置最大工作者数：CPU核心数 * 2，上限为16
     "db_path": getdirmain() / "data" / "joplin_vector_db",  # ChromaDB存储路径
     "state_path": getdirmain()
     / "data"
     / "joplin_process_state.json",  # 处理状态文件路径
-    "log_level": logging.INFO,  # 日志级别
+    # "log_level": logging.INFO,  # 日志级别
     "enable_deepseek_embed": False,  # 是否用DeepSeek嵌入替代本地嵌入（增强向量质量）
     "enable_deepseek_summary": False,  # 是否用DeepSeek生成摘要（增强笔记元数据）
     "enable_deepseek_tags": False,  # 是否用DeepSeek提取标签（增强笔记标签）
     "deepseek_api_key": getcfpoptionvalue("joplinai", "deepseek", "token"),
     "deepseek_chat_model": "deepseek-chat",  # 修正模型名称
     "deepseek_embed_model": "deepseek-embedding",
+    "force_update": False,  # 新增：强制更新开关，默认关闭
 }
 
 
 # %% [markdown]
 # ## 功能函数集
-
 # %% [markdown]
 # ### 工具小集合
-
 # %% [markdown]
 # #### clean_text(text: str) -> str
-
 # %%
 def clean_text(text: str) -> str:
     """清理笔记文本：移除图片、格式符号、多余换行"""
@@ -128,7 +128,6 @@ def clean_text(text: str) -> str:
 
 # %% [markdown]
 # #### compute_content_hash(title: str, body: str) -> str
-
 # %%
 def compute_content_hash(title: str, body: str) -> str:
     """计算笔记内容哈希（用于增量更新判断）"""
@@ -138,7 +137,6 @@ def compute_content_hash(title: str, body: str) -> str:
 
 # %% [markdown]
 # #### load_process_state(state_path: Path) -> Dict[str, Dict]
-
 # %%
 def load_process_state(state_path: Path) -> Dict[str, Dict]:
     """加载处理状态（笔记ID→{更新时间, 哈希, 处理时间}）"""
@@ -153,7 +151,6 @@ def load_process_state(state_path: Path) -> Dict[str, Dict]:
 
 # %% [markdown]
 # #### save_process_state(state: Dict, state_path: Path)
-
 # %%
 def save_process_state(state: Dict, state_path: Path):
     """保存处理状态（增强序列化）"""
@@ -179,7 +176,6 @@ def save_process_state(state: Dict, state_path: Path):
 
 # %% [markdown]
 # ### 向量数据库操作（ChromaDB）
-
 # %%
 class VectorDBManager:
     """ChromaDB向量数据库管理器（封装集合操作）"""
@@ -223,17 +219,6 @@ class VectorDBManager:
         }
         return dimensions.get(model_name, 768)  # 默认768维
 
-    def _get_or_create_collection(self):
-        """获取或创建集合（支持余弦相似度）"""
-        try:
-            return self.client.get_collection(name=self.collection_name)
-        except Exception:
-            log.info(f"集合 {self.collection_name} 不存在，创建新集合")
-            return self.client.create_collection(
-                name=self.collection_name,
-                metadata={"hnsw:space": "cosine"},  # 余弦相似度
-            )
-
     def upsert_note(
         self,
         note_id: str,
@@ -257,10 +242,8 @@ class VectorDBManager:
 
 # %% [markdown]
 # ### 嵌入生成（Ollama API调用+并发）
-
 # %% [markdown]
 # #### get_model_max_context(model_name: str) -> int
-
 # %%
 def get_model_max_context(model_name: str) -> int:
     """精确获取模型上下文限制（token→字符转换）"""
@@ -281,18 +264,10 @@ def get_model_max_context(model_name: str) -> int:
 
 
 # %% [markdown]
-# #### get_ollama_embedding(text: str, model_name: str, max_context: int) -> List[float]
-
+# #### get_ollama_embedding(text: str, model_name: str) -> List[float]
 # %%
 def get_ollama_embedding(text: str, model_name: str) -> List[float]:
-    """极端保守的嵌入生成（确保永不超限）"""
-    MAX_SAFE_LENGTH = 1000  # 强制限制为1000字符（约700-1000 token）
-
-    # 如果文本过长，截取最前面的部分（可改为保留开头+结尾）
-    if len(text) > MAX_SAFE_LENGTH:
-        log.warning(f"文本过长({len(text)}字符)，强制截取前{MAX_SAFE_LENGTH}字符")
-        text = text[:MAX_SAFE_LENGTH]
-
+    """调用 Ollama 生成文本嵌入。注意：传入的 text 应是已分块的适当长度文本。"""
     for attempt in range(3):
         try:
             response = ollama.embeddings(model=model_name, prompt=text)
@@ -306,17 +281,7 @@ def get_ollama_embedding(text: str, model_name: str) -> List[float]:
 
 
 # %% [markdown]
-# #### split_text(text: str, chunk_size: int) -> List[str]
-
-# %%
-def split_text(text: str, chunk_size: int) -> List[str]:
-    """将长文本按chunk_size分块（最后一块可能不足）"""
-    return [text[i : i + chunk_size] for i in range(0, len(text), chunk_size)]
-
-
-# %% [markdown]
 # #### get_merged_embedding(text: str, model_name: str, config: Dict) -> List[float]
-
 # %%
 def get_merged_embedding(text: str, model_name: str, config: Dict) -> List[float]:
     """合并嵌入生成（本地嵌入为主，DeepSeek嵌入为增强选项）"""
@@ -331,15 +296,15 @@ def get_merged_embedding(text: str, model_name: str, config: Dict) -> List[float
     else:
         # 默认用本地Ollama嵌入（保留您已优化的分块逻辑）
         log.info("使用本地Ollama嵌入")
-        """极端保守的分块策略（每块不超过1000字符）"""
-        # CHUNK_SIZE = 800  # 留出安全余量
         CHUNK_SIZE = get_model_max_context(model_name)
         chunks = [text[i : i + CHUNK_SIZE] for i in range(0, len(text), CHUNK_SIZE)]
 
         if not chunks:
             return []
 
-        log.info(f"文本分块: {len(chunks)}块（每块{CHUNK_SIZE}字符）")
+        log.info(
+            f"文本分块: {len(chunks)}块（每块{CHUNK_SIZE}字符），实际每块字符数量{[len(chunk) for chunk in chunks]}"
+        )
 
         # 顺序处理（避免并发问题）
         embeddings = []
@@ -356,47 +321,9 @@ def get_merged_embedding(text: str, model_name: str, config: Dict) -> List[float
 
 
 # %% [markdown]
-# #### concurrent_generate_embeddings( texts: List[str], model_name: str, concurrency_type: str, max_workers: int, config, Dict) -> List[List[float]]
-
-# %%
-def concurrent_generate_embeddings(
-    texts: List[str],
-    model_name: str,
-    concurrency_type: str,
-    max_workers: int,
-    config: Dict,
-) -> List[List[float]]:
-    """并发生成多个文本的嵌入（支持多线程/多进程）"""
-    if concurrency_type == "thread":
-        executor_class = ThreadPoolExecutor
-    elif concurrency_type == "process":
-        executor_class = ProcessPoolExecutor
-    else:
-        raise ValueError(f"不支持的并发类型: {concurrency_type}（可选thread/process）")
-
-    results = []
-    with executor_class(max_workers=max_workers) as executor:
-        # 提交任务（注意：多进程需确保函数可序列化，避免lambda）
-        future_to_text = {
-            executor.submit(get_ollama_embedding, text, model_name): text
-            for text in texts
-        }
-        for future in as_completed(future_to_text):
-            try:
-                emb = future.result()
-                results.append(emb)
-            except Exception as e:
-                log.error(f"并发嵌入生成失败: {e}")
-                results.append([])  # 占位空嵌入
-    return results
-
-
-# %% [markdown]
 # ### 笔记处理核心逻辑（增量更新+入库）
-
 # %% [markdown]
 # #### process_single_note(note, vector_db: VectorDBManager, model_name: str, config: Dict) -> bool
-
 # %%
 def process_single_note(
     note, vector_db: VectorDBManager, model_name: str, config: Dict
@@ -406,7 +333,7 @@ def process_single_note(
         # 获取笔记完整信息（含更新时间）
         note_detail = getnote(note.id)
         if not note_detail:
-            log.warning(f"笔记 {note.id} 获取失败，跳过")
+            log.warning(f"笔记《{note.title}》（{note.id}） 获取失败，跳过")
             return False
 
         # 计算内容哈希（标题+正文）
@@ -421,12 +348,8 @@ def process_single_note(
 
         # 生成嵌入
         embedding = get_merged_embedding(text, model_name, config)
-        # embedding_list = concurrent_generate_embeddings(
-        #     text, model_name, config["concurrency_type"], config["max_workers"], config
-        # )
-        # embedding = embeddings_list[0] if embeddings_list else []  # 提取单条嵌入向量
         if not embedding:  # 嵌入生成失败
-            log.error(f"笔记 {note.id} 嵌入生成失败，跳过")
+            log.error(f"笔记《{note.title}》（{note.id}） 获取失败，跳过")
             return False
 
         # 获取标签
@@ -457,9 +380,12 @@ def process_single_note(
             enhanced_tags = local_tags
 
         enhanced_metadata["tags"] = ",".join(enhanced_tags)
-        print(enhanced_metadata)
+        # 将调试信息改为日志记录，移除 print 语句
+        log.debug(f"笔记《{note.title}》（{note.id}）增强元数据: {enhanced_metadata}")
 
-        log.info(f"笔记 {note.id} 准备入库，嵌入维度：{len(embedding)}")  # 打印嵌入维度
+        log.info(
+            f"笔记《{note.title}》（{note.id}）准备入库，嵌入维度：{len(embedding)}"
+        )
         # ------ 入库（本地向量库+增强元数据），存在则更新，不存在则新增 ------
         vector_db.upsert_note(
             note_id=note.id,
@@ -468,17 +394,18 @@ def process_single_note(
             tags=enhanced_tags,
             metadatas=[enhanced_metadata],
         )
-        log.info(f"笔记 {note.id} 处理完成（标题: {note.title[:20]}...）")
+        log.info(f"笔记《{note.title}》（{note.id}）向量化处理完成！")
         return True
 
     except Exception as e:
-        log.error(f"处理笔记 {note.id} 失败: {e}", exc_info=True)
+        log.error(
+            f"向量化处理笔记《{note.title}》（{note.id}）失败: {e}", exc_info=True
+        )
         return False
 
 
 # %% [markdown]
 # #### process_notes_incremental(notebook_title: str, config: Dict)
-
 # %%
 def process_notes_incremental(notebook_title: str, config: Dict):
     """增量处理笔记本笔记（修复时间处理问题）"""
@@ -495,6 +422,8 @@ def process_notes_incremental(notebook_title: str, config: Dict):
 
     # 加载处理状态
     process_state = load_process_state(config["state_path"])
+    # 获取强制更新配置
+    force_update = config.get("force_update", False)
 
     # 获取笔记本所有笔记
     notes = get_notes_in_notebook_by_title(notebook_title=notebook_title)
@@ -506,19 +435,7 @@ def process_notes_incremental(notebook_title: str, config: Dict):
     updated_count = 0
     failed_notes = []
 
-    # 根据配置选择并发类型
-    if config["concurrency_type"] == "thread":
-        executor_class = ThreadPoolExecutor
-    elif config["concurrency_type"] == "process":
-        executor_class = ProcessPoolExecutor
-    else:
-        executor_class = ThreadPoolExecutor  # 默认
-
-    # 使用并发执行器处理多条笔记
-    from concurrent.futures import ThreadPoolExecutor  # 改为线程池
-
     with ThreadPoolExecutor(max_workers=config["max_workers"]) as executor:
-        # with executor_class(max_workers=config["max_workers"]) as executor:
         # 提交所有笔记处理任务
         future_to_note = {}
         for note in notes:
@@ -540,8 +457,8 @@ def process_notes_incremental(notebook_title: str, config: Dict):
             current_hash = compute_content_hash(note.title, note.body)
             last_state = process_state.get(note_id, {})
 
-            # 只有需要更新的笔记才提交处理
-            if not (
+            # 只有需要更新的笔记才提交处理，为了方便调试，增加了云端配置的强制更新选项
+            if force_update or not (
                 last_state.get("update_time") == current_update_time
                 and last_state.get("hash") == current_hash
             ):
@@ -589,6 +506,7 @@ def process_notes_incremental(notebook_title: str, config: Dict):
 # %% [markdown]
 # #### parse_args()
 
+
 # %%
 def parse_args():
     parser = argparse.ArgumentParser(description="Joplin笔记向量化处理工具")
@@ -634,6 +552,7 @@ def parse_args():
 # %% [markdown]
 # #### main()
 
+
 # %%
 @timethis
 def main():
@@ -647,6 +566,7 @@ def main():
     dynamic_config["enable_deepseek_embed"] = args.enable_deepseek_embed
     dynamic_config["enable_deepseek_summary"] = args.enable_deepseek_summary
     dynamic_config["enable_deepseek_tags"] = args.enable_deepseek_tags
+    dynamic_config["force_update"] = getinivaluefromcloud("joplinai", "force_update")
 
     log.info(
         f"动态配置：模型={dynamic_config['embedding_model']}, \
@@ -655,6 +575,7 @@ def main():
         使能deepseek嵌入模型为{dynamic_config['enable_deepseek_embed']}， \
         使能deepseek摘要功能为{dynamic_config['enable_deepseek_summary']}， \
         使能deepseek标签功能为{dynamic_config['enable_deepseek_tags']}， \
+        强制更新为{dynamic_config['force_update']} \
         "
     )
     log.info("===== 启动Joplin笔记向量化处理 =====")
