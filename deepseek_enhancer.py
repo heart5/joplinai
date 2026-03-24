@@ -136,8 +136,8 @@ def deepseek_process_note(
         return None
 
     prompts = {
-        "summary": f"用1句话总结以下笔记核心内容，突出主题和结论：\n{text}",
-        "tags": f"从以下文本中提取3-5个核心标签（用逗号分隔），标签需简洁反映内容领域：\n{text}",
+        "summary": f"用1句话总结以下笔记核心内容，突出主题和结论：\n%s",
+        "tags": f"从以下文本中提取3-5个核心标签（用逗号分隔），标签需简洁反映内容领域：\n%s",
     }
     # print(prompts)
 
@@ -145,7 +145,14 @@ def deepseek_process_note(
         log.error(f"不支持的任务类型: {task}")
         return None
 
-    prompt = prompts[task].format(text=text[:8000])
+    # prompt = prompts[task].format(text=text[:8000])
+    # 关键修复：转义文本中的花括号，避免格式化错误
+    # safe_text = text[:8000].replace("{", "{{").replace("}", "}}")
+    # prompt = prompts[task].format(text=safe_text)
+
+    # 使用 % 格式化，避免花括号问题
+    safe_text = text[:8000]
+    prompt = prompts[task] % safe_text
     headers = {
         "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
         "Content-Type": "application/json",
