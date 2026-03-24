@@ -87,7 +87,7 @@ CONFIG = {
     "embedding_model": "qwen:1.8b",  # 嵌入模型（Ollama本地模型，优先选nomic-embed-text）
     "chunk_size": 2000,  # 文本分块大小（字符数，根据模型上下文调整，nomic支持8192）
     "max_context": 4000,  # 模型最大上下文（字符数，nomic-embed-text为8192）
-    "concurrency_type": "thread",  # 并发类型："thread"（多线程，I/O密集型）/"process"（多进程，CPU密集型）
+    "concurrency_type": "process",  # 并发类型："thread"（多线程，I/O密集型）/"process"（多进程，CPU密集型）
     "max_workers": 4,  # 并发数（线程/进程数）
     "db_path": getdirmain() / "data" / "joplin_vector_db",  # ChromaDB存储路径
     "state_path": getdirmain()
@@ -398,7 +398,6 @@ def concurrent_generate_embeddings(
 # #### process_single_note(note, vector_db: VectorDBManager, model_name: str, config: Dict) -> bool
 
 # %%
-@timethis
 def process_single_note(
     note, vector_db: VectorDBManager, model_name: str, config: Dict
 ) -> bool:
@@ -421,10 +420,11 @@ def process_single_note(
         text = f"{note.title}\n{cleaned_body}"
 
         # 生成嵌入
-        # embedding = get_merged_embedding(text, model_name, config)
-        embedding = concurrent_generate_embeddings(
-            text, model_name, config["concurrency_type"], config["max_workers"], config
-        )
+        embedding = get_merged_embedding(text, model_name, config)
+        # embedding_list = concurrent_generate_embeddings(
+        #     text, model_name, config["concurrency_type"], config["max_workers"], config
+        # )
+        # embedding = embeddings_list[0] if embeddings_list else []  # 提取单条嵌入向量
         if not embedding:  # 嵌入生成失败
             log.error(f"笔记 {note.id} 嵌入生成失败，跳过")
             return False
@@ -459,6 +459,7 @@ def process_single_note(
         enhanced_metadata["tags"] = ",".join(enhanced_tags)
         print(enhanced_metadata)
 
+        log.info(f"笔记 {note.id} 准备入库，嵌入维度：{len(embedding)}")  # 打印嵌入维度
         # ------ 入库（本地向量库+增强元数据），存在则更新，不存在则新增 ------
         vector_db.upsert_note(
             note_id=note.id,
@@ -503,16 +504,31 @@ def process_notes_incremental(notebook_title: str, config: Dict):
 
     log.info(f"开始增量处理笔记本 '{notebook_title}'，共 {len(notes)} 条笔记")
     updated_count = 0
+    failed_notes = []
 
-    for note in notes:
-        note_id = note.id
-        try:
-            # 获取笔记完整信息
+    # 根据配置选择并发类型
+    if config["concurrency_type"] == "thread":
+        executor_class = ThreadPoolExecutor
+    elif config["concurrency_type"] == "process":
+        executor_class = ProcessPoolExecutor
+    else:
+        executor_class = ThreadPoolExecutor  # 默认
+
+    # 使用并发执行器处理多条笔记
+    from concurrent.futures import ThreadPoolExecutor  # 改为线程池
+
+    with ThreadPoolExecutor(max_workers=config["max_workers"]) as executor:
+        # with executor_class(max_workers=config["max_workers"]) as executor:
+        # 提交所有笔记处理任务
+        future_to_note = {}
+        for note in notes:
+            # 检查是否需要处理（增量更新判断）
+            note_id = note.id
             note_detail = getnote(note_id)
             if not note_detail:
                 continue
 
-            # 关键修复：统一时间格式为时间戳
+            # ... 时间格式转换 关键修复：统一时间格式为时间戳
             current_update_time = note_detail.updated_time
             if isinstance(current_update_time, datetime):
                 current_update_time = current_update_time.timestamp()
@@ -521,38 +537,50 @@ def process_notes_incremental(notebook_title: str, config: Dict):
                     current_update_time
                 ).timestamp()
 
-            # 计算内容哈希
             current_hash = compute_content_hash(note.title, note.body)
-
-            # 判断是否需要处理
             last_state = process_state.get(note_id, {})
-            if (
+
+            # 只有需要更新的笔记才提交处理
+            if not (
                 last_state.get("update_time") == current_update_time
                 and last_state.get("hash") == current_hash
             ):
-                log.debug(f"笔记 {note_id} 未更新，跳过")
-                continue
+                # 提交任务到线程池/进程池
+                future = executor.submit(
+                    process_single_note,
+                    note,
+                    vector_db,
+                    model_name,
+                    config,
+                )
+                future_to_note[future] = (note_id, current_update_time, current_hash)
 
-            # 处理笔记
-            success = process_single_note(
-                note=note, vector_db=vector_db, model_name=model_name, config=config
-            )
+        # 收集处理结果
+        for future in as_completed(future_to_note):
+            note_id, update_time, content_hash = future_to_note[future]
+            try:
+                success = future.result()
+                if success:
+                    # 更新处理状态
+                    process_state[note_id] = {
+                        "update_time": float(update_time),
+                        "hash": content_hash,
+                        "processed_time": datetime.now().timestamp(),
+                    }
+                    updated_count += 1
+                else:
+                    failed_notes.append(note_id)
+            except Exception as e:
+                log.error(f"并发处理笔记 {note_id} 异常: {e}")
+                failed_notes.append(note_id)
 
-            if success:
-                # 更新处理状态（确保时间格式正确）
-                process_state[note_id] = {
-                    "update_time": float(current_update_time),  # 确保是浮点数
-                    "hash": current_hash,
-                    "processed_time": datetime.now().timestamp(),
-                }
-                updated_count += 1
-
-        except Exception as e:
-            log.error(f"处理笔记 {note_id} 时出错: {e}", exc_info=True)
-
-    # 保存状态（使用增强序列化）
+    # 保存状态
     save_process_state(process_state, config["state_path"])
-    log.info(f"增量处理完成：共处理 {updated_count} 条笔记（总计 {len(notes)} 条）")
+    log.info(
+        f"增量处理完成：成功 {updated_count} 条，失败 {len(failed_notes)} 条（总计 {len(notes)} 条）"
+    )
+    if failed_notes:
+        log.warning(f"失败笔记ID: {failed_notes}")
 
 
 # %% [markdown]
