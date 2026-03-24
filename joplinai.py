@@ -82,7 +82,7 @@ except ImportError as e:
 
 # %%
 CONFIG = {
-    "notebook_title": "顺风顺水",  # 目标笔记本名称
+    "notebook_titles": ["顺风顺水", "日新月异", "运营管理"],  # 改为笔记本名称列表
     # "embedding_model": "nomic-embed-text",  # 嵌入模型（Ollama本地模型，优先选nomic-embed-text）
     "embedding_model": "qwen:1.8b",  # 嵌入模型（Ollama本地模型，优先选nomic-embed-text）
     "chunk_size": 2000,  # 文本分块大小（字符数，根据模型上下文调整，nomic支持8192）
@@ -225,14 +225,20 @@ class VectorDBManager:
         text: str,
         embedding: List[float],
         tags: List[str],
-        metadatas: List[Dict],
+        metadata: Dict,
     ):
         """插入/更新笔记向量数据"""
         self.collection.upsert(
             ids=[note_id],
             documents=[text],
             embeddings=[embedding],
-            metadatas=[{"note_id": note_id, "tags": ",".join(tags)}],
+            metadatas=[
+                {
+                    "note_id": note_id,
+                    "tags": ",".join(tags),
+                    "summary": metadata.get("summary"),
+                }
+            ],
         )
 
     def delete_note(self, note_id: str):
@@ -356,7 +362,7 @@ def process_single_note(
         local_tags = get_tag_titles(note.id)  # 项目函数：获取笔记标签列表
         # -------------------------- DeepSeek增强加工（可选） --------------------------
         enhanced_metadata = {}
-        enhanced_metadata["note_id"] = note.id
+        # enhanced_metadata["note_id"] = note.id
         if config["enable_deepseek_summary"] and config["deepseek_api_key"]:
             from deepseek_enhancer import deepseek_process_note
 
@@ -392,7 +398,7 @@ def process_single_note(
             text=text,
             embedding=embedding,
             tags=enhanced_tags,
-            metadatas=[enhanced_metadata],
+            metadata=enhanced_metadata,
         )
         log.info(f"笔记《{note.title}》（{note.id}）向量化处理完成！")
         return True
@@ -433,6 +439,7 @@ def process_notes_incremental(notebook_title: str, config: Dict):
 
     log.info(f"开始增量处理笔记本 '{notebook_title}'，共 {len(notes)} 条笔记")
     updated_count = 0
+    new_time_notes = []
     failed_notes = []
 
     with ThreadPoolExecutor(max_workers=config["max_workers"]) as executor:
@@ -471,6 +478,7 @@ def process_notes_incremental(notebook_title: str, config: Dict):
                     config,
                 )
                 future_to_note[future] = (note_id, current_update_time, current_hash)
+                new_time_notes.append(note.title)
 
         # 收集处理结果
         for future in as_completed(future_to_note):
@@ -486,15 +494,15 @@ def process_notes_incremental(notebook_title: str, config: Dict):
                     }
                     updated_count += 1
                 else:
-                    failed_notes.append(note_id)
+                    failed_notes.append(note.title)
             except Exception as e:
                 log.error(f"并发处理笔记 {note_id} 异常: {e}")
-                failed_notes.append(note_id)
+                failed_notes.append(note.title)
 
     # 保存状态
     save_process_state(process_state, config["state_path"])
     log.info(
-        f"增量处理完成：成功 {updated_count} 条，失败 {len(failed_notes)} 条（总计 {len(notes)} 条）"
+        f"增量处理完成：新日期需要更新 {len(new_time_notes)} 条，成功 {updated_count} 条，失败 {len(failed_notes)} 条（总计 {len(notes)} 条）"
     )
     if failed_notes:
         log.warning(f"失败笔记ID: {failed_notes}")
@@ -515,12 +523,6 @@ def parse_args():
         type=str,
         default=CONFIG["embedding_model"],
         help=f"Ollama嵌入模型名称（默认：{CONFIG['embedding_model']}）",
-    )
-    parser.add_argument(
-        "--notebook",
-        type=str,
-        default=CONFIG["notebook_title"],
-        help=f"目标笔记本名称（默认：{CONFIG['notebook_title']}）",
     )
     parser.add_argument(
         "--workers",
@@ -561,7 +563,12 @@ def main():
     # 动态覆盖配置
     dynamic_config = CONFIG.copy()
     dynamic_config["embedding_model"] = args.model
-    dynamic_config["notebook_title"] = args.notebook
+    notebook_titles = [
+        title.strip()
+        for title in getinivaluefromcloud("joplinai", "imp_nbs").split(",")
+    ]
+    if notebook_titles:
+        dynamic_config["notebook_titles"] = notebook_titles
     dynamic_config["max_workers"] = args.workers
     dynamic_config["enable_deepseek_embed"] = args.enable_deepseek_embed
     dynamic_config["enable_deepseek_summary"] = args.enable_deepseek_summary
@@ -570,7 +577,7 @@ def main():
 
     log.info(
         f"动态配置：模型={dynamic_config['embedding_model']}, \
-        笔记本={dynamic_config['notebook_title']}, \
+        笔记本={dynamic_config['notebook_titles']}, \
         并发数={dynamic_config['max_workers']}， \
         使能deepseek嵌入模型为{dynamic_config['enable_deepseek_embed']}， \
         使能deepseek摘要功能为{dynamic_config['enable_deepseek_summary']}， \
@@ -580,10 +587,12 @@ def main():
     )
     log.info("===== 启动Joplin笔记向量化处理 =====")
     try:
-        process_notes_incremental(
-            notebook_title=dynamic_config["notebook_title"], config=dynamic_config
-        )
-        log.info("===== 处理完成 =====")
+        for notebook_title in notebook_titles:
+            log.info(f"开始处理笔记本: {notebook_title}")
+            process_notes_incremental(
+                notebook_title=notebook_title, config=dynamic_config
+            )
+        log.info("===== 所有笔记本处理完成 =====")
     except Exception as e:
         log.critical(f"主流程执行失败: {e}", exc_info=True)
 
