@@ -105,6 +105,9 @@ CONFIG = {
     "force_update": False,  # 新增：强制更新开关，默认关闭
 }
 
+# %%
+min(16, (os.cpu_count() or 1) * 2)
+
 
 # %% [markdown]
 # ## 功能函数集
@@ -314,10 +317,15 @@ def get_merged_embedding(text: str, model_name: str, config: Dict) -> List[float
 
         # 顺序处理（避免并发问题）
         embeddings = []
-        for chunk in chunks:
-            emb = get_ollama_embedding(chunk, model_name)
+        for i in range(len(chunks)):
+            emb = get_ollama_embedding(chunks[i], model_name)
             if emb:
                 embeddings.append(emb)
+            else:  # 如果文本块中有嵌入量化操作失败，返回空列表，方便后面捕捉，避免写入残值导致误判
+                log.error(
+                    f"处理文本块列表{[len(chunk) for chunk in chunks]}的第{i}块时出错，未有效获取嵌入向量"
+                )
+                return []
 
         if not embeddings:
             return []
@@ -355,7 +363,7 @@ def process_single_note(
         # 生成嵌入
         embedding = get_merged_embedding(text, model_name, config)
         if not embedding:  # 嵌入生成失败
-            log.error(f"笔记《{note.title}》（{note.id}） 获取失败，跳过")
+            log.error(f"笔记《{note.title}》（{note.id}） 嵌入生成失败，跳过")
             return False
 
         # 获取标签
@@ -495,8 +503,9 @@ def process_notes_incremental(notebook_title: str, config: Dict):
                     updated_count += 1
                 else:
                     failed_notes.append(note.title)
+                    log.error(f"向量化处理笔记 {note.title} 时可能异常")
             except Exception as e:
-                log.error(f"并发处理笔记 {note_id} 异常: {e}")
+                log.error(f"并发处理笔记 {note.title} 异常: {e}")
                 failed_notes.append(note.title)
 
     # 保存状态
@@ -505,7 +514,7 @@ def process_notes_incremental(notebook_title: str, config: Dict):
         f"增量处理完成：新日期需要更新 {len(new_time_notes)} 条，成功 {updated_count} 条，失败 {len(failed_notes)} 条（总计 {len(notes)} 条）"
     )
     if failed_notes:
-        log.warning(f"失败笔记ID: {failed_notes}")
+        log.warning(f"失败笔记: {set(failed_notes)}")
 
 
 # %% [markdown]
