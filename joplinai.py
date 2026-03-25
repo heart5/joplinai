@@ -259,14 +259,14 @@ def get_model_max_context(model_name: str) -> int:
     try:
         # 特殊处理已知模型
         if model_name == "nomic-embed-text":
-            return 24000  # 8192 token × 3字符/token × 0.9余量 ≈ 22000，取24000更安全
+            return 19000  # 8192 token × 3字符/token × 0.8余量 ≈ 19660，取19000更安全
         if model_name == "qwen:1.8b":
-            return 5529  # 2048 token × 3×0.9
+            return 4900  # 2048 token × 3 × 0.8 = 4916，取4900
 
         # 通用模型处理
         model_info = ollama.show(model=model_name)
         num_ctx = model_info.get("parameters", {}).get("num_ctx", 2048)
-        return int(num_ctx * 3 * 0.9)  # 通用转换公式
+        return int(num_ctx * 3 * 0.8)  # 通用转换公式
     except Exception as e:
         log.warning(f"获取模型上下文失败({model_name})，使用默认值8192字符: {e}")
         return 8192  # 安全默认值
@@ -596,10 +596,12 @@ def main():
     )
     log.info("===== 启动Joplin笔记向量化处理 =====")
     try:
-        for notebook_title in notebook_titles:
-            log.info(f"开始处理笔记本: {notebook_title}")
+        for i in range(len(notebook_titles)):
+            log.info(
+                f"开始处理笔记本【{i + 1}/{len(notebook_titles)}】: {notebook_titles[i]}…………"
+            )
             process_notes_incremental(
-                notebook_title=notebook_title, config=dynamic_config
+                notebook_title=notebook_titles[i], config=dynamic_config
             )
         log.info("===== 所有笔记本处理完成 =====")
     except Exception as e:
