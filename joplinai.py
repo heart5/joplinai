@@ -442,10 +442,10 @@ def process_notes_incremental(notebook_title: str, config: Dict):
     # 获取笔记本所有笔记
     notes = get_notes_in_notebook_by_title(notebook_title=notebook_title)
     if not notes:
-        log.info(f"笔记本 '{notebook_title}' 无笔记，跳过处理")
+        log.info(f"笔记本 【{notebook_title}】 无笔记，跳过处理")
         return
 
-    log.info(f"开始增量处理笔记本 '{notebook_title}'，共 {len(notes)} 条笔记")
+    log.info(f"开始增量处理笔记本 【{notebook_title}】，共 {len(notes)} 条笔记")
     updated_count = 0
     new_time_notes = []
     failed_notes = []
@@ -488,7 +488,7 @@ def process_notes_incremental(notebook_title: str, config: Dict):
                 )
                 future_to_note[future] = (note_id, current_update_time, current_hash)
                 log.info(
-                    f"开始处理笔记本《{notebook_title}》下的第【{i + 1}/{len(notes)}】条笔记: {note.title}…………"
+                    f"开始处理笔记本【{notebook_title}】下的第（{i + 1}/{len(notes)}）条笔记: 《{note.title}》…………"
                 )
                 new_time_notes.append(note.title)
 
@@ -507,18 +507,20 @@ def process_notes_incremental(notebook_title: str, config: Dict):
                     updated_count += 1
                 else:
                     failed_notes.append(note.title)
-                    log.error(f"向量化处理笔记 {note.title} 时可能异常")
+                    log.error(f"向量化处理笔记 《{note.title}》 时可能异常")
             except Exception as e:
-                log.error(f"并发处理笔记 {note.title} 异常: {e}")
+                log.error(f"并发处理笔记 《{note.title}》 异常: {e}")
                 failed_notes.append(note.title)
 
     # 保存状态
     save_process_state(process_state, config["state_path"])
     log.info(
-        f"增量处理完成：新日期需要更新 {len(new_time_notes)} 条，成功 {updated_count} 条，失败 {len(failed_notes)} 条（总计 {len(notes)} 条）"
+        f"增量笔记本【{notebook_title}】中的笔记处理完成小结：新日期需要更新 {len(new_time_notes)} 条，成功 {updated_count} 条，失败 {len(failed_notes)} 条（总计 {len(notes)} 条）"
     )
     if failed_notes:
-        log.warning(f"失败笔记: {set(failed_notes)}")
+        log.warning(
+            f"笔记本【{notebook_title}】中增量处理（向量化）失败的笔记: {set(failed_notes)}"
+        )
 
 
 # %% [markdown]
@@ -602,7 +604,7 @@ def main():
     try:
         for i in range(len(notebook_titles)):
             log.info(
-                f"开始处理笔记本【{i + 1}/{len(notebook_titles)}】: {notebook_titles[i]}…………"
+                f"开始处理笔记本（{i + 1}/{len(notebook_titles)}）: 【{notebook_titles[i]}】…………"
             )
             process_notes_incremental(
                 notebook_title=notebook_titles[i], config=dynamic_config
