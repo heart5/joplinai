@@ -182,7 +182,14 @@ def deepseek_process_note(
     return None
 
 
+# %% [markdown]
+# # 主函数
+
 # %%
 if __name__ == "__main__":
-    result = deepseek_process_note("测试文本", task="summary", model="deepseek-chat")
+    result = deepseek_process_note(
+        "请在100字之内介绍joplin笔记软件", task="summary", model="deepseek-chat"
+    )
     print(result)
+
+# %%
