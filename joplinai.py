@@ -82,7 +82,7 @@ except ImportError as e:
 
 # %%
 CONFIG = {
-    "notebook_titles": ["顺风顺水", "日新月异", "运营管理"],  # 改为笔记本名称列表
+    "notebook_titles": "顺风顺水, 日新月异, 运营管理",  # 改为笔记本名称列表字符串
     # "embedding_model": "nomic-embed-text",  # 嵌入模型（Ollama本地模型，优先选nomic-embed-text）
     "embedding_model": "qwen:1.8b",  # 嵌入模型（Ollama本地模型，优先选nomic-embed-text）
     "chunk_size": 2000,  # 文本分块大小（字符数，根据模型上下文调整，nomic支持8192）
@@ -95,7 +95,7 @@ CONFIG = {
     "enable_deepseek_embed": False,  # 是否用DeepSeek嵌入替代本地嵌入（增强向量质量）
     "enable_deepseek_summary": False,  # 是否用DeepSeek生成摘要（增强笔记元数据）
     "enable_deepseek_tags": False,  # 是否用DeepSeek提取标签（增强笔记标签）
-    "deepseek_api_key": getcfpoptionvalue("joplinai", "deepseek", "token"),
+    "deepseek_api_key": getinivaluefromcloud("joplinai", "deepseek_token"),
     "deepseek_chat_model": "deepseek-chat",  # 修正模型名称
     "deepseek_embed_model": "deepseek-embedding",
     "force_update": False,  # 新增：强制更新开关，默认关闭
@@ -565,6 +565,12 @@ def parse_args():
         help=f"Ollama嵌入模型名称（默认：{CONFIG['embedding_model']}）",
     )
     parser.add_argument(
+        "--notebook_titles",
+        type=str,
+        default=CONFIG["notebook_titles"],
+        help=f"笔记本名称（用“,”分割）（默认：{CONFIG['notebook_titles']}）",
+    )
+    parser.add_argument(
         "--workers",
         type=int,
         default=CONFIG["max_workers"],
@@ -589,10 +595,10 @@ def parse_args():
         help=f"开启deepseek标签支持（默认：{CONFIG['enable_deepseek_tags']}）",
     )
     parser.add_argument(
-        "--notebook_titles",
-        type=str,
-        default=CONFIG["notebook_titles"],
-        help=f"笔记本名称（用“,”分割）（默认：{CONFIG['notebook_titles']}）",
+        "--enable_force_update",
+        action="store_true",
+        default=CONFIG["force_update"],
+        help=f"开启deepseek标签支持（默认：{CONFIG['force_update']}）",
     )
     return parser.parse_args()
 
@@ -618,22 +624,16 @@ def main():
         getdirmain() / "data" / f"joplin_process_state_{model_name}.json"
     )
 
-    # 处理笔记本列表，参数是字符串，需要处理成列表，如果有必要的话
-    if type(args.notebook_titles) != list:
-        notebook_titles_str = args.notebook_titles
-    if notebook_titles_str := getinivaluefromcloud("joplinai", "imp_nbs"):
-        pass
-    if notebook_titles_str:
-        dynamic_config["notebook_titles"] = [
-            title.strip()
-            for title in re.split(r"[,，]", notebook_titles_str.strip())
-            if title.strip()
-        ]
     dynamic_config["max_workers"] = args.workers
     dynamic_config["enable_deepseek_embed"] = args.enable_deepseek_embed
     dynamic_config["enable_deepseek_summary"] = args.enable_deepseek_summary
     dynamic_config["enable_deepseek_tags"] = args.enable_deepseek_tags
-    dynamic_config["force_update"] = getinivaluefromcloud("joplinai", "force_update")
+    if args.enable_force_update:
+        dynamic_config["force_update"] = True
+    else:
+        dynamic_config["force_update"] = getinivaluefromcloud(
+            "joplinai", "force_update"
+        )
 
     log.info(
         f"动态配置：模型={dynamic_config['embedding_model']}, \
@@ -647,7 +647,18 @@ def main():
         "
     )
     log.info("===== 启动Joplin笔记向量化处理 =====")
-    notebook_titles = dynamic_config["notebook_titles"]
+    # 处理笔记本列表字符串
+    if args.notebook_titles != dynamic_config["notebook_titles"]:
+        notebook_titles_str = args.notebook_titles
+    elif notebook_titles_str := getinivaluefromcloud("joplinai", "imp_nbs"):
+        pass
+    else:
+        notebook_titles_str = dynamic_config["notebook_titles"]
+    dynamic_config["notebook_titles"] = [
+        title.strip()
+        for title in re.split(r"[,，]", notebook_titles_str.strip())
+        if title.strip()
+    ]
     try:
         # 添加检查点
         checkpoint_file = dynamic_config["state_path"].with_suffix(".checkpoint")
