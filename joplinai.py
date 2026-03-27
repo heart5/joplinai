@@ -635,6 +635,14 @@ def main():
             "joplinai", "force_update"
         )
 
+    # 处理笔记本列表字符串
+    if args.notebook_titles != dynamic_config["notebook_titles"]:
+        notebook_titles_str = args.notebook_titles
+    elif notebook_titles_str := getinivaluefromcloud("joplinai", "imp_nbs"):
+        pass
+    else:
+        notebook_titles_str = dynamic_config["notebook_titles"]
+    dynamic_config["notebook_titles"] = notebook_titles_str
     log.info(
         f"动态配置：模型={dynamic_config['embedding_model']}, \
         处理状态文件={dynamic_config['state_path']}, \
@@ -647,14 +655,7 @@ def main():
         "
     )
     log.info("===== 启动Joplin笔记向量化处理 =====")
-    # 处理笔记本列表字符串
-    if args.notebook_titles != dynamic_config["notebook_titles"]:
-        notebook_titles_str = args.notebook_titles
-    elif notebook_titles_str := getinivaluefromcloud("joplinai", "imp_nbs"):
-        pass
-    else:
-        notebook_titles_str = dynamic_config["notebook_titles"]
-    dynamic_config["notebook_titles"] = [
+    notebook_titles = [
         title.strip()
         for title in re.split(r"[,，]", notebook_titles_str.strip())
         if title.strip()
