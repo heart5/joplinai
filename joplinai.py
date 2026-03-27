@@ -563,6 +563,12 @@ def parse_args():
         default=CONFIG["enable_deepseek_tags"],
         help=f"开启deepseek标签支持（默认：{CONFIG['enable_deepseek_tags']}）",
     )
+    parser.add_argument(
+        "--notebook_titles",
+        type=str,
+        default=CONFIG["notebook_titles"],
+        help=f"笔记本名称（用“,”分割）（默认：{CONFIG['notebook_titles']}）",
+    )
     return parser.parse_args()
 
 
@@ -578,12 +584,16 @@ def main():
     # 动态覆盖配置
     dynamic_config = CONFIG.copy()
     dynamic_config["embedding_model"] = args.model
-    notebook_titles = [
-        title.strip()
-        for title in getinivaluefromcloud("joplinai", "imp_nbs").split(",")
-    ]
-    if notebook_titles:
-        dynamic_config["notebook_titles"] = notebook_titles
+    if args.notebook_titles:
+        notebook_titles_str = args.notebook_titles
+    elif notebook_titles_str := getinivaluefromcloud("joplinai", "imp_nbs"):
+        pass
+    if notebook_titles_str:
+        dynamic_config["notebook_titles"] = [
+            title.strip()
+            for title in re.split(r"[,，]", notebook_titles_str.strip())
+            if title.strip()
+        ]
     dynamic_config["max_workers"] = args.workers
     dynamic_config["enable_deepseek_embed"] = args.enable_deepseek_embed
     dynamic_config["enable_deepseek_summary"] = args.enable_deepseek_summary
@@ -601,6 +611,7 @@ def main():
         "
     )
     log.info("===== 启动Joplin笔记向量化处理 =====")
+    notebook_titles = dynamic_config["notebook_titles"]
     try:
         for i in range(len(notebook_titles)):
             log.info(
