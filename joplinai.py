@@ -649,6 +649,14 @@ def main():
     log.info("===== 启动Joplin笔记向量化处理 =====")
     notebook_titles = dynamic_config["notebook_titles"]
     try:
+        # 添加检查点
+        checkpoint_file = config["state_path"].with_suffix(".checkpoint")
+        if checkpoint_file.exists():
+            with open(checkpoint_file, "r") as f:
+                checkpoint = json.load(f)
+            # 从断点处恢复处理
+            notebook_titles = notebook_titles[checkpoint["last_processed_index"] :]
+
         for i, notebook_title in enumerate(notebook_titles):
             log.info(
                 f"开始处理笔记本（{i + 1}/{len(notebook_titles)}）: 【{notebook_title}】…………"
@@ -656,9 +664,24 @@ def main():
             process_notes_incremental(
                 notebook_title=notebook_title, config=dynamic_config
             )
+            # 每处理2条笔记保存一次检查点
+            if i % 2 == 0:
+                checkpoint_data = {
+                    "notebook": notebook_title,
+                    "last_processed_index": i,
+                    "timestamp": datetime.now().isoformat(),
+                }
+                with open(checkpoint_file, "w") as f:
+                    json.dump(checkpoint_data, f)
+
         log.info("===== 所有笔记本处理完成 =====")
     except Exception as e:
         log.critical(f"主流程执行失败: {e}", exc_info=True)
+        return
+
+    # 处理完成后删除检查点
+    if checkpoint_file.exists():
+        checkpoint_file.unlink()
 
 
 # %% [markdown]
