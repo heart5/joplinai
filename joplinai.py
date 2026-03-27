@@ -650,7 +650,7 @@ def main():
     notebook_titles = dynamic_config["notebook_titles"]
     try:
         # 添加检查点
-        checkpoint_file = config["state_path"].with_suffix(".checkpoint")
+        checkpoint_file = dynamic_config["state_path"].with_suffix(".checkpoint")
         if checkpoint_file.exists():
             with open(checkpoint_file, "r") as f:
                 checkpoint = json.load(f)
