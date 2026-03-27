@@ -105,9 +105,6 @@ CONFIG = {
     "force_update": False,  # 新增：强制更新开关，默认关闭
 }
 
-# %%
-min(16, (os.cpu_count() or 1) * 2)
-
 
 # %% [markdown]
 # ## 功能函数集
@@ -371,30 +368,40 @@ def process_single_note(
         # -------------------------- DeepSeek增强加工（可选） --------------------------
         enhanced_metadata = {}
         # enhanced_metadata["note_id"] = note.id
-        if config["enable_deepseek_summary"] and config["deepseek_api_key"]:
-            from deepseek_enhancer import deepseek_process_note
+        try:
+            if config["enable_deepseek_summary"] and config["deepseek_api_key"]:
+                from deepseek_enhancer import deepseek_process_note
 
-            summary = deepseek_process_note(
-                text,
-                task="summary",
-                model=config.get("deepseek_chat_model", "deepseek-chat"),
-            )
-            enhanced_metadata["summary"] = summary or ""  # 存入摘要
+                summary = deepseek_process_note(
+                    text,
+                    task="summary",
+                    model=config.get("deepseek_chat_model", "deepseek-chat"),
+                )
+                enhanced_metadata["summary"] = summary or ""  # 存入摘要
+        except Exception as e:
+            log.error(f"笔记《{note.title}》（{note.id}） 嵌入生成失败，跳过。{e}")
+            return false
 
-        if config["enable_deepseek_tags"] and config["deepseek_api_key"]:
-            tags_str = deepseek_process_note(
-                text,
-                task="tags",
-                model=config.get("deepseek_chat_model", "deepseek-chat"),
-            )
-            deepseek_tags = [t.strip() for t in tags_str.split(",")] if tags_str else []
-            # 合并本地标签与DeepSeek标签（去重）
-            enhanced_tags = list(set(local_tags + deepseek_tags))
-        else:
-            enhanced_tags = local_tags
+        try:
+            if config["enable_deepseek_tags"] and config["deepseek_api_key"]:
+                tags_str = deepseek_process_note(
+                    text,
+                    task="tags",
+                    model=config.get("deepseek_chat_model", "deepseek-chat"),
+                )
+                deepseek_tags = (
+                    [t.strip() for t in tags_str.split(",")] if tags_str else []
+                )
+                # 合并本地标签与DeepSeek标签（去重）
+                enhanced_tags = list(set(local_tags + deepseek_tags))
+            else:
+                enhanced_tags = local_tags
 
-        enhanced_metadata["tags"] = ",".join(enhanced_tags)
-        # 将调试信息改为日志记录，移除 print 语句
+            enhanced_metadata["tags"] = ",".join(enhanced_tags)
+        except Exception as e:
+            log.error(f"笔记《{note.title}》（{note.id}） 嵌入生成失败，跳过。{e}")
+            return false
+
         log.debug(f"笔记《{note.title}》（{note.id}）增强元数据: {enhanced_metadata}")
 
         log.info(
