@@ -92,10 +92,6 @@ CONFIG = {
         16, (os.cpu_count() or 1) * 2
     ),  # 动态设置最大工作者数：CPU核心数 * 2，上限为16
     "db_path": getdirmain() / "data" / "joplin_vector_db",  # ChromaDB存储路径
-    "state_path": getdirmain()
-    / "data"
-    / "joplin_process_state.json",  # 处理状态文件路径
-    # "log_level": logging.INFO,  # 日志级别
     "enable_deepseek_embed": False,  # 是否用DeepSeek嵌入替代本地嵌入（增强向量质量）
     "enable_deepseek_summary": False,  # 是否用DeepSeek生成摘要（增强笔记元数据）
     "enable_deepseek_tags": False,  # 是否用DeepSeek提取标签（增强笔记标签）
@@ -104,6 +100,11 @@ CONFIG = {
     "deepseek_embed_model": "deepseek-embedding",
     "force_update": False,  # 新增：强制更新开关，默认关闭
 }
+
+model_name = CONFIG.get("embedding_model").replace(":", "_").replace("-", "_")
+CONFIG["state_path"] = (
+    getdirmain() / "data" / f"joplin_process_state_{model_name}.json"
+)  # 处理状态文件路径
 
 
 # %% [markdown]
@@ -182,7 +183,10 @@ class VectorDBManager:
 
     def __init__(self, db_path: Path, model_name: str):
         self.client = chromadb.PersistentClient(path=str(db_path))
-        self.collection_name = f"joplin_{model_name.replace(':', '_')}"
+        self.collection_name = (
+            f"joplin_{model_name.replace(':', '_').replace('-', '_')}"
+        )
+        self._model_dimension_cache = {}
         self._ensure_collection(model_name)
 
     def _ensure_collection(self, model_name: str):
@@ -211,13 +215,28 @@ class VectorDBManager:
             )
 
     def _get_model_dimension(self, model_name: str) -> int:
-        """获取模型嵌入维度"""
+        if model_name in self._model_dimension_cache:
+            return self._model_dimension_cache[model_name]
+
         dimensions = {
             "nomic-embed-text": 768,
-            "qwen:1.8b": 768,
+            "qwen:1.8b": 2048,
             "text2vec-large-chinese": 1024,
         }
-        return dimensions.get(model_name, 768)  # 默认768维
+
+        if model_name in dimensions:
+            dim = dimensions[model_name]
+        else:
+            # 动态获取并缓存
+            try:
+                model_info = ollama.show(model=model_name)
+                num_ctx = model_info.get("parameters", {}).get("num_ctx", 2048)
+                dim = int(num_ctx * 3 * 0.8)
+            except:
+                dim = 768
+
+        self._model_dimension_cache[model_name] = dim
+        return dim
 
     def upsert_note(
         self,
@@ -256,7 +275,7 @@ def get_model_max_context(model_name: str) -> int:
     try:
         # 特殊处理已知模型
         if model_name == "nomic-embed-text":
-            return 19000  # 8192 token × 3字符/token × 0.8余量 ≈ 19660，取19000更安全
+            return 1850  # 768 token × 3字符/token × 0.8余量 ≈ 1850
         if model_name == "qwen:1.8b":
             return 4900  # 2048 token × 3 × 0.8 = 4916，取4900
 
@@ -265,8 +284,8 @@ def get_model_max_context(model_name: str) -> int:
         num_ctx = model_info.get("parameters", {}).get("num_ctx", 2048)
         return int(num_ctx * 3 * 0.8)  # 通用转换公式
     except Exception as e:
-        log.warning(f"获取模型上下文失败({model_name})，使用默认值8192字符: {e}")
-        return 8192  # 安全默认值
+        log.warning(f"获取模型上下文失败({model_name})，使用默认值2048字符: {e}")
+        return 2048  # 安全默认值
 
 
 # %% [markdown]
@@ -591,6 +610,12 @@ def main():
     # 动态覆盖配置
     dynamic_config = CONFIG.copy()
     dynamic_config["embedding_model"] = args.model
+    model_name = (
+        dynamic_config.get("embedding_model").replace(":", "_").replace("-", "_")
+    )
+    dynamic_config["state_path"] = (
+        getdirmain() / "data" / f"joplin_process_state_{model_name}.json"
+    )  # 处理状态文件路径
     if args.notebook_titles:
         notebook_titles_str = args.notebook_titles
     elif notebook_titles_str := getinivaluefromcloud("joplinai", "imp_nbs"):
@@ -609,6 +634,7 @@ def main():
 
     log.info(
         f"动态配置：模型={dynamic_config['embedding_model']}, \
+        处理状态文件={dynamic_config['state_path']}, \
         笔记本={dynamic_config['notebook_titles']}, \
         并发数={dynamic_config['max_workers']}， \
         使能deepseek嵌入模型为{dynamic_config['enable_deepseek_embed']}， \
