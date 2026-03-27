@@ -479,8 +479,7 @@ def process_notes_incremental(notebook_title: str, config: Dict):
     with ThreadPoolExecutor(max_workers=config["max_workers"]) as executor:
         # 提交所有笔记处理任务
         future_to_note = {}
-        for i in range(len(notes)):
-            note = notes[i]
+        for i, note in enumerate(notes):
             # 检查是否需要处理（增量更新判断）
             note_id = note.id
             note_detail = getnote(note_id)
@@ -541,7 +540,7 @@ def process_notes_incremental(notebook_title: str, config: Dict):
     # 保存状态
     save_process_state(process_state, config["state_path"])
     log.info(
-        f"增量笔记本【{notebook_title}】中的笔记处理完成小结：新日期需要更新 {len(new_time_notes)} 条，成功 {updated_count} 条，失败 {len(failed_notes)} 条（总计 {len(notes)} 条）"
+        f"增量处理笔记本【{notebook_title}】中的笔记完成情况小结：新日期需要更新 {len(new_time_notes)} 条，成功 {updated_count} 条，失败 {len(failed_notes)} 条（总计 {len(notes)} 条）"
     )
     if failed_notes:
         log.warning(
@@ -646,12 +645,12 @@ def main():
     log.info("===== 启动Joplin笔记向量化处理 =====")
     notebook_titles = dynamic_config["notebook_titles"]
     try:
-        for i in range(len(notebook_titles)):
+        for i, notebook_title in enumerate(notebook_titles):
             log.info(
-                f"开始处理笔记本（{i + 1}/{len(notebook_titles)}）: 【{notebook_titles[i]}】…………"
+                f"开始处理笔记本（{i + 1}/{len(notebook_titles)}）: 【{notebook_title}】…………"
             )
             process_notes_incremental(
-                notebook_title=notebook_titles[i], config=dynamic_config
+                notebook_title=notebook_title, config=dynamic_config
             )
         log.info("===== 所有笔记本处理完成 =====")
     except Exception as e:
