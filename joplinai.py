@@ -486,7 +486,7 @@ def process_notes_incremental(notebook_title: str, config: Dict):
             if not note_detail:
                 continue
 
-            # ... 时间格式转换 关键修复：统一时间格式为时间戳
+            # 时间格式转换，统一时间格式为时间戳
             current_update_time = note_detail.updated_time
             if isinstance(current_update_time, datetime):
                 current_update_time = current_update_time.timestamp()
@@ -608,16 +608,20 @@ def main():
     args = parse_args()
     # 动态覆盖配置
     dynamic_config = CONFIG.copy()
+
+    # 生成按照模型区分的状态文件名称
     dynamic_config["embedding_model"] = args.model
     model_name = (
         dynamic_config.get("embedding_model").replace(":", "_").replace("-", "_")
     )
     dynamic_config["state_path"] = (
         getdirmain() / "data" / f"joplin_process_state_{model_name}.json"
-    )  # 处理状态文件路径
-    if args.notebook_titles:
+    )
+
+    # 处理笔记本列表，参数是字符串，需要处理成列表，如果有必要的话
+    if type(args.notebook_titles) != list:
         notebook_titles_str = args.notebook_titles
-    elif notebook_titles_str := getinivaluefromcloud("joplinai", "imp_nbs"):
+    if notebook_titles_str := getinivaluefromcloud("joplinai", "imp_nbs"):
         pass
     if notebook_titles_str:
         dynamic_config["notebook_titles"] = [
