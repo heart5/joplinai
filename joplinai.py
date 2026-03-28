@@ -469,7 +469,7 @@ def process_notes_incremental(notebook_title: str, config: Dict):
     notes = get_notes_in_notebook_by_title(notebook_title=notebook_title)
     if not notes:
         log.info(f"笔记本 【{notebook_title}】 无笔记，跳过处理")
-        return
+        return {}
 
     log.info(f"开始增量处理笔记本 【{notebook_title}】，共 {len(notes)} 条笔记")
     updated_count = 0
@@ -546,6 +546,19 @@ def process_notes_incremental(notebook_title: str, config: Dict):
         log.warning(
             f"笔记本【{notebook_title}】中增量处理（向量化）失败的笔记: {set(failed_notes)}"
         )
+
+    # 在函数末尾，整理并返回统计信息
+    stats = {
+        "notebook_title": notebook_title,
+        "total_notes": len(notes),
+        "updated_count": updated_count,
+        "failed_notes": failed_notes,  # 这是一个列表
+        "new_time_notes": new_time_notes,  # 需要更新的笔记标题列表
+        "process_time": datetime.now().isoformat(),
+    }
+
+    log.info(f"笔记本【{notebook_title}】处理完成。统计：{stats}")
+    return stats
 
 
 # %% [markdown]
@@ -654,6 +667,11 @@ def main():
         强制更新为{dynamic_config['force_update']} \
         "
     )
+    # 初始化任务报告器
+    from aitaskreporter import JoplinAITaskReporter
+
+    task_reporter = JoplinAITaskReporter(dynamic_config)
+
     log.info("===== 启动Joplin笔记向量化处理 =====")
     notebook_titles = [
         title.strip()
@@ -673,9 +691,15 @@ def main():
             log.info(
                 f"开始处理笔记本（{i + 1}/{len(notebook_titles)}）: 【{notebook_title}】…………"
             )
-            process_notes_incremental(
+            # 调用原有的处理函数，但需要其返回统计信息
+            # 建议修改 process_notes_incremental 使其返回统计字典
+            stats = process_notes_incremental(
                 notebook_title=notebook_title, config=dynamic_config
             )
+
+            # 将统计结果添加到报告器
+            task_reporter.add_notebook_record(notebook_title, stats)
+
             # 每处理2条笔记保存一次检查点
             if i % 2 == 0:
                 checkpoint_data = {
@@ -687,6 +711,14 @@ def main():
                     json.dump(checkpoint_data, f)
 
         log.info("===== 所有笔记本处理完成 =====")
+
+        # 生成并保存报告到Joplin
+        report_content = task_reporter.generate_markdown_report()
+        success = task_reporter.update_joplin_note(report_content)
+        if success:
+            log.info("处理统计报告已成功更新至Joplin笔记。")
+        else:
+            log.warning("处理统计报告更新至Joplin笔记失败。")
     except Exception as e:
         log.critical(f"主流程执行失败: {e}", exc_info=True)
         return
