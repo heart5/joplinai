@@ -203,25 +203,37 @@ class EmbeddingGenerator:
 
     # %%
     def _split_text_into_chunks(self, text: str) -> List[str]:
-        """将文本分割成块"""
-        # 实现分块逻辑
-        words = text.split()
+        """基于字符位置分块，保留完整单词"""
+        if len(text) <= self.chunk_size:
+            return [text]
+        
         chunks = []
-        current_chunk = []
-        current_length = 0
-
-        for word in words:
-            word_length = len(word)
-            if current_length + word_length + 1 > self.chunk_size:
-                if current_chunk:
-                    chunks.append(" ".join(current_chunk))
-                current_chunk = [word]
-                current_length = word_length
-            else:
-                current_chunk.append(word)
-                current_length += word_length + 1
-
-        if current_chunk:
-            chunks.append(" ".join(current_chunk))
-
+        start = 0
+        
+        while start < len(text):
+            # 计算本块的结束位置
+            end = start + self.chunk_size
+            
+            # 如果已经到文本末尾
+            if end >= len(text):
+                chunks.append(text[start:])
+                break
+            
+            # 寻找合适的断点（空格或标点）
+            # 向前找最近的空格
+            while end > start and text[end] not in ' \t\n.,;!?':
+                end -= 1
+            
+            # 如果没找到空格，强制在chunk_size处截断
+            if end == start:
+                end = start + self.chunk_size
+            
+            # 添加块
+            chunk = text[start:end].strip()
+            if chunk:  # 避免添加空块
+                chunks.append(chunk)
+            
+            # 更新起始位置
+            start = end
+        
         return chunks
