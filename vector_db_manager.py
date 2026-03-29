@@ -59,13 +59,13 @@ class VectorDBManager:
                 path=str(db_path),
             )
             self.embedding_model = embedding_model
-            self.collection_name = f"joplin_{embedding_model.replace(':', '_').replace('-', '_')}"
-            
+            self.collection_name = f"joplin_{embedding_model.replace(':', '_').replace('/', '_').replace('-', '_')}"
+
             # 先尝试获取集合，如果不存在则创建
             try:
                 self.collection = self.client.get_collection(self.collection_name)
                 log.info(f"成功加载现有集合: {self.collection_name}")
-                
+
                 # 验证维度匹配
                 if self.collection.count() > 0:
                     sample = self.collection.get(limit=1)
