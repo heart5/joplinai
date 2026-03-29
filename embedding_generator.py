@@ -21,8 +21,10 @@
 # ## 导入库
 
 # %%
+import hashlib
 import logging
 import time
+from functools import lru_cache
 from typing import List, Optional
 
 import ollama
@@ -50,6 +52,7 @@ class EmbeddingGenerator:
     def __init__(self, model_name: str, chunk_size: int = 2048):
         self.model_name = model_name
         self.chunk_size = chunk_size
+        self.embedding_cache = {}  # 简单缓存
 
 # %% [markdown]
 # ### get_model_max_context(self,) -> int
@@ -91,33 +94,56 @@ class EmbeddingGenerator:
         return []
 
 # %% [markdown]
+# ### get_cached_embedding(self, text_hash: str) -> Optional[List[float]]
+
+    # %%
+    @lru_cache(maxsize=100)
+    def get_cached_embedding(self, text_hash: str) -> Optional[List[float]]:
+        """缓存嵌入结果"""
+        return self.embedding_cache.get(text_hash)
+
+# %% [markdown]
 # ### get_merged_embedding(self, text: str, enable_deepseek_embed: bool = False) -> List[float]
     # %%
     def get_merged_embedding(
         self, text: str, enable_deepseek_embed: bool = False
     ) -> List[float]:
+        # 计算文本哈希
+        text_hash = hashlib.md5(text.encode()).hexdigest()
+
+        # 检查缓存
+        cached = self.get_cached_embedding(text_hash)
+        if cached:
+            log.info(f"使用缓存嵌入: {text_hash[:8]}")
+            return cached
+
         """合并嵌入生成（本地嵌入为主，DeepSeek嵌入为增强选项）"""
         if enable_deepseek_embed:
             # 优先用DeepSeek增强嵌入
             log.info("使用DeepSeek增强嵌入")
             from deepseek_enhancer import get_deepseek_embedding
-    
-            return get_deepseek_embedding(
+
+            embedding = get_deepseek_embedding(
                 text, model=config.get("deepseek_embed_model", "deepseek-embedding")
             )
+            # 存储到缓存
+            if embedding:
+                self.embedding_cache[text_hash] = embedding
+                log.info(f"生成缓存嵌入: {text_hash[:8]}，{len(embedding)}")
+            return embedding
         else:
             # 默认用本地Ollama嵌入（保留您已优化的分块逻辑）
             log.info("使用本地Ollama嵌入")
             self.get_model_max_context()
             chunks = self._split_text_into_chunks(text)
-    
+
             if not chunks:
                 return []
-    
+
             log.info(
                 f"文本分块: {len(chunks)}块（每块{self.chunk_size}字符），实际每块字符数量{[len(chunk) for chunk in chunks]}"
             )
-    
+
             # 顺序处理（避免并发问题）
             embeddings = []
             for i in range(len(chunks)):
@@ -129,12 +155,17 @@ class EmbeddingGenerator:
                         f"处理文本块列表{[len(chunk) for chunk in chunks]}的第{i}块时出错，未有效获取嵌入向量"
                     )
                     return []
-    
+
             if not embeddings:
                 return []
-    
+
             # 简单平均合并
-            return [sum(dim) / len(embeddings) for dim in zip(*embeddings)]
+            embedding = [sum(dim) / len(embeddings) for dim in zip(*embeddings)]
+            # 存储到缓存
+            if embedding:
+                self.embedding_cache[text_hash] = embedding
+                log.info(f"生成缓存嵌入: {text_hash[:8]}，{len(embedding)}")
+            return embedding
 
 # %% [markdown]
 # ### _split_text_into_chunks(self, text: str) -> List[str]
