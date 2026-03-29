@@ -72,7 +72,9 @@ class JoplinAITaskReporter:
     def generate_markdown_report(self) -> str:
         """生成Markdown格式的统计报告（参考hostconfig的表格设计）"""
         md_lines = ["# Joplin笔记向量化处理统计报告\n"]
-        md_lines.append(f"*生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*\n")
+        md_lines.append(
+            f"*生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*，嵌入模型为：{self.config['embedding_model']}\n"
+        )
 
         # 1. 总体概览
         md_lines.append("## 1. 处理概览\n")
