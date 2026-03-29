@@ -50,6 +50,7 @@ from chromadb.config import Settings
 
 # %%
 try:
+    from embedding_generator import EmbeddingGenerator
     from func.configpr import (
         findvaluebykeyinsection,
         getcfpoptionvalue,
@@ -72,6 +73,7 @@ try:
     from func.logme import log
     from func.sysfunc import execcmd, not_IPython
     from func.wrapfuncs import timethis
+    from vector_db_manager import VectorDBManager
 except ImportError as e:
     logging.basicConfig(level=logging.INFO)
     log = logging.getLogger(__name__)
@@ -176,187 +178,15 @@ def save_process_state(state: Dict, state_path: Path):
 
 
 # %% [markdown]
-# ### 向量数据库操作（ChromaDB）
-# %%
-class VectorDBManager:
-    """ChromaDB向量数据库管理器（封装集合操作）"""
-
-    def __init__(self, db_path: Path, model_name: str):
-        self.client = chromadb.PersistentClient(path=str(db_path))
-        self.collection_name = (
-            f"joplin_{model_name.replace(':', '_').replace('-', '_')}"
-        )
-        self._model_dimension_cache = {}
-        self._ensure_collection(model_name)
-
-    def _ensure_collection(self, model_name: str):
-        """确保集合存在且维度匹配"""
-        try:
-            self.collection = self.client.get_collection(self.collection_name)
-            # 检查维度是否匹配
-            sample = self.collection.get(limit=1)
-            if sample and "embeddings" in sample:
-                existing_dim = len(sample["embeddings"][0])
-                current_dim = self._get_model_dimension(model_name)
-                if existing_dim != current_dim:
-                    raise ValueError(
-                        f"维度不匹配: 现有{existing_dim}D, 需要{current_dim}D"
-                    )
-        except:
-            # 维度不匹配或集合不存在时重建
-            if hasattr(self, "collection"):
-                self.client.delete_collection(self.collection_name)
-            self.collection = self.client.create_collection(
-                name=self.collection_name,
-                metadata={
-                    "hnsw:space": "cosine",
-                    "dimension": self._get_model_dimension(model_name),
-                },
-            )
-
-    def _get_model_dimension(self, model_name: str) -> int:
-        if model_name in self._model_dimension_cache:
-            return self._model_dimension_cache[model_name]
-
-        dimensions = {
-            "nomic-embed-text": 768,
-            "qwen:1.8b": 2048,
-            "text2vec-large-chinese": 1024,
-        }
-
-        if model_name in dimensions:
-            dim = dimensions[model_name]
-        else:
-            # 动态获取并缓存
-            try:
-                model_info = ollama.show(model=model_name)
-                num_ctx = model_info.get("parameters", {}).get("num_ctx", 2048)
-                dim = int(num_ctx * 3 * 0.8)
-            except:
-                dim = 768
-
-        self._model_dimension_cache[model_name] = dim
-        return dim
-
-    def upsert_note(
-        self,
-        note_id: str,
-        text: str,
-        embedding: List[float],
-        tags: List[str],
-        metadata: Dict,
-    ):
-        """插入/更新笔记向量数据"""
-        self.collection.upsert(
-            ids=[note_id],
-            documents=[text],
-            embeddings=[embedding],
-            metadatas=[
-                {
-                    "note_id": note_id,
-                    "tags": ",".join(tags),
-                    "summary": metadata.get("summary"),
-                }
-            ],
-        )
-
-    def delete_note(self, note_id: str):
-        """删除笔记向量数据"""
-        self.collection.delete(ids=[note_id])
-
-
-# %% [markdown]
-# ### 嵌入生成（Ollama API调用+并发）
-# %% [markdown]
-# #### get_model_max_context(model_name: str) -> int
-# %%
-def get_model_max_context(model_name: str) -> int:
-    """精确获取模型上下文限制（token→字符转换）"""
-    try:
-        # 特殊处理已知模型
-        if model_name == "nomic-embed-text":
-            return 1850  # 768 token × 3字符/token × 0.8余量 ≈ 1850
-        if model_name == "qwen:1.8b":
-            return 4900  # 2048 token × 3 × 0.8 = 4916，取4900
-
-        # 通用模型处理
-        model_info = ollama.show(model=model_name)
-        num_ctx = model_info.get("parameters", {}).get("num_ctx", 2048)
-        return int(num_ctx * 3 * 0.8)  # 通用转换公式
-    except Exception as e:
-        log.warning(f"获取模型上下文失败({model_name})，使用默认值2048字符: {e}")
-        return 2048  # 安全默认值
-
-
-# %% [markdown]
-# #### get_ollama_embedding(text: str, model_name: str) -> List[float]
-# %%
-def get_ollama_embedding(text: str, model_name: str) -> List[float]:
-    """调用 Ollama 生成文本嵌入。注意：传入的 text 应是已分块的适当长度文本。"""
-    for attempt in range(3):
-        try:
-            response = ollama.embeddings(model=model_name, prompt=text)
-            return response["embedding"]
-        except Exception as e:
-            log.warning(f"嵌入失败({attempt + 1}/3): {str(e)[:100]}")
-            time.sleep(2**attempt)
-
-    log.error(f"嵌入生成最终失败: {model_name}, 文本长度{len(text)}")
-    return []
-
-
-# %% [markdown]
-# #### get_merged_embedding(text: str, model_name: str, config: Dict) -> List[float]
-# %%
-def get_merged_embedding(text: str, model_name: str, config: Dict) -> List[float]:
-    """合并嵌入生成（本地嵌入为主，DeepSeek嵌入为增强选项）"""
-    if config["enable_deepseek_embed"] and config["deepseek_api_key"]:
-        # 优先用DeepSeek增强嵌入
-        log.info("使用DeepSeek增强嵌入")
-        from deepseek_enhancer import get_deepseek_embedding
-
-        return get_deepseek_embedding(
-            text, model=config.get("deepseek_embed_model", "deepseek-embedding")
-        )
-    else:
-        # 默认用本地Ollama嵌入（保留您已优化的分块逻辑）
-        log.info("使用本地Ollama嵌入")
-        CHUNK_SIZE = get_model_max_context(model_name)
-        chunks = [text[i : i + CHUNK_SIZE] for i in range(0, len(text), CHUNK_SIZE)]
-
-        if not chunks:
-            return []
-
-        log.info(
-            f"文本分块: {len(chunks)}块（每块{CHUNK_SIZE}字符），实际每块字符数量{[len(chunk) for chunk in chunks]}"
-        )
-
-        # 顺序处理（避免并发问题）
-        embeddings = []
-        for i in range(len(chunks)):
-            emb = get_ollama_embedding(chunks[i], model_name)
-            if emb:
-                embeddings.append(emb)
-            else:  # 如果文本块中有嵌入量化操作失败，返回空列表，方便后面捕捉，避免写入残值导致误判
-                log.error(
-                    f"处理文本块列表{[len(chunk) for chunk in chunks]}的第{i}块时出错，未有效获取嵌入向量"
-                )
-                return []
-
-        if not embeddings:
-            return []
-
-        # 简单平均合并
-        return [sum(dim) / len(embeddings) for dim in zip(*embeddings)]
-
-
-# %% [markdown]
 # ### 笔记处理核心逻辑（增量更新+入库）
 # %% [markdown]
 # #### process_single_note(note, vector_db: VectorDBManager, model_name: str, config: Dict) -> bool
 # %%
 def process_single_note(
-    note, vector_db: VectorDBManager, model_name: str, config: Dict
+    note,
+    vector_db: VectorDBManager,
+    embedding_generator: EmbeddingGenerator,
+    config: Dict,
 ) -> bool:
     """处理单条笔记（清理→嵌入→入库），返回是否成功"""
     try:
@@ -377,7 +207,9 @@ def process_single_note(
         text = f"{note.title}\n{cleaned_body}"
 
         # 生成嵌入
-        embedding = get_merged_embedding(text, model_name, config)
+        embedding = EmbeddingGenerator(config["embedding_model"]).get_merged_embedding(
+            text, config["enable_deepseek_embed"]
+        )
         if not embedding:  # 嵌入生成失败
             log.error(f"笔记《{note.title}》（{note.id}） 嵌入生成失败，跳过")
             return False
@@ -451,14 +283,22 @@ def process_notes_incremental(notebook_title: str, config: Dict):
     """增量处理笔记本笔记（修复时间处理问题）"""
     # 动态获取模型最大上下文
     model_name = config["embedding_model"]
-    max_context = get_model_max_context(model_name)
+    max_context = EmbeddingGenerator(config["embedding_model"]).chunk_size
     chunk_size = min(config["chunk_size"], max_context // 2)
     log.info(
         f"使用模型“{model_name}”，动态分块配置：chunk_size={chunk_size}，max_context={max_context}"
     )
 
-    # 初始化向量数据库
-    vector_db = VectorDBManager(config["db_path"], model_name)
+    # 初始化向量数据库（在整个处理过程中只初始化一次）
+    if not hasattr(process_notes_incremental, "vector_db"):
+        process_notes_incremental.vector_db = VectorDBManager(
+            config["db_path"], model_name, True
+        )
+        log.info(
+            f"向量数据库初始化完成，集合: {process_notes_incremental.vector_db.collection_name}"
+        )
+
+    vector_db = process_notes_incremental.vector_db
 
     # 加载处理状态
     process_state = load_process_state(config["state_path"])
