@@ -53,6 +53,7 @@ try:
     from func.logme import log
     from func.sysfunc import execcmd, not_IPython
     from func.wrapfuncs import timethis
+    from vector_db_manager import VectorDBManager
 except ImportError as e:
     logging.basicConfig(level=logging.INFO)
     log = logging.getLogger(__name__)
@@ -79,232 +80,6 @@ model_name = CONFIG.get("embedding_model").replace(":", "_").replace("-", "_")
 CONFIG["collection_name"] = f"joplin_{model_name}"
 
 # %% [markdown]
-# ## 向量数据库管理器
-
-# %%
-class VectorDBManager:
-    """ChromaDB向量数据库管理器（用于检索）"""
-
-    def __init__(self, db_path: Path, collection_name: str):
-        self.client = chromadb.PersistentClient(path=str(db_path))
-        self.collection_name = collection_name
-        self.collection = None
-        self._load_collection()
-
-    def _load_collection(self):
-        """加载向量数据库集合"""
-        try:
-            # 先列出所有集合
-            collections = self.client.list_collections()
-            log.info(f"数据库中的集合列表: {[c.name for c in collections]}")
-
-            # 尝试加载目标集合
-            self.collection = self.client.get_collection(self.collection_name)
-            log.info(f"成功加载集合: {self.collection_name}")
-
-            # 获取集合统计信息
-            try:
-                count = self.collection.count()
-                log.info(f"集合中包含 {count} 个文档")
-
-                # 获取一些样本数据
-                sample = self.collection.get(limit=min(3, count))
-                if sample and sample["ids"]:
-                    log.info(f"样本笔记ID: {sample['ids'][:3]}")
-                    log.info(f"样本元数据: {sample.get('metadatas', [])[:3]}")
-            except Exception as e:
-                log.warning(f"无法获取集合统计信息: {e}")
-
-        except Exception as e:
-            log.error(f"加载集合失败: {e}")
-            self.collection = None
-
-            # 尝试创建集合（如果不存在）
-            try:
-                log.info(f"尝试创建集合: {self.collection_name}")
-                self.collection = self.client.create_collection(self.collection_name)
-                log.info(f"成功创建新集合: {self.collection_name}")
-            except Exception as create_e:
-                log.error(f"创建集合也失败: {create_e}")
-
-    def search_similar_notes(self, query: str, n_results: int = 8) -> List[Dict]:
-        """
-        搜索与查询相似的笔记
-
-        Args:
-            query: 查询文本
-            n_results: 返回结果数量
-
-        Returns:
-            相似笔记列表，每个元素包含笔记ID、内容、相似度和元数据
-        """
-        if not self.collection:
-            log.error("向量数据库集合未加载")
-            return []
-
-        try:
-            # 生成查询的嵌入向量
-            query_embedding = self._generate_query_embedding(query)
-            if not query_embedding:
-                log.error("查询嵌入生成失败")
-                return []
-
-            log.info(f"查询嵌入维度: {len(query_embedding)}")
-
-            # 在向量数据库中搜索
-            results = self.collection.query(
-                query_embeddings=[query_embedding],
-                n_results=n_results,
-                include=["documents", "metadatas", "distances"],
-            )
-
-            log.debug(
-                f"ChromaDB返回结果结构: {json.dumps({k: type(v) for k, v in results.items()}, default=str)}"
-            )
-
-            # 格式化结果
-            similar_notes = []
-
-            # 检查结果是否有效
-            if not results or "ids" not in results or not results["ids"]:
-                log.warning("ChromaDB返回空结果")
-                return similar_notes
-
-            # 处理结果结构 - ChromaDB返回的是二维列表
-            # results["ids"] 是列表的列表，如 [["id1", "id2"]]
-            ids_list = results["ids"]
-            if not ids_list or len(ids_list) == 0:
-                log.warning("结果ID列表为空")
-                return similar_notes
-
-            # 获取第一个查询的结果（因为我们只查询了一个）
-            ids = ids_list[0] if isinstance(ids_list[0], list) else ids_list
-
-            if not ids or len(ids) == 0:
-                log.warning("没有找到相关笔记")
-                return similar_notes
-
-            log.info(f"找到 {len(ids)} 个潜在相关笔记")
-
-            # 获取其他字段
-            documents = results.get("documents", [])
-            distances = results.get("distances", [])
-            metadatas = results.get("metadatas", [])
-
-            # 确保所有字段都是正确的格式
-            doc_list = (
-                documents[0] if documents and isinstance(documents[0], list) else []
-            )
-            dist_list = (
-                distances[0] if distances and isinstance(distances[0], list) else []
-            )
-            meta_list = (
-                metadatas[0] if metadatas and isinstance(metadatas[0], list) else []
-            )
-
-            for i in range(min(len(ids), len(doc_list))):
-                try:
-                    note_id = ids[i]
-                    content = doc_list[i] if i < len(doc_list) else ""
-                    distance = dist_list[i] if i < len(dist_list) else 0
-                    metadata = meta_list[i] if i < len(meta_list) else {}
-
-                    # 计算相似度分数（距离转换为相似度）
-                    # 确保distance是数字而不是列表
-                    if isinstance(distance, list):
-                        distance = distance[0] if len(distance) > 0 else 0
-
-                    similarity = 1.0 / (1.0 + distance) if distance > 0 else 1.0
-
-                    similar_notes.append(
-                        {
-                            "note_id": note_id,
-                            "content": content,
-                            "similarity": similarity,
-                            "metadata": metadata,
-                        }
-                    )
-
-                    log.debug(
-                        f"找到笔记 {i + 1}: ID={note_id}, 相似度={similarity:.3f}"
-                    )
-
-                except Exception as e:
-                    log.error(f"处理第{i + 1}个笔记时出错: {e}")
-                    continue
-
-            # 按相似度排序
-            similar_notes.sort(key=lambda x: x["similarity"], reverse=True)
-            log.info(f"成功检索到 {len(similar_notes)} 条相关笔记")
-
-            return similar_notes
-
-        except Exception as e:
-            log.error(f"搜索失败: {e}")
-            import traceback
-
-            log.error(f"详细错误堆栈:\n{traceback.format_exc()}")
-            return []
-
-    def _generate_query_embedding(self, query: str) -> List[float]:
-        """生成查询文本的嵌入向量"""
-        try:
-            # 使用与笔记相同的嵌入模型
-            model_name = CONFIG["embedding_model"]
-            log.info(f"尝试使用模型 {model_name} 生成查询嵌入")
-
-            # 检查Ollama服务是否可用
-            try:
-                models = ollama.list()
-                log.info(f"可用模型: {[m['model'] for m in models['models']]}")
-            except Exception as e:
-                log.error(f"无法获取Ollama模型列表: {e}")
-                return []
-
-            # 尝试生成嵌入，最多重试3次
-            for attempt in range(3):
-                try:
-                    response = ollama.embeddings(model=model_name, prompt=query)
-                    if "embedding" in response and response["embedding"]:
-                        log.info(
-                            f"成功生成查询嵌入，维度: {len(response['embedding'])}"
-                        )
-                        return response["embedding"]
-                    else:
-                        log.warning(f"第{attempt + 1}次尝试：返回的嵌入为空")
-                except Exception as e:
-                    log.warning(f"第{attempt + 1}次尝试生成嵌入失败: {str(e)[:100]}")
-                    time.sleep(1)
-
-            log.error(f"生成查询嵌入最终失败")
-            return []
-
-        except Exception as e:
-            log.error(f"生成查询嵌入失败: {e}")
-            return []
-
-    def get_note_by_id(self, note_id: str) -> Optional[Dict]:
-        """根据ID获取笔记"""
-        if not self.collection:
-            return None
-
-        try:
-            results = self.collection.get(
-                ids=[note_id], include=["documents", "metadatas"]
-            )
-
-            if results and results["ids"]:
-                return {
-                    "note_id": note_id,
-                    "content": results["documents"][0] if results["documents"] else "",
-                    "metadata": results["metadatas"][0] if results["metadatas"] else {},
-                }
-            return None
-        except Exception as e:
-            log.error(f"获取笔记失败: {e}")
-            return None
-
-# %% [markdown]
 # ## 问答系统核心
 
 # %%
@@ -313,7 +88,10 @@ class JoplinQASystem:
 
     def __init__(self, config: Dict):
         self.config = config
-        self.vector_db = VectorDBManager(config["db_path"], config["collection_name"])
+        # for_creation=False表示用于查询
+        self.vector_db = VectorDBManager(
+            config["db_path"], config["embedding_model"], for_creation=False
+        )
         self.conversation_history = []  # 对话历史
 
     def ask(self, question: str, use_history: bool = True) -> Dict:
