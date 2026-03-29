@@ -59,6 +59,7 @@ class VectorDBManager:
                 path=str(db_path),
             )
             self.embedding_model = embedding_model
+            self._model_dimension_cache = {}  # 添加这行：初始化缓存字典
             self.collection_name = f"joplin_{embedding_model.replace(':', '_').replace('/', '_').replace('-', '_')}"
 
             # 先尝试获取集合，如果不存在则创建
@@ -170,20 +171,35 @@ class VectorDBManager:
     # %%
     def _get_model_dimension(self, model_name: str) -> int:
         """获取模型维度"""
+        # 已知模型维度映射
+        known_dimensions = {
+            "dengcao/bge-large-zh-v1.5": 1024,  # 根据日志显示实际是1024维
+            "nomic-embed-text": 768,
+            "qwen:1.8b": 4096,
+            # 可以添加更多已知模型
+        }
+        
+        if model_name in known_dimensions:
+            dim = known_dimensions[model_name]
+            self._model_dimension_cache[model_name] = dim
+            log.info(f"使用已知模型维度: {model_name} -> {dim}D")
+            return dim
+        
         if model_name in self._model_dimension_cache:
             return self._model_dimension_cache[model_name]
-        
+    
         # 尝试从Ollama获取模型信息
         try:
             # 通过生成一个简单嵌入来获取维度
             test_response = ollama.embeddings(model=model_name, prompt="test")
             dim = len(test_response["embedding"])
             self._model_dimension_cache[model_name] = dim
+            log.info(f"通过测试嵌入获取模型维度: {model_name} -> {dim}D")
             return dim
         except Exception as e:
             log.error(f"获取模型维度失败: {e}")
             # 默认返回常见维度
-            return 4096
+            return 1024
 
 # %% [markdown]
 # ### upsert_note(self, note_id: str, text: str, embedding: List[float], tags: List[str], metadata: Dict)
