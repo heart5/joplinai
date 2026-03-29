@@ -91,7 +91,7 @@ CONFIG = {
     "max_context": 4000,  # 模型最大上下文（字符数，nomic-embed-text为8192）
     "concurrency_type": "thread",  # 固定使用多线程，移除 process 选项
     "max_workers": min(
-        16, (os.cpu_count() or 1) * 2
+        8, (os.cpu_count() or 1) * 2
     ),  # 动态设置最大工作者数：CPU核心数 * 2，上限为16
     "db_path": getdirmain() / "data" / "joplin_vector_db",  # ChromaDB存储路径
     "enable_deepseek_embed": False,  # 是否用DeepSeek嵌入替代本地嵌入（增强向量质量）
@@ -103,9 +103,11 @@ CONFIG = {
     "force_update": False,  # 新增：强制更新开关，默认关闭
 }
 
-model_name = CONFIG.get("embedding_model").replace(":", "_").replace("-", "_")
+model_name_str = (
+    CONFIG.get("embedding_model").replace(":", "_").replace("/", "_").replace("-", "_")
+)
 CONFIG["state_path"] = (
-    getdirmain() / "data" / f"joplin_process_state_{model_name}.json"
+    getdirmain() / "data" / f"joplin_process_state_{model_name_str}.json"
 )  # 处理状态文件路径
 
 
@@ -470,11 +472,14 @@ def main():
 
     # 生成按照模型区分的状态文件名称
     dynamic_config["embedding_model"] = args.model
-    model_name = (
-        dynamic_config.get("embedding_model").replace(":", "_").replace("-", "_")
+    model_name_str = (
+        dynamic_config.get("embedding_model")
+        .replace(":", "_")
+        .replace("/", "_")
+        .replace("-", "_")
     )
     dynamic_config["state_path"] = (
-        getdirmain() / "data" / f"joplin_process_state_{model_name}.json"
+        getdirmain() / "data" / f"joplin_process_state_{model_name_str}.json"
     )
 
     dynamic_config["max_workers"] = args.workers
