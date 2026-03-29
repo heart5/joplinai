@@ -76,7 +76,9 @@ CONFIG = {
 }
 
 # 根据嵌入模型生成状态文件路径
-model_name = CONFIG.get("embedding_model").replace(":", "_").replace("-", "_")
+model_name = (
+    CONFIG.get("embedding_model").replace(":", "_").replace("/", "_").replace("-", "_")
+)
 CONFIG["collection_name"] = f"joplin_{model_name}"
 
 # %% [markdown]
