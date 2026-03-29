@@ -55,15 +55,18 @@ class EmbeddingGenerator:
         self.embedding_cache = {}  # 简单缓存
 
 # %% [markdown]
-# ### get_model_max_context(self,) -> int
+# ### get_model_max_context(self) -> int
     # %%
-    def get_model_max_context(
-        self,
-    ) -> int:
+    def get_model_max_context(self) -> int:
         """精确获取模型上下文限制（token→字符转换）"""
         # 特殊处理已知模型
         if self.model_name == "nomic-embed-text":
             self.chunk_size = 1850  # 768 token × 3字符/token × 0.8余量 ≈ 1850
+            return
+        elif self.model_name == "dengcao/bge-large-zh-v1.5":
+            self.chunk_size = 450 # 512 token，中文是一对一，应为是一对三或者四，实际中文为主
+            return
+            return
         elif self.model_name == "qwen:1.8b":
             self.chunk_size = 4900  # 2048 token × 3 × 0.8 = 4916，取4900
             return
@@ -71,11 +74,39 @@ class EmbeddingGenerator:
         # 通用模型处理
         try:
             model_info = ollama.show(model=self.model_name)
-            num_ctx = model_info.get("parameters", {}).get("num_ctx", 2048)
+            
+            # 方法1：尝试从 parameters 字符串解析
+            params_str = model_info.get("parameters", "")
+            num_ctx = 2048  # 默认值
+            
+            if isinstance(params_str, str) and params_str:
+                # 解析字符串，例如 "num_ctx 512"
+                import re
+                match = re.search(r'num_ctx\s+(\d+)', params_str)
+                if match:
+                    num_ctx = int(match.group(1))
+                else:
+                    # 方法2：尝试从 modelfile 解析
+                    modelfile = model_info.get("modelfile", "")
+                    match = re.search(r'PARAMETER num_ctx\s+(\d+)', modelfile)
+                    if match:
+                        num_ctx = int(match.group(1))
+                    else:
+                        # 方法3：尝试从 details.modelinfo 获取
+                        try:
+                            num_ctx = model_info.get("details", {}).get("modelinfo", {}).get("bert.context_length", 2048)
+                        except:
+                            pass
+            else:
+                # 如果 parameters 是字典（其他模型）
+                num_ctx = model_info.get("parameters", {}).get("num_ctx", 1024)
+                
             self.chunk_size = int(num_ctx * 3 * 0.8)
+            log.info(f"模型 {self.model_name} 上下文长度: {num_ctx} tokens, 分块大小: {self.chunk_size} 字符")
+            
         except Exception as e:
-            log.warning(f"获取模型上下文失败({self.model_name})，使用默认值2048字符: {e}")
-            self.chunk_size = 2048
+            log.warning(f"获取模型上下文失败({self.model_name})，使用默认值1024字符: {e}")
+            self.chunk_size = 1024
 
 # %% [markdown]
 # ### get_ollama_embedding(self, text: str) -> List[float]
