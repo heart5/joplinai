@@ -36,6 +36,7 @@ try:
         jpapi,
         searchnotebook,
         searchnotes,
+        updatenote_body,
     )
     from func.logme import log
     from func.sysfunc import execcmd, not_IPython
