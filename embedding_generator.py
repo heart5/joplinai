@@ -68,7 +68,7 @@ class EmbeddingGenerator:
             return
             return
         elif self.model_name == "qwen:1.8b":
-            self.chunk_size = 4900  # 2048 token × 3 × 0.8 = 4916，取4900
+            self.chunk_size = 4000  # 2048 token × 3 × 0.8 = 4916，取4000
             return
     
         # 通用模型处理
