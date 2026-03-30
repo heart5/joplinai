@@ -135,20 +135,36 @@ def deepseek_process_note(
         log.warning("未配置DeepSeek API Key")
         return None
 
+    # 添加个人笔记QA提示词
     prompts = {
-        "summary": f"用1句话总结以下笔记核心内容，突出主题和结论：\n%s",
-        "tags": f"从以下文本中提取3-5个核心标签（用逗号分隔），标签需简洁反映内容领域：\n%s",
+        "summary": """请用1-3句话总结以下个人笔记的核心内容，突出：主要事件或主题
+
+笔记内容：
+%s
+
+总结：""",
+        "tags": """请从以下个人笔记中提取3-6个核心标签，要求：
+1. 反映笔记的核心主题
+2. 使用具体的关键词，不要泛泛而谈
+3. 提取可能的人名和客户名称以及城市名称
+4. 每个标签尽量不要超过六个字
+5. 用逗号分隔
+
+笔记内容：
+%s
+
+标签：""",
     }
+
+    # prompts = {
+    #     "summary": f"用1句话总结以下笔记核心内容，突出主题和结论：\n%s",
+    #     "tags": f"从以下文本中提取3-5个核心标签（用逗号分隔），标签需简洁反映内容领域：\n%s",
+    # }
     # print(prompts)
 
     if task not in prompts:
         log.error(f"不支持的任务类型: {task}")
         return None
-
-    # prompt = prompts[task].format(text=text[:8000])
-    # 关键修复：转义文本中的花括号，避免格式化错误
-    # safe_text = text[:8000].replace("{", "{{").replace("}", "}}")
-    # prompt = prompts[task].format(text=safe_text)
 
     # 使用 % 格式化，避免花括号问题
     safe_text = text[:8000]
