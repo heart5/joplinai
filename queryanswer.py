@@ -64,16 +64,17 @@ except ImportError as e:
 
 # %%
 CONFIG = {
-    # "embedding_model": "dengcao/bge-large-zh-v1.5",  # 嵌入模型（与joplinai.py保持一致）
-    "embedding_model": "qwen:1.8b",  # 嵌入模型（与joplinai.py保持一致）
+    "embedding_model": "dengcao/bge-large-zh-v1.5",  # 嵌入模型（与joplinai.py保持一致）
+    # "embedding_model": "qwen:1.8b",  # 嵌入模型（与joplinai.py保持一致）
     "chat_model": "qwen:1.8b",  # 聊天模型（用于问答）
     "db_path": getdirmain() / "data" / "joplin_vector_db",  # ChromaDB存储路径
-    "max_retrieved_notes": 15,  # 最大检索笔记数量
+    "max_retrieved_notes": 10,  # 最大检索笔记数量
     "similarity_threshold": 0.5,  # 相似度阈值
     "enable_deepseek": False,  # 是否使用DeepSeek进行问答
     "deepseek_api_key": getinivaluefromcloud("joplinai", "deepseek_token"),
     "deepseek_chat_model": "deepseek-chat",
     "context_max_length": 4000,  # 上下文最大长度（字符）
+    "min_answer_length": 50,  # 添加最小答案长度要求
 }
 
 # %%
@@ -187,8 +188,18 @@ class JoplinQASystem:
         context_parts = []
 
         # 添加系统提示
-        system_prompt = """你是一个基于Joplin笔记的智能助手。请基于以下笔记内容回答用户的问题。
-如果笔记中没有相关信息，请如实告知。回答时请引用相关笔记的内容。"""
+        system_prompt = """你是我个人的笔记助手，请基于我的笔记内容回答问题。
+    我的笔记特点：
+    1. 记录工作、学习、生活的点滴
+    2. 包含具体项目、人名、日期
+    3. 可能有零散的想法和计划
+    
+    回答要求：
+    1. 基于笔记事实，不要编造
+    2. 引用具体的笔记内容
+    3. 如果笔记中没有相关信息，请说明
+    4. 用第一人称视角回答（因为这是我的笔记）
+    """
         context_parts.append(system_prompt)
 
         # 添加相关笔记内容
@@ -371,6 +382,323 @@ class JoplinQASystem:
             }
 
 # %% [markdown]
+# ## 优化的问答系统核心OptimizedJoplinQASystem(JoplinQASystem)
+
+# %%
+class OptimizedJoplinQASystem(JoplinQASystem):
+    """优化版的问答系统，针对个人笔记"""
+
+    def ask(self, question: str, use_history: bool = True) -> Dict:
+        # 1. 问题预处理
+        processed_question = self._preprocess_question(question)
+
+        # 2. 检索相关笔记（带过滤）
+        similar_notes = self.vector_db.search_similar_notes(
+            processed_question, n_results=self.config["max_retrieved_notes"]
+        )
+
+        # 3. 过滤和排序
+        filtered_notes = self._filter_and_rank_notes(similar_notes, question)
+
+        # 4. 构建优化上下文
+        context = self._build_optimized_context(filtered_notes, question)
+
+        # 5. 生成答案（带质量检查）
+        answer = self._generate_optimized_answer(question, context)
+
+        # 6. 后处理答案
+        final_answer = self._postprocess_answer(answer)
+
+        return {
+            "question": question,
+            "answer": final_answer,
+            "relevant_notes": filtered_notes,
+            "context_length": len(context),
+            "is_based_on_notes": bool(filtered_notes),  # 根据是否有相关笔记判断
+        }
+
+    def _preprocess_question(self, question: str) -> str:
+        """预处理问题，提高检索效果"""
+        # 移除常见疑问词
+        question = question.lower()
+        stop_words = ["请问", "请", "帮我", "我想知道", "什么是", "怎么", "如何"]
+        for word in stop_words:
+            question = question.replace(word, "")
+
+        # 提取关键词
+        keywords = self._extract_keywords(question)
+
+        # 如果是关于"我"的问题，添加个人化标记
+        if "我" in question or "我的" in question:
+            question = "个人笔记 " + question
+
+        return question.strip()
+
+    def _extract_keywords(self, text: str) -> List[str]:
+        """提取关键词（简单实现）"""
+        # 移除标点
+        import re
+
+        text = re.sub(r"[^\w\s]", "", text)
+
+        # 按词频提取（这里可以更复杂）
+        words = text.split()
+        from collections import Counter
+
+        word_counts = Counter(words)
+
+        # 返回前3个高频词（排除停用词）
+        stop_words = {"的", "了", "在", "是", "我", "你", "他", "她", "它", "这", "那"}
+        keywords = [
+            word
+            for word, count in word_counts.most_common(10)
+            if word not in stop_words and len(word) > 1
+        ]
+
+        return keywords[:3]
+
+    def _filter_and_rank_notes(self, notes: List[Dict], question: str) -> List[Dict]:
+        """过滤和重排序笔记"""
+        if not notes:
+            return []
+
+        # 1. 按相似度排序
+        notes.sort(key=lambda x: x["similarity"], reverse=True)
+
+        # 2. 应用阈值过滤
+        threshold = self.config.get("similarity_threshold", 0.6)
+        filtered = [note for note in notes if note["similarity"] >= threshold]
+
+        # 3. 如果过滤后太少，放宽条件
+        if len(filtered) < 2 and len(notes) > 0:
+            # 取前2个最相似的
+            filtered = notes[:2]
+
+        # 4. 基于问题关键词进一步过滤
+        keywords = self._extract_keywords(question)
+        if keywords:
+            scored_notes = []
+            for note in filtered:
+                score = note["similarity"]
+                content = note["content"].lower()
+
+                # 关键词匹配加分
+                for keyword in keywords:
+                    if keyword in content:
+                        score += 0.1
+
+                # 元数据匹配加分
+                metadata = note.get("metadata", {})
+                tags = metadata.get("tags", "").lower()
+                for keyword in keywords:
+                    if keyword in tags:
+                        score += 0.15
+
+                scored_notes.append((score, note))
+
+            # 重新按综合评分排序
+            scored_notes.sort(key=lambda x: x[0], reverse=True)
+            filtered = [note for _, note in scored_notes]
+
+        return filtered
+
+    def _build_optimized_context(self, notes: List[Dict], question: str) -> str:
+        """构建优化上下文"""
+        if not notes:
+            return "没有找到相关笔记。"
+
+        # 构建系统提示
+        system_prompt = """你是我个人的笔记助手，基于Joplin笔记回答问题。
+笔记记录了工作（轻行动功能饮料、习龙酱酒等）、学习、生活、想法等各种内容，请注意，因为有共享笔记本，这意味着有些笔记是同事或者朋友记录的。
+如果涉及到轻行动品牌（主要是功能饮料等系列产品），注意人物关系，我（白晔峰）是轻行动运营公司的负责人，陈志伟（志伟）和张永是领导班子成员，白磊（磊帅）是轻行动商业模式的创始人
+请基于以下相关笔记片段。
+如果笔记中没有相关信息，请如实告知。"""
+
+        # 构建笔记上下文
+        note_contexts = []
+        for i, note in enumerate(notes[:3]):  # 最多3条
+            metadata = note.get("metadata", {})
+            tags = metadata.get("tags", "无标签")
+            summary = metadata.get("summary", "")
+
+            # 提取最相关的片段（基于问题关键词）
+            content_snippet = self._extract_relevant_snippet(
+                note["content"], question, max_length=300
+            )
+
+            note_context = f"""【笔记{i + 1}】
+标签：{tags}
+摘要：{summary}
+相关内容：{content_snippet}"""
+
+            note_contexts.append(note_context)
+
+        # 组合完整上下文
+        context = f"""{system_prompt}
+
+相关笔记：
+{chr(10).join(note_contexts)}
+
+我的问题：{question}
+
+请基于以上笔记回答，如果笔记中没有相关信息，请说明。"""
+
+        # 限制长度
+        max_len = self.config.get("context_max_length", 1500)
+        if len(context) > max_len:
+            context = context[:max_len] + "..."
+
+        return context
+
+    def _extract_relevant_snippet(
+        self, content: str, question: str, max_length: int = 300
+    ) -> str:
+        """提取内容中最相关的片段"""
+        keywords = self._extract_keywords(question)
+
+        if not keywords:
+            # 没有关键词，取开头部分
+            return content[:max_length] + ("..." if len(content) > max_length else "")
+
+        # 查找包含关键词的句子
+        import re
+
+        sentences = re.split(r"[。！？；\n]", content)
+
+        relevant_sentences = []
+        for sentence in sentences:
+            for keyword in keywords:
+                if keyword in sentence:
+                    relevant_sentences.append(sentence.strip())
+                    break
+
+        if relevant_sentences:
+            # 合并相关句子
+            snippet = "。".join(relevant_sentences[:5]) + "。"
+            if len(snippet) > max_length:
+                snippet = snippet[:max_length] + "..."
+            return snippet
+        else:
+            # 没有找到关键词，取开头
+            return content[:max_length] + ("..." if len(content) > max_length else "")
+
+    def _generate_optimized_answer(self, question: str, context: str) -> str:
+        """生成优化答案"""
+        # 使用DeepSeek
+        if self.config["enable_deepseek"] and self.config["deepseek_api_key"]:
+            return self._generate_answer_with_deepseek_optimized(question, context)
+        else:
+            return self._generate_answer_with_ollama(question, context)
+
+    def _generate_answer_with_deepseek_optimized(
+        self, question: str, context: str
+    ) -> str:
+        """优化版的DeepSeek答案生成"""
+        try:
+            import requests
+
+            headers = {
+                "Authorization": f"Bearer {self.config['deepseek_api_key']}",
+                "Content-Type": "application/json",
+            }
+
+            # 优化提示词
+            prompt = f"""{context}
+
+回答要求：
+1. 基于笔记事实，不要编造
+2. 引用具体的笔记内容（如：根据笔记1提到...）
+3. 如果笔记信息不完整，可以合理推断但需说明
+4. 回答要具体、实用
+5. 语言自然，像在对话"""
+
+            payload = {
+                "model": self.config["deepseek_chat_model"],
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "你是我个人的笔记助手，帮助我回忆和整理笔记内容。",
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                "temperature": 0.3,
+                "max_tokens": 800,
+                "top_p": 0.9,
+            }
+
+            response = requests.post(
+                "https://api.deepseek.com/v1/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=60,
+            )
+            response.raise_for_status()
+
+            answer = response.json()["choices"][0]["message"]["content"].strip()
+
+            # 检查答案质量
+            if len(answer) < self.config.get("min_answer_length", 30):
+                log.warning(f"答案过短: {len(answer)}字符")
+                # 尝试重新生成
+                answer = self._regenerate_answer(question, context)
+
+            return answer
+
+        except Exception as e:
+            log.error(f"DeepSeek生成答案失败: {e}")
+            return f"抱歉，生成答案时出错: {str(e)[:100]}"
+
+    def _regenerate_answer(self, question: str, context: str) -> str:
+        """重新生成答案（当答案质量不高时）"""
+        # 简化上下文，重新生成
+        simplified_context = f"问题：{question}\n\n笔记摘要：{context[:500]}..."
+
+        try:
+            import requests
+
+            headers = {
+                "Authorization": f"Bearer {self.config['deepseek_api_key']}",
+                "Content-Type": "application/json",
+            }
+
+            payload = {
+                "model": self.config["deepseek_chat_model"],
+                "messages": [
+                    {"role": "user", "content": f"请回答：{question}"},
+                ],
+                "temperature": 0.7,
+                "max_tokens": 400,
+            }
+
+            response = requests.post(
+                "https://api.deepseek.com/v1/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=30,
+            )
+            response.raise_for_status()
+
+            answer = response.json()["choices"]["message"]["content"].strip()
+            return answer
+
+        except Exception as e:
+            return "根据我的笔记，我找到了一些相关信息，但无法生成完整的回答。建议您直接查看相关笔记。"
+
+    def _postprocess_answer(self, answer: str) -> str:
+        """后处理答案"""
+        # 移除多余的空白
+        import re
+
+        answer = re.sub(r"\n\s*\n", "\n\n", answer)
+
+        # 确保以句号结束
+        if answer and answer[-1] not in [".", "。", "!", "！", "?", "？"]:
+            answer += "。"
+
+        return answer.strip()
+
+
+# %% [markdown]
 # ## 命令行界面
 
 # %%
@@ -501,7 +829,8 @@ def main():
 
     # 初始化问答系统
     log.info("初始化Joplin问答系统...")
-    qa_system = JoplinQASystem(dynamic_config)
+    # qa_system = JoplinQASystem(dynamic_config)
+    qa_system = OptimizedJoplinQASystem(dynamic_config)
 
     # 检查向量数据库
     if not qa_system.vector_db.collection:
