@@ -85,10 +85,10 @@ except ImportError as e:
 # %%
 CONFIG = {
     "notebook_titles": "顺风顺水, 日新月异, 运营管理",  # 改为笔记本名称列表字符串
-    # "embedding_model": "dengcao/bge-large-zh-v1.5",  # 嵌入模型（Ollama本地模型，优先选dengcao/bge-large-zh-v1.5
-    "embedding_model": "qwen:1.8b",  # 嵌入模型（Ollama本地模型，优先选nomic-embed-text）
-    "chunk_size": 2000,  # 文本分块大小（字符数，根据模型上下文调整，nomic支持8192）
-    "max_context": 4000,  # 模型最大上下文（字符数，nomic-embed-text为8192）
+    "embedding_model": "dengcao/bge-large-zh-v1.5",  # 嵌入模型（Ollama本地模型，优先选dengcao/bge-large-zh-v1.5
+    # "embedding_model": "qwen:1.8b",  # 嵌入模型（Ollama本地模型，优先选nomic-embed-text）
+    "chunk_size": 512,  # 文本分块大小（字符数，根据模型上下文调整）
+    "max_context": 512,  # 模型最大上下文（字符数）
     "concurrency_type": "thread",  # 固定使用多线程，移除 process 选项
     "max_workers": min(
         8, (os.cpu_count() or 1) * 2
