@@ -64,18 +64,19 @@ except ImportError as e:
 
 # %%
 CONFIG = {
-    "embedding_model": "dengcao/bge-large-zh-v1.5",  # 嵌入模型（与joplinai.py保持一致）
-    # "embedding_model": "qwen:1.8b",  # 嵌入模型（与joplinai.py保持一致）
+    # "embedding_model": "dengcao/bge-large-zh-v1.5",  # 嵌入模型（与joplinai.py保持一致）
+    "embedding_model": "qwen:1.8b",  # 嵌入模型（与joplinai.py保持一致）
     "chat_model": "qwen:1.8b",  # 聊天模型（用于问答）
     "db_path": getdirmain() / "data" / "joplin_vector_db",  # ChromaDB存储路径
-    "max_retrieved_notes": 5,  # 最大检索笔记数量
-    "similarity_threshold": 0.3,  # 相似度阈值
+    "max_retrieved_notes": 15,  # 最大检索笔记数量
+    "similarity_threshold": 0.5,  # 相似度阈值
     "enable_deepseek": False,  # 是否使用DeepSeek进行问答
     "deepseek_api_key": getinivaluefromcloud("joplinai", "deepseek_token"),
     "deepseek_chat_model": "deepseek-chat",
     "context_max_length": 4000,  # 上下文最大长度（字符）
 }
 
+# %%
 # 根据嵌入模型生成状态文件路径
 model_name = (
     CONFIG.get("embedding_model").replace(":", "_").replace("/", "_").replace("-", "_")
@@ -89,6 +90,10 @@ CONFIG["collection_name"] = f"joplin_{model_name}"
 class JoplinQASystem:
     """Joplin笔记问答系统"""
 
+# %% [markdown]
+# ### __init__(self, config: Dict)
+
+    # %%
     def __init__(self, config: Dict):
         self.config = config
         # for_creation=False表示用于查询
@@ -97,6 +102,10 @@ class JoplinQASystem:
         )
         self.conversation_history = []  # 对话历史
 
+# %% [markdown]
+# ### ask(self, question: str, use_history: bool = True) -> Dict
+
+    # %%
     def ask(self, question: str, use_history: bool = True) -> Dict:
         """
         回答用户问题
@@ -169,6 +178,10 @@ class JoplinQASystem:
             "context_length": len(context),
         }
 
+# %% [markdown]
+# ### _build_context(self, notes: List[Dict], question: str) -> str
+
+    # %%
     def _build_context(self, notes: List[Dict], question: str) -> str:
         """构建问答上下文"""
         context_parts = []
@@ -215,6 +228,10 @@ class JoplinQASystem:
         log.debug(f"构建上下文长度: {len(full_context)}字符")
         return full_context
 
+# %% [markdown]
+# ### _generate_answer_with_ollama(self, question: str, context: str) -> str
+
+    # %%
     def _generate_answer_with_ollama(self, question: str, context: str) -> str:
         """使用本地Ollama生成答案"""
         try:
@@ -243,6 +260,10 @@ class JoplinQASystem:
             log.error(f"Ollama生成答案失败: {e}")
             return f"抱歉，生成答案时出现错误: {str(e)}"
 
+# %% [markdown]
+# ### _generate_answer_with_deepseek(self, question: str, context: str) -> str
+
+    # %%
     def _generate_answer_with_deepseek(self, question: str, context: str) -> str:
         """使用DeepSeek API生成答案"""
         try:
@@ -283,6 +304,10 @@ class JoplinQASystem:
             # 回退到Ollama
             return self._generate_answer_with_ollama(question, context)
 
+# %% [markdown]
+# ### _generate_generic_answer(self, question: str) -> str
+
+    # %%
     def _generate_generic_answer(self, question: str) -> str:
         """生成通用回答（当没有相关笔记时）"""
         generic_responses = [
@@ -311,11 +336,19 @@ class JoplinQASystem:
             sources.append(source)
         return sources
 
+# %% [markdown]
+# ### clear_history(self)
+
+    # %%
     def clear_history(self):
         """清空对话历史"""
         self.conversation_history = []
         log.info("对话历史已清空")
 
+# %% [markdown]
+# ### get_statistics(self) -> Dict
+
+    # %%
     def get_statistics(self) -> Dict:
         """获取系统统计信息"""
         try:
