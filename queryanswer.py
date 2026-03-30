@@ -64,7 +64,8 @@ except ImportError as e:
 
 # %%
 CONFIG = {
-    "embedding_model": "qwen:1.8b",  # 嵌入模型（与joplinai.py保持一致）
+    "embedding_model": "dengcao/bge-large-zh-v1.5",  # 嵌入模型（与joplinai.py保持一致）
+    # "embedding_model": "qwen:1.8b",  # 嵌入模型（与joplinai.py保持一致）
     "chat_model": "qwen:1.8b",  # 聊天模型（用于问答）
     "db_path": getdirmain() / "data" / "joplin_vector_db",  # ChromaDB存储路径
     "max_retrieved_notes": 5,  # 最大检索笔记数量
