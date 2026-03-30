@@ -175,7 +175,7 @@ class VectorDBManager:
         known_dimensions = {
             "dengcao/bge-large-zh-v1.5": 1024,  # 根据日志显示实际是1024维
             "nomic-embed-text": 768,
-            "qwen:1.8b": 4096,
+            "qwen:1.8b": 2048,
             # 可以添加更多已知模型
         }
         
