@@ -559,55 +559,6 @@ class OptimizedJoplinQASystem(JoplinQASystem):
         return filtered
 
 # %% [markdown]
-# ### _filter_and_rank_notes(self, notes: List[Dict], question: str) -> List[Dict]
-
-    # %%
-    def _filter_and_rank_notes(self, notes: List[Dict], question: str) -> List[Dict]:
-        """过滤和重排序笔记"""
-        if not notes:
-            return []
-
-        # 1. 按相似度排序
-        notes.sort(key=lambda x: x["similarity"], reverse=True)
-
-        # 2. 应用阈值过滤
-        threshold = self.config.get("similarity_threshold", 0.6)
-        filtered = [note for note in notes if note["similarity"] >= threshold]
-
-        # 3. 如果过滤后太少，放宽条件
-        if len(filtered) < 2 and len(notes) > 0:
-            # 取前2个最相似的
-            filtered = notes[:2]
-
-        # 4. 基于问题关键词进一步过滤
-        keywords = self._extract_keywords(question)
-        if keywords:
-            scored_notes = []
-            for note in filtered:
-                score = note["similarity"]
-                content = note["content"].lower()
-
-                # 关键词匹配加分
-                for keyword in keywords:
-                    if keyword in content:
-                        score += 0.1
-
-                # 元数据匹配加分
-                metadata = note.get("metadata", {})
-                tags = metadata.get("tags", "").lower()
-                for keyword in keywords:
-                    if keyword in tags:
-                        score += 0.15
-
-                scored_notes.append((score, note))
-
-            # 重新按综合评分排序
-            scored_notes.sort(key=lambda x: x[0], reverse=True)
-            filtered = [note for _, note in scored_notes]
-
-        return filtered
-
-# %% [markdown]
 # ### _build_optimized_context_from_chunks(self, chunks: List[Dict], question: str) -> str
 
     # %%
@@ -733,7 +684,7 @@ class OptimizedJoplinQASystem(JoplinQASystem):
     
         for chunk in filtered_chunks:
             metadata = chunk.get("metadata", {})
-            original_note_id = metadata.get("original_note_id")
+            original_note_id = metadata.get("source_note_id")
             # 如果 original_note_id 不存在，尝试用其他逻辑获取（如从chunk_id解析）
             if not original_note_id:
                 # 备选方案：假设 chunk_id 格式为 “{note_id}_chunk_{index}”
@@ -747,7 +698,7 @@ class OptimizedJoplinQASystem(JoplinQASystem):
     
         # 2. 为每个原始笔记构建一条返回记录
         relevant_notes_for_return = []
-        for original_note_id, chunk_list in notes_dict.items():
+        for source_note_id, chunk_list in notes_dict.items():
             if not chunk_list:
                 continue
     
@@ -756,9 +707,9 @@ class OptimizedJoplinQASystem(JoplinQASystem):
             sample_metadata = sample_chunk.get("metadata", {})
     
             # 确定笔记标题：优先用 parent_note_title，其次用 note_title
-            note_title = sample_metadata.get("parent_note_title")
+            note_title = sample_metadata.get("source_note_title")
             if not note_title:
-                note_title = sample_metadata.get("note_title", "未知标题")
+                note_title = sample_metadata.get("source_note_title", "未知标题")
     
             # 计算该笔记下所有块中的最高相似度作为此笔记的关联度
             max_similarity = max(chunk.get("similarity", 0.0) for chunk in chunk_list)
@@ -773,13 +724,13 @@ class OptimizedJoplinQASystem(JoplinQASystem):
                     )
     
             note_entry = {
-                "note_id": original_note_id,  # 返回原始笔记ID
+                "note_id": source_note_id,  # 返回原始笔记ID
                 "title": note_title,  # 正确的来源笔记标题
                 "similarity": max_similarity,  # 笔记级别的关联度
                 "metadata": {
                     "aggregated_from_chunks": len(chunk_list),  # 包含几个相关块
                     "tags": ",".join(list(all_tags)),  # 聚合后的标签
-                    "parent_note_title": note_title,
+                    "source_note_title": note_title,
                 },
                 # 如果需要，可以附加关联的块ID列表
                 "related_chunk_ids": [
