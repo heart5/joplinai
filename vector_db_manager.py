@@ -206,44 +206,60 @@ class VectorDBManager:
 
     # %%
     def search_similar_chunks(self, query_embedding: list, top_k: int = 10):
-        """搜索最相似的文本块（而非整篇笔记）"""
-        # 使用向量相似度搜索
-        # 假设使用余弦相似度或欧氏距离
-        pipeline = [
-            {
-                "$vectorSearch": {
-                    "index": "vector_index",  # 您的向量索引名
-                    "path": "embedding",
-                    "queryVector": query_embedding,
-                    "numCandidates": top_k * 10,
-                    "limit": top_k,
-                }
-            },
-            {
-                "$project": {
-                    "_id": 0,
-                    "metadata": 1,
-                    "content": "$metadata.content",  # 直接返回块内容
-                    "similarity": { "$meta": "vectorSearchScore" }
-                }
-            }
-        ]
-
+        """搜索最相似的文本块（使用 ChromaDB 正确 API）"""
+        if not self.collection:
+            log.error("集合未加载")
+            return []
+    
         try:
-            results = list(self.collection.aggregate(pipeline))
-            # 格式化返回结果，明确这是“块”
+            # ChromaDB 的正确查询方法
+            results = self.collection.query(
+                query_embeddings=[query_embedding],
+                n_results=top_k,
+                include=["documents", "metadatas", "distances"] # 确保包含这些字段
+            )
+            
+            # 格式化返回结果
             similar_chunks = []
-            for r in results:
-                similar_chunks.append({
-                    "chunk_id": f"{r['metadata']['note_id']}_{r['metadata']['chunk_index']}",
-                    "note_id": r["metadata"]["note_id"],
-                    "content": r["content"],
-                    "similarity": r["similarity"],
-                    "metadata": r["metadata"]  # 包含所有原始元数据
-                })
-            return similar_chunks
+            
+            # 检查结果结构
+            if results and "ids" in results and results["ids"]:
+                # ChromaDB返回的ids、metadatas、documents、distances都是列表的列表
+                # 因为query_embeddings是单元素列表，所以取第一个元素
+                ids_list = results["ids"][0] if results["ids"] else []
+                metadatas_list = results["metadatas"][0] if results.get("metadatas") else []
+                documents_list = results["documents"][0] if results.get("documents") else []
+                distances_list = results["distances"][0] if results.get("distances") else []
+                
+                for i in range(len(ids_list)):
+                    chunk_id = ids_list[i]
+                    metadata = metadatas_list[i] if i < len(metadatas_list) else {}
+                    document = documents_list[i] if i < len(documents_list) else ""
+                    # **关键修正**：distances_list[i] 是单个距离值
+                    distance = distances_list[i] if i < len(distances_list) else 0.0
+                    
+                    # 将距离转换为相似度（余弦距离越小，相似度越高）
+                    # 注意：余弦距离范围是[0, 2]，但通常归一化到[0, 1]
+                    similarity = 1.0 - distance if distance <= 1.0 else 0.0
+                    
+                    similar_chunks.append({
+                        "chunk_id": chunk_id,
+                        "note_id": metadata.get("note_id", ""),
+                        "content": document,
+                        "similarity": similarity,
+                        "metadata": metadata
+                    })
+                
+                log.info(f"成功检索到 {len(similar_chunks)} 个相关块")
+                return similar_chunks
+            else:
+                log.warning("未检索到相关块")
+                return []
+                
         except Exception as e:
             log.error(f"向量搜索失败: {e}")
+            import traceback
+            log.error(f"详细错误堆栈:\n{traceback.format_exc()}")
             return []
 
 # %% [markdown]
