@@ -87,6 +87,7 @@ CONFIG["collection_name"] = f"joplin_{model_name}"
 # %% [markdown]
 # ## 问答系统核心
 
+
 # %%
 class JoplinQASystem:
     """Joplin笔记问答系统"""
@@ -331,6 +332,10 @@ class JoplinQASystem:
 
         return random.choice(generic_responses)
 
+# %% [markdown]
+# ### _extract_sources(self, notes: List[Dict]) -> List[Dict]
+
+    # %%
     def _extract_sources(self, notes: List[Dict]) -> List[Dict]:
         """提取来源信息"""
         sources = []
@@ -381,13 +386,14 @@ class JoplinQASystem:
                 "conversation_history_count": len(self.conversation_history),
             }
 
+
 # %% [markdown]
 # ## 优化的问答系统核心OptimizedJoplinQASystem(JoplinQASystem)
+
 
 # %%
 class OptimizedJoplinQASystem(JoplinQASystem):
     """优化版的问答系统，针对个人笔记"""
-
 
 # %% [markdown]
 # ### __init__(self, config: Dict)
@@ -404,10 +410,13 @@ class OptimizedJoplinQASystem(JoplinQASystem):
         # 关键修复：初始化 embedding_generator
         # 需要导入或创建 EmbeddingGenerator 类（参考 joplinai.py 中的使用）
         from embedding_generator import EmbeddingGenerator  # 请根据实际模块名调整
+
         self.embedding_generator = EmbeddingGenerator(
             model_name=config["embedding_model"],
         )
-        log.info("OptimizedJoplinQASystem 初始化完成，已加载 embedding_generator")
+        log.info(
+            f"OptimizedJoplinQASystem 初始化完成，已加载 embedding_generator，嵌入模型为：{config['embedding_model']}"
+        )
 
 # %% [markdown]
 # ### ask(self, question: str) -> Dict
@@ -417,39 +426,48 @@ class OptimizedJoplinQASystem(JoplinQASystem):
         """提问入口，现在基于块进行检索和回答。"""
         # 1. 预处理问题
         processed_question = self._preprocess_question(question)
-        
+
         # 2. 获取问题嵌入
         query_embedding = self.embedding_generator.get_merged_embedding(
             processed_question, self.config.get("enable_deepseek_embed", False)
         )
         if not query_embedding:
             return {"answer": "无法生成问题嵌入，请检查配置。", "relevant_chunks": []}
-        
+
         # 3. 搜索相似块（注意：调用的是 search_similar_chunks）
         similar_chunks = self.vector_db.search_similar_chunks(
             query_embedding,
-            top_k=self.config.get("max_retrieved_chunks", 15)  # 可配置
+            top_k=self.config.get("max_retrieved_chunks", 15),  # 可配置
         )
-        
+
         # 4. 过滤和重排序块
         filtered_chunks = self._filter_and_rank_chunks(similar_chunks, question)
-        
+
         # 5. 构建优化上下文（基于块）
         context = self._build_optimized_context_from_chunks(filtered_chunks, question)
         log.debug(f"过滤后块数: {len(filtered_chunks)}")
         log.debug(f"构建的上下文长度: {len(context)}")
-        log.debug(f"上下文预览 (前500字符): {context[:500]}")
-        
+        # log.debug(f"上下文预览 (前500字符): {context[:500]}")
+
         # 6. 生成答案
         answer = self._generate_optimized_answer(question, context)
         final_answer = self._postprocess_answer(answer)
-        
+
+        # 构建与原始JoplinQASystem兼容的返回字典
+        # 关键：将 `filtered_chunks` 转换为 `relevant_notes` 格式
+        relevant_notes_for_return = self._get_relevant_notes_for_return(filtered_chunks)
+
+        # 构建来源信息（sources）
+        sources = self._extract_sources(relevant_notes_for_return)
+
         return {
             "question": question,
             "answer": final_answer,
+            "relevant_notes": relevant_notes_for_return,  # <-- 必须包含此键
+            "sources": sources,
             "relevant_chunks": filtered_chunks,  # 返回块信息
             "context_length": len(context),
-            "is_based_on_notes": bool(filtered_chunks),
+            "is_based_on_notes": len(filtered_chunks) > 0,  # 如果有相关块，则基于笔记
         }
 
 # %% [markdown]
@@ -508,20 +526,21 @@ class OptimizedJoplinQASystem(JoplinQASystem):
         """过滤和重排序检索到的文本块。"""
         if not chunks:
             return []
-        log.debug(f"原始检索到 {len(chunks)} 个块，相似度样例: {[c.get('similarity') for c in chunks[:3]]}")
+        log.debug(
+            f"原始检索到 {len(chunks)} 个块，相似度样例: {[c.get('similarity') for c in chunks[:3]]}"
+        )
 
-    
         # 1. 按相似度排序
         chunks.sort(key=lambda x: x["similarity"], reverse=True)
-    
+
         # 2. 应用阈值过滤
         threshold = self.config.get("similarity_threshold", 0.6)
         filtered = [chunk for chunk in chunks if chunk["similarity"] >= threshold]
-    
+
         # 3. 如果过滤后太少，放宽条件
         if len(filtered) < 3 and len(chunks) > 0:
             filtered = chunks[:3]
-    
+
         # 4. 基于问题关键词进一步过滤（可选）
         keywords = self._extract_keywords(question)
         if keywords:
@@ -536,6 +555,7 @@ class OptimizedJoplinQASystem(JoplinQASystem):
             scored_chunks.sort(key=lambda x: x[0], reverse=True)
             filtered = [chunk for _, chunk in scored_chunks]
 
+        return filtered
 
 # %% [markdown]
 # ### _filter_and_rank_notes(self, notes: List[Dict], question: str) -> List[Dict]
@@ -590,42 +610,45 @@ class OptimizedJoplinQASystem(JoplinQASystem):
 # ### _build_optimized_context_from_chunks(self, chunks: List[Dict], question: str) -> str
 
     # %%
-    def _build_optimized_context_from_chunks(self, chunks: List[Dict], question: str) -> str:
+    def _build_optimized_context_from_chunks(
+        self, chunks: List[Dict], question: str
+    ) -> str:
         """基于检索到的块构建问答上下文。"""
         if not chunks:
             return "没有找到相关笔记内容。"
-        
+
         # 按原始笔记对块进行分组，便于组织
         from collections import defaultdict
+
         notes_dict = defaultdict(list)
         for chunk in chunks:
             note_id = chunk["note_id"]
             notes_dict[note_id].append(chunk)
-        
+
         # 构建系统提示
         system_prompt = """你是我个人的笔记助手，基于Joplin笔记回答问题。
     笔记记录了工作（轻行动功能饮料、习龙酱酒等）、学习、生活、想法等各种内容。
     请基于以下相关笔记片段（可能来自同一篇笔记的不同部分）回答问题。
     如果笔记中没有相关信息，请如实告知。"""
-        
+
         # 为每个原始笔记构建上下文部分
         note_contexts = []
         for note_id, chunk_list in notes_dict.items():
             # 取该笔记的第一个块获取标题等信息（假设所有块metadata一致）
-            sample_chunk = chunk_list
+            sample_chunk = chunk_list[0]
             note_title = sample_chunk["metadata"].get("parent_note_title", "未知标题")
             note_tags = sample_chunk["metadata"].get("parent_note_tags", "")
-            
+
             # 合并该笔记的所有相关块内容
             combined_content = "\n---\n".join([c["content"] for c in chunk_list])
-            
+
             note_context = f"""【笔记：{note_title}】
     标签：{note_tags}
     相关内容：
     {combined_content}
     """
             note_contexts.append(note_context)
-        
+
         # 组合完整上下文
         context = f"""{system_prompt}
     
@@ -635,12 +658,14 @@ class OptimizedJoplinQASystem(JoplinQASystem):
     我的问题：{question}
     
     请基于以上笔记内容回答，如果笔记中没有相关信息，请说明。"""
-        
+
         # 限制长度
-        max_len = self.config.get("context_max_length", 2000)  # 可适当提高，因为现在信息更密集
+        max_len = self.config.get(
+            "context_max_length", 2000
+        )  # 可适当提高，因为现在信息更密集
         if len(context) > max_len:
             context = context[:max_len] + "..."
-        
+
         return context
 
 # %% [markdown]
@@ -694,6 +719,76 @@ class OptimizedJoplinQASystem(JoplinQASystem):
             context = context[:max_len] + "..."
 
         return context
+
+# %% [markdown]
+# ### _get_relevant_notes_for_return(filtered_chunks: List)
+
+    # %%
+    def _get_relevant_notes_for_return(self, filtered_chunks: List):
+        # 1. 按原始笔记ID (original_note_id) 对块进行分组
+        from collections import defaultdict
+    
+        notes_dict = defaultdict(list)
+    
+        for chunk in filtered_chunks:
+            metadata = chunk.get("metadata", {})
+            original_note_id = metadata.get("original_note_id")
+            # 如果 original_note_id 不存在，尝试用其他逻辑获取（如从chunk_id解析）
+            if not original_note_id:
+                # 备选方案：假设 chunk_id 格式为 “{note_id}_chunk_{index}”
+                chunk_id = chunk.get("chunk_id", "")
+                if "_chunk_" in chunk_id:
+                    original_note_id = chunk_id.split("_chunk_")
+                else:
+                    original_note_id = chunk_id  # 降级处理
+    
+            notes_dict[original_note_id].append(chunk)
+    
+        # 2. 为每个原始笔记构建一条返回记录
+        relevant_notes_for_return = []
+        for original_note_id, chunk_list in notes_dict.items():
+            if not chunk_list:
+                continue
+    
+            # 取第一个块获取笔记标题（假设同笔记的所有块metadata一致）
+            sample_chunk = chunk_list[0]
+            sample_metadata = sample_chunk.get("metadata", {})
+    
+            # 确定笔记标题：优先用 parent_note_title，其次用 note_title
+            note_title = sample_metadata.get("parent_note_title")
+            if not note_title:
+                note_title = sample_metadata.get("note_title", "未知标题")
+    
+            # 计算该笔记下所有块中的最高相似度作为此笔记的关联度
+            max_similarity = max(chunk.get("similarity", 0.0) for chunk in chunk_list)
+    
+            # 可以聚合所有块的标签等信息（可选）
+            all_tags = set()
+            for chunk in chunk_list:
+                tags_str = chunk.get("metadata", {}).get("tags", "")
+                if tags_str:
+                    all_tags.update(
+                        tag.strip() for tag in tags_str.split(",") if tag.strip()
+                    )
+    
+            note_entry = {
+                "id": original_note_id,  # 返回原始笔记ID
+                "title": note_title,  # 正确的来源笔记标题
+                "similarity": max_similarity,  # 笔记级别的关联度
+                "metadata": {
+                    "aggregated_from_chunks": len(chunk_list),  # 包含几个相关块
+                    "tags": list(all_tags),  # 聚合后的标签
+                    "parent_note_title": note_title,
+                },
+                # 如果需要，可以附加关联的块ID列表
+                "related_chunk_ids": [
+                    chunk.get("chunk_id") for chunk in chunk_list if chunk.get("chunk_id")
+                ],
+            }
+            relevant_notes_for_return.append(note_entry)
+    
+        # 3. 按相似度排序
+        return relevant_notes_for_return.sort(key=lambda x: x["similarity"], reverse=True)
 
 # %% [markdown]
 # ### _extract_relevant_snippet(self, content: str, question: str, max_length: int = 300) -> str
@@ -866,6 +961,7 @@ class OptimizedJoplinQASystem(JoplinQASystem):
 # %% [markdown]
 # ## 命令行界面
 
+
 # %%
 def parse_args():
     """解析命令行参数"""
@@ -902,8 +998,10 @@ def parse_args():
 
     return parser.parse_args()
 
+
 # %% [markdown]
 # ## 交互式界面
+
 
 # %%
 def interactive_mode(qa_system: JoplinQASystem):
@@ -977,8 +1075,10 @@ def interactive_mode(qa_system: JoplinQASystem):
         except Exception as e:
             print(f"\n错误: {e}")
 
+
 # %% [markdown]
 # ## 主函数
+
 
 # %%
 @timethis
@@ -1036,6 +1136,7 @@ def main():
     ):
         interactive_mode(qa_system)
         return
+
 
 # %% [markdown]
 # ## 主程序入口
