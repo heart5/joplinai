@@ -69,7 +69,7 @@ CONFIG = {
     "chat_model": "qwen:1.8b",  # 聊天模型（用于问答）
     "db_path": getdirmain() / "data" / "joplin_vector_db",  # ChromaDB存储路径
     "max_retrieved_notes": 10,  # 最大检索笔记数量
-    "similarity_threshold": 0.5,  # 相似度阈值
+    "similarity_threshold": 0.3,  # 相似度阈值
     "enable_deepseek": False,  # 是否使用DeepSeek进行问答
     "deepseek_api_key": getinivaluefromcloud("joplinai", "deepseek_token"),
     "deepseek_chat_model": "deepseek-chat",
@@ -390,6 +390,26 @@ class OptimizedJoplinQASystem(JoplinQASystem):
 
 
 # %% [markdown]
+# ### __init__(self, config: Dict)
+
+    # %%
+    def __init__(self, config: Dict):
+        # 首先，调用父类的初始化（如果继承了 JoplinQASystem）
+        super().__init__(config)  # 如果 OptimizedJoplinQASystem 继承自 JoplinQASystem
+        # 或者手动初始化父类的必要属性：
+        # self.config = config
+        # self.vector_db = VectorDBManager(...)
+        # self.conversation_history = []
+
+        # 关键修复：初始化 embedding_generator
+        # 需要导入或创建 EmbeddingGenerator 类（参考 joplinai.py 中的使用）
+        from embedding_generator import EmbeddingGenerator  # 请根据实际模块名调整
+        self.embedding_generator = EmbeddingGenerator(
+            model_name=config["embedding_model"],
+        )
+        log.info("OptimizedJoplinQASystem 初始化完成，已加载 embedding_generator")
+
+# %% [markdown]
 # ### ask(self, question: str) -> Dict
 
     # %%
@@ -407,7 +427,7 @@ class OptimizedJoplinQASystem(JoplinQASystem):
         
         # 3. 搜索相似块（注意：调用的是 search_similar_chunks）
         similar_chunks = self.vector_db.search_similar_chunks(
-            query_embedding, 
+            query_embedding,
             top_k=self.config.get("max_retrieved_chunks", 15)  # 可配置
         )
         
@@ -416,6 +436,9 @@ class OptimizedJoplinQASystem(JoplinQASystem):
         
         # 5. 构建优化上下文（基于块）
         context = self._build_optimized_context_from_chunks(filtered_chunks, question)
+        log.debug(f"过滤后块数: {len(filtered_chunks)}")
+        log.debug(f"构建的上下文长度: {len(context)}")
+        log.debug(f"上下文预览 (前500字符): {context[:500]}")
         
         # 6. 生成答案
         answer = self._generate_optimized_answer(question, context)
@@ -485,6 +508,8 @@ class OptimizedJoplinQASystem(JoplinQASystem):
         """过滤和重排序检索到的文本块。"""
         if not chunks:
             return []
+        log.debug(f"原始检索到 {len(chunks)} 个块，相似度样例: {[c.get('similarity') for c in chunks[:3]]}")
+
     
         # 1. 按相似度排序
         chunks.sort(key=lambda x: x["similarity"], reverse=True)
