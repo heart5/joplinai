@@ -321,22 +321,24 @@ def process_single_note(
 
             # 存入向量数据库（以块为单位）
             try:
-                vector_db.upsert_note(
-                    note_id=f"{note.id}_chunk_{base_metadata['chunk_index']}",  # 例如: f"{note.id}_chunk_{chunk_index}"
+                # 构建完整的块元数据
+                metadata = {
+                    **base_metadata,
+                    **enhanced_metadata,  # 包含 deepseek 生成的 summary 和 tags
+                    # "parent_note_title": note.title,
+                    "original_note_id": note.id,
+                }
+                vector_db.upsert_chunk(
+                    chunk_id=f"{note.id}_chunk_{base_metadata['chunk_index']}",  # 例如: f"{note.id}_chunk_{chunk_index}"
                     text=chunk_content,
                     embedding=embedding,
-                    tags=enhanced_tags,  # 或 local_tags
-                    metadata={
-                        **base_metadata,
-                        **enhanced_metadata,  # 包含 deepseek 生成的 summary 和 tags
-                        "note_title": note.title,
-                        "original_note_id": note.id,
-                    },  # 构建完整的块元数据
+                    tags=enhanced_tags,  # 或 local_tags，list类型
+                    metadata=metadata,
                 )
                 successful_chunks += 1
-                log.info(f"{enhanced_metadata}")
+                log.info(f"{metadata}")
             except Exception as e:
-                log.error(f"存储块嵌入失败: {e}")
+                log.error(f"存储块嵌入失败: {e}", exc_info=True)
 
         if successful_chunks > 0:
             log.info(
