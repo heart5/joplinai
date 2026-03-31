@@ -258,7 +258,7 @@ class EmbeddingGenerator:
             date_match = re.search(r'(\d{4}年\d{1,2}月\d{1,2}日)', chunk_content)
             chunk_metadata = {
                 "chunk_index": idx,
-                "content": chunk_content,
+                # "content": chunk_content,
                 "parent_note_title": note_title,
                 "parent_note_tags": note_tags,
                 "estimated_date": date_match.group(1) if date_match else "",
