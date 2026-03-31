@@ -128,7 +128,7 @@ class VectorDBManager:
                     "dimension": self._get_model_dimension(self.embedding_model),
                 },
             )
-    
+
 
 # %% [markdown]
 # ### _load_collection(self)
@@ -163,7 +163,7 @@ class VectorDBManager:
                 log.info(f"成功创建新集合: {self.collection_name}")
             except Exception as create_e:
                 log.error(f"创建集合也失败: {create_e}")
-    
+
 
 # %% [markdown]
 # ### _get_model_dimension(self, model_name: str) -> int
@@ -202,17 +202,62 @@ class VectorDBManager:
             return 1024
 
 # %% [markdown]
-# ### upsert_note(self, note_id: str, text: str, embedding: List[float], tags: List[str], metadata: Dict)
+# ### search_similar_chunks(self, query_embedding: list, top_k: int = 10)
 
     # %%
-    def upsert_note(self, note_id: str, text: str, embedding: List[float], 
-                    tags: List[str], metadata: Dict):
+    def search_similar_chunks(self, query_embedding: list, top_k: int = 10):
+        """搜索最相似的文本块（而非整篇笔记）"""
+        # 使用向量相似度搜索
+        # 假设使用余弦相似度或欧氏距离
+        pipeline = [
+            {
+                "$vectorSearch": {
+                    "index": "vector_index",  # 您的向量索引名
+                    "path": "embedding",
+                    "queryVector": query_embedding,
+                    "numCandidates": top_k * 10,
+                    "limit": top_k,
+                }
+            },
+            {
+                "$project": {
+                    "_id": 0,
+                    "metadata": 1,
+                    "content": "$metadata.content",  # 直接返回块内容
+                    "similarity": { "$meta": "vectorSearchScore" }
+                }
+            }
+        ]
+
+        try:
+            results = list(self.collection.aggregate(pipeline))
+            # 格式化返回结果，明确这是“块”
+            similar_chunks = []
+            for r in results:
+                similar_chunks.append({
+                    "chunk_id": f"{r['metadata']['note_id']}_{r['metadata']['chunk_index']}",
+                    "note_id": r["metadata"]["note_id"],
+                    "content": r["content"],
+                    "similarity": r["similarity"],
+                    "metadata": r["metadata"]  # 包含所有原始元数据
+                })
+            return similar_chunks
+        except Exception as e:
+            log.error(f"向量搜索失败: {e}")
+            return []
+
+# %% [markdown]
+# ### upsert_note(self, note_id: str, text: str, embedding: List[float]
+
+    # %%
+    def upsert_note(self, note_id: str, text: str, embedding: List[float],
+                     tags: List[str], metadata: Dict):
         """插入/更新笔记向量数据"""
-        # ========== joplinai.py 的功能 ==========
         if not self.collection:
             log.error("集合未加载")
             return
-        
+
+        # 确保使用 upsert 方法
         self.collection.upsert(
             ids=[note_id],
             documents=[text],
@@ -221,10 +266,13 @@ class VectorDBManager:
                 {
                     "note_id": note_id,
                     "tags": ",".join(tags),
-                    "summary": metadata.get("summary"),
+                    "summary": metadata.get("chunk_summary"),
+                    # 确保这里包含了所有来自 joplinai.py 的增强元数据
+                    # 例如：metadata.get('chunk_summary'), metadata.get('enhanced_tags') 等
                 }
             ],
         )
+        log.info(f"成功存储笔记块: {note_id}")
 
 # %% [markdown]
 # ### delete_note(self, note_id: str)
@@ -238,7 +286,7 @@ class VectorDBManager:
             return
         
         self.collection.delete(ids=[note_id])
-   
+
 
 # %% [markdown]
 # ### search_similar_notes(self, query: str, n_results: int = 5) -> List[Dict]
@@ -363,10 +411,10 @@ class VectorDBManager:
                 except Exception as e:
                     log.warning(f"第{attempt + 1}次尝试生成嵌入失败: {str(e)[:100]}")
                     time.sleep(1)
-            
+
             log.error("生成查询嵌入最终失败")
             return []
-            
+
         except Exception as e:
             log.error(f"生成查询嵌入失败: {e}")
             return []
@@ -380,12 +428,12 @@ class VectorDBManager:
         # ========== joplin_qa.py 的功能 ==========
         if not self.collection:
             return None
-        
+
         try:
             results = self.collection.get(
                 ids=[note_id], include=["documents", "metadatas"]
             )
-            
+
             if results and results["ids"]:
                 return {
                     "note_id": note_id,
