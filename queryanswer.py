@@ -343,6 +343,7 @@ class JoplinQASystem:
             metadata = note.get("metadata", {})
             source = {
                 "note_id": note["note_id"],
+                "title": note["title"],
                 "similarity": note["similarity"],
                 "tags": metadata.get("tags", "").split(",")
                 if metadata.get("tags")
@@ -772,12 +773,12 @@ class OptimizedJoplinQASystem(JoplinQASystem):
                     )
     
             note_entry = {
-                "id": original_note_id,  # 返回原始笔记ID
+                "note_id": original_note_id,  # 返回原始笔记ID
                 "title": note_title,  # 正确的来源笔记标题
                 "similarity": max_similarity,  # 笔记级别的关联度
                 "metadata": {
                     "aggregated_from_chunks": len(chunk_list),  # 包含几个相关块
-                    "tags": list(all_tags),  # 聚合后的标签
+                    "tags": ",".join(list(all_tags)),  # 聚合后的标签
                     "parent_note_title": note_title,
                 },
                 # 如果需要，可以附加关联的块ID列表
@@ -788,7 +789,9 @@ class OptimizedJoplinQASystem(JoplinQASystem):
             relevant_notes_for_return.append(note_entry)
     
         # 3. 按相似度排序
-        return relevant_notes_for_return.sort(key=lambda x: x["similarity"], reverse=True)
+        relevant_notes_for_return.sort(key=lambda x: x["similarity"], reverse=True)
+
+        return relevant_notes_for_return
 
 # %% [markdown]
 # ### _extract_relevant_snippet(self, content: str, question: str, max_length: int = 300) -> str
@@ -1059,11 +1062,15 @@ def interactive_mode(qa_system: JoplinQASystem):
 
             # 显示来源信息
             if result["is_based_on_notes"] and result["relevant_notes"]:
-                print(f"\n来源 ({len(result['relevant_notes'])}条相关笔记):")
+                print(f"\n来源 ({len(result['relevant_notes'])}块相关文本块):")
                 for i, note in enumerate(result["relevant_notes"], 1):
                     similarity = note["similarity"]
                     tags = note["metadata"].get("tags", "无标签")
                     print(f"  {i}. 相似度: {similarity:.2f} | 标签: {tags}")
+            if result["sources"]:
+                print(f"\n以上文本块来源 ({len(result['sources'])}条相关笔记):")
+                for i, note in enumerate(result["sources"], 1):
+                    print(f"  {i}. 《{note['title']}》")
 
             print(
                 f"\n[处理时间: {elapsed_time:.2f}秒 | 上下文长度: {result.get('context_length', 0)}字符]"
@@ -1124,7 +1131,7 @@ def main():
         print(f"\n答案: {result['answer']}")
 
         if result["is_based_on_notes"] and result["relevant_notes"]:
-            print(f"\n基于 {len(result['relevant_notes'])} 条相关笔记:")
+            print(f"\n基于 {len(result['relevant_notes'])} 条相关文本块:")
             for note in result["relevant_notes"]:
                 print(f"  - 相似度: {note['similarity']:.2f}")
 
