@@ -263,32 +263,37 @@ class VectorDBManager:
             return []
 
 # %% [markdown]
-# ### upsert_note(self, note_id: str, text: str, embedding: List[float]
+# ### upsert_chunk(self, note_id: str, text: str, embedding: List[float]
 
     # %%
-    def upsert_note(self, note_id: str, text: str, embedding: List[float],
+    def upsert_chunk(self, chunk_id: str, text: str, embedding: List[float],
                      tags: List[str], metadata: Dict):
         """插入/更新笔记向量数据"""
         if not self.collection:
             log.error("集合未加载")
             return
 
+        # 构建要存储的元数据，合并所有必要信息
+        db_metadata = {
+            "chunk_id": chunk_id,           # 当前块的ID
+            "tags": ",".join(tags),
+            "summary": metadata.get("chunk_summary", ""),
+            # 关键：保留从 joplinai.py 传入的完整元数据
+            "parent_note_title": metadata.get("parent_note_title", ""),
+            "original_note_id": metadata.get("original_note_id", ""),
+            # "note_title": metadata.get("note_title", ""), # 也可能叫 note_title
+            # 可以根据需要添加其他字段，如 chunk_index
+            "chunk_index": metadata.get("chunk_index", 0),
+        }
+
         # 确保使用 upsert 方法
         self.collection.upsert(
-            ids=[note_id],
+            ids=[chunk_id],
             documents=[text],
             embeddings=[embedding],
-            metadatas=[
-                {
-                    "note_id": note_id,
-                    "tags": ",".join(tags),
-                    "summary": metadata.get("chunk_summary"),
-                    # 确保这里包含了所有来自 joplinai.py 的增强元数据
-                    # 例如：metadata.get('chunk_summary'), metadata.get('enhanced_tags') 等
-                }
-            ],
+            metadatas=[db_metadata],
         )
-        log.info(f"成功存储笔记块: {note_id}")
+        log.info(f"成功存储笔记块: {chunk_id}, 来源笔记: 《{db_metadata.get('parent_note_title')}》")
 
 # %% [markdown]
 # ### delete_note(self, note_id: str)
