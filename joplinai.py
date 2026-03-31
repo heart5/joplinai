@@ -209,7 +209,7 @@ def save_process_state(state: Dict, state_path: Path):
 # %% [markdown]
 # ### 笔记处理核心逻辑（增量更新+入库）
 # %% [markdown]
-# #### process_single_note(note, vector_db: VectorDBManager, model_name: str, config: Dict) -> bool
+# #### process_single_note(note, vector_db: VectorDBManager, embedding_generator: EmbeddingGenerator, config: Dict,) -> bool
 # %%
 def process_single_note(
     note,
@@ -235,6 +235,7 @@ def process_single_note(
         log.debug(f"原始正文长度: {len(note.body)} 字符")
 
         # 清理文本
+        # cleaned_body = note.body
         cleaned_body = clean_text(note.body)
         log.debug(f"清理后正文长度: {len(cleaned_body)} 字符")
         log.debug(f"清理后正文预览: {cleaned_body[:200]}...")
@@ -246,16 +247,18 @@ def process_single_note(
         else:
             text = f"{note.title}\n{cleaned_body}"
 
-        # 生成嵌入
-        embedding = EmbeddingGenerator(config["embedding_model"]).get_merged_embedding(
-            text, config["enable_deepseek_embed"]
-        )
-        if not embedding:  # 嵌入生成失败
-            log.error(f"笔记《{note.title}》（{note.id}） 嵌入生成失败，跳过")
-            return False
-
         # 获取标签
         local_tags = get_tag_titles(note.id)  # 项目函数：获取笔记标签列表
+        tags_str = ",".join(local_tags) if local_tags else ""
+        # 关键修改：使用新的语义分块函数
+        chunk_dicts = embedding_generator.split_into_semantic_chunks(
+            text=cleaned_body, note_title=note.title, note_tags=tags_str
+        )
+
+        if not chunk_dicts:
+            log.warning(f"笔记《{note.title}》分块后无内容，跳过。")
+            return False
+
         # -------------------------- DeepSeek增强加工（可选） --------------------------
         enhanced_metadata = {}
         # enhanced_metadata["note_id"] = note.id
@@ -267,8 +270,9 @@ def process_single_note(
                     text,
                     task="summary",
                     model=config.get("deepseek_chat_model", "deepseek-chat"),
+                    use_cache=True,  # 启用缓存
                 )
-                enhanced_metadata["summary"] = summary or ""  # 存入摘要
+                enhanced_metadata["chunk_summary"] = summary or ""  # 存入摘要
         except Exception as e:
             log.error(f"笔记《{note.title}》（{note.id}） 嵌入生成失败，跳过。{e}")
             return false
@@ -279,6 +283,7 @@ def process_single_note(
                     text,
                     task="tags",
                     model=config.get("deepseek_chat_model", "deepseek-chat"),
+                    use_cache=True,  # 启用缓存
                 )
                 deepseek_tags = (
                     [t.strip() for t in tags_str.split(",")] if tags_str else []
@@ -296,19 +301,51 @@ def process_single_note(
         log.debug(f"笔记《{note.title}》（{note.id}）增强元数据: {enhanced_metadata}")
 
         log.info(
-            f"笔记《{note.title}》（{note.id}）准备入库，嵌入维度：{len(embedding)}"
+            f"笔记《{note.title}》（{note.id}）准备入库，嵌入维度：{embedding_generator.embedding_dim}"
         )
-        # ------ 入库（本地向量库+增强元数据），存在则更新，不存在则新增 ------
-        vector_db.upsert_note(
-            note_id=note.id,
-            text=text,
-            embedding=embedding,
-            tags=enhanced_tags,
-            metadata=enhanced_metadata,
-        )
-        log.info(f"笔记《{note.title}》（{note.id}）向量化处理完成！")
-        return True
 
+        successful_chunks = 0
+        for chunk_info in chunk_dicts:
+            chunk_content = chunk_info["content"]
+            base_metadata = chunk_info["metadata"]
+
+            # 为每个块生成嵌入
+            embedding = embedding_generator.get_merged_embedding(
+                chunk_content, config["enable_deepseek_embed"]
+            )
+            if not embedding:
+                log.warning(
+                    f"笔记《{note.title}》第{base_metadata['chunk_index']}块嵌入生成失败，跳过此块。"
+                )
+                continue
+
+            # 存入向量数据库（以块为单位）
+            try:
+                vector_db.upsert_note(
+                    note_id=f"{note.id}_chunk_{base_metadata['chunk_index']}",  # 例如: f"{note.id}_chunk_{chunk_index}"
+                    text=chunk_content,
+                    embedding=embedding,
+                    tags=enhanced_tags,  # 或 local_tags
+                    metadata={
+                        **base_metadata,
+                        **enhanced_metadata,  # 包含 deepseek 生成的 summary 和 tags
+                        "note_title": note.title,
+                        "original_note_id": note.id,
+                    },  # 构建完整的块元数据
+                )
+                successful_chunks += 1
+                log.info(f"{enhanced_metadata}")
+            except Exception as e:
+                log.error(f"存储块嵌入失败: {e}")
+
+        if successful_chunks > 0:
+            log.info(
+                f"笔记《{note.title}》处理完成，成功存储 {successful_chunks}/{len(chunk_dicts)} 个块。"
+            )
+            return True
+        else:
+            log.error(f"笔记《{note.title}》所有块处理均失败。")
+            return False
     except Exception as e:
         log.error(
             f"向量化处理笔记《{note.title}》（{note.id}）失败: {e}", exc_info=True
@@ -334,8 +371,16 @@ def process_notes_incremental(notebook_title: str, config: Dict):
         log.info(
             f"向量数据库初始化完成，集合: {process_notes_incremental.vector_db.collection_name}"
         )
-
     vector_db = process_notes_incremental.vector_db
+
+    # 初始化向量数据库（在整个处理过程中只初始化一次）
+    if not hasattr(process_notes_incremental, "embedding_gen"):
+        process_notes_incremental.embedding_gen = EmbeddingGenerator(
+            config["embedding_model"]
+        )
+        log.info(f"嵌入生成器初始化完成")
+
+    embedding_gen = process_notes_incremental.embedding_gen
 
     # 加载处理状态
     process_state = load_process_state(config["state_path"])
@@ -385,7 +430,7 @@ def process_notes_incremental(notebook_title: str, config: Dict):
                     process_single_note,
                     note,
                     vector_db,
-                    model_name,
+                    embedding_gen,
                     config,
                 )
                 future_to_note[future] = (note_id, current_update_time, current_hash)
