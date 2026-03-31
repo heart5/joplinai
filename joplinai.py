@@ -209,15 +209,15 @@ def save_process_state(state: Dict, state_path: Path):
 # %% [markdown]
 # ### 笔记处理核心逻辑（增量更新+入库）
 # %% [markdown]
-# #### process_single_note(note, vector_db: VectorDBManager, embedding_generator: EmbeddingGenerator, config: Dict,) -> bool
+# #### process_note_chunks(note, vector_db: VectorDBManager, embedding_generator: EmbeddingGenerator, config: Dict,) -> bool
 # %%
-def process_single_note(
+def process_note_chunks(
     note,
     vector_db: VectorDBManager,
     embedding_generator: EmbeddingGenerator,
     config: Dict,
 ) -> bool:
-    """处理单条笔记（清理→嵌入→入库），返回是否成功"""
+    """处理单条笔记（清理→分块→嵌入→入库），返回是否成功"""
     try:
         # 获取笔记完整信息（含更新时间）
         note_detail = getnote(note.id)
@@ -301,7 +301,7 @@ def process_single_note(
         log.debug(f"笔记《{note.title}》（{note.id}）增强元数据: {enhanced_metadata}")
 
         log.info(
-            f"笔记《{note.title}》（{note.id}）准备入库，嵌入维度：{embedding_generator.embedding_dim}"
+            f"笔记《{note.title}》（{note.id}）准备分块入库，嵌入维度：{embedding_generator.embedding_dim}"
         )
 
         successful_chunks = 0
@@ -325,8 +325,7 @@ def process_single_note(
                 metadata = {
                     **base_metadata,
                     **enhanced_metadata,  # 包含 deepseek 生成的 summary 和 tags
-                    # "parent_note_title": note.title,
-                    "original_note_id": note.id,
+                    "source_note_id": note.id,
                 }
                 vector_db.upsert_chunk(
                     chunk_id=f"{note.id}_chunk_{base_metadata['chunk_index']}",  # 例如: f"{note.id}_chunk_{chunk_index}"
@@ -338,7 +337,10 @@ def process_single_note(
                 successful_chunks += 1
                 log.info(f"{metadata}")
             except Exception as e:
-                log.error(f"存储块嵌入失败: {e}", exc_info=True)
+                log.error(
+                    f"笔记《{note.title}》第{base_metadata['chunk_index']}块存储块失败: {e}",
+                    exc_info=True,
+                )
 
         if successful_chunks > 0:
             log.info(
@@ -429,7 +431,7 @@ def process_notes_incremental(notebook_title: str, config: Dict):
             ):
                 # 提交任务到线程池/进程池
                 future = executor.submit(
-                    process_single_note,
+                    process_note_chunks,
                     note,
                     vector_db,
                     embedding_gen,
@@ -476,7 +478,9 @@ def process_notes_incremental(notebook_title: str, config: Dict):
         "notebook_title": notebook_title,
         "total_notes": len(notes),
         "updated_count": updated_count,
-        "failed_notes": failed_notes,  # 这是一个列表
+        "failed_notes": list(
+            set(failed_notes)
+        ),  # 这是一个集合，为了去重，因为可能是该笔记的多个块出错
         "new_time_notes": new_time_notes,  # 需要更新的笔记标题列表
         "process_time": datetime.now().isoformat(),
     }
