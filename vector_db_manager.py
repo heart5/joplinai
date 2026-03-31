@@ -279,8 +279,8 @@ class VectorDBManager:
             "tags": ",".join(tags),
             "summary": metadata.get("chunk_summary", ""),
             # 关键：保留从 joplinai.py 传入的完整元数据
-            "parent_note_title": metadata.get("parent_note_title", ""),
-            "original_note_id": metadata.get("original_note_id", ""),
+            "source_note_title": metadata.get("source_note_title", ""),
+            "source_note_id": metadata.get("source_note_id", ""),
             # "note_title": metadata.get("note_title", ""), # 也可能叫 note_title
             # 可以根据需要添加其他字段，如 chunk_index
             "chunk_index": metadata.get("chunk_index", 0),
@@ -293,7 +293,7 @@ class VectorDBManager:
             embeddings=[embedding],
             metadatas=[db_metadata],
         )
-        log.info(f"成功存储笔记块: {chunk_id}, 来源笔记: 《{db_metadata.get('parent_note_title')}》")
+        log.info(f"成功存储笔记块: {chunk_id}, 来源笔记: 《{db_metadata.get('source_note_title')}》")
 
 # %% [markdown]
 # ### delete_note(self, note_id: str)
