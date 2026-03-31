@@ -20,6 +20,7 @@
 # # 导入库
 
 # %%
+import hashlib
 import os
 import time
 from typing import Dict, List, Optional
