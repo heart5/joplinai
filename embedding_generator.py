@@ -23,9 +23,10 @@
 # %%
 import hashlib
 import logging
+import re
 import time
 from functools import lru_cache
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import ollama
 import requests
@@ -208,11 +209,148 @@ class EmbeddingGenerator:
         return text
 
 # %% [markdown]
+# ### split_into_semantic_chunks(self, text: str, note_title: str = "", note_tags: str = "") -> List[Dict]
+
+    # %%
+    def split_into_semantic_chunks(self, text: str, note_title: str = "", note_tags: str = "") -> List[Dict]:
+        """
+        将文本分割成语义块，并返回块字典列表。
+        每个字典包含 'content' 和初步的 'metadata'。
+        """
+        if not text:
+            return []
+        
+        chunks = []
+        
+        # 1. 首先尝试按明显的章节或日期分割（针对日志）
+        # 例如：按 "## "、"---"、日期行 "2025年11月27日" 分割
+        major_sections = re.split(r'\n(?:#{1,3}\s+.*?|\-{3,}|\d{4}年\d{1,2}月\d{1,2}日.*?)\n', text)
+        major_sections = [s.strip() for s in major_sections if s.strip()]
+        
+        for section in major_sections:
+            if len(section) <= self.chunk_size:
+                # 如果整个章节已经很小，直接作为一个块
+                chunks.append(section)
+            else:
+                # 2. 对于长章节，按段落分割
+                paragraphs = section.split('\n\n')
+                current_chunk = ""
+                for para in paragraphs:
+                    if len(current_chunk) + len(para) <= self.chunk_size:
+                        current_chunk += (para + "\n\n")
+                    else:
+                        if current_chunk:
+                            chunks.append(current_chunk.strip())
+                        current_chunk = para + "\n\n"
+                if current_chunk:
+                    chunks.append(current_chunk.strip())
+        
+        # 3. 如果上述分割结果块数太少或太大，回退到句子级分块
+        if len(chunks) == 0 or max(len(c) for c in chunks) > self.chunk_size * 1.5:
+            log.debug("启用句子级分块回退")
+            chunks = self._split_by_sentences(text)
+        
+        # 4. 为每个块构建初步元数据
+        chunk_dicts = []
+        for idx, chunk_content in enumerate(chunks):
+            # 提取块内可能的关键词或日期（简单示例）
+            import datetime
+            date_match = re.search(r'(\d{4}年\d{1,2}月\d{1,2}日)', chunk_content)
+            chunk_metadata = {
+                "chunk_index": idx,
+                "content": chunk_content,
+                "parent_note_title": note_title,
+                "parent_note_tags": note_tags,
+                "estimated_date": date_match.group(1) if date_match else "",
+                "word_count": len(chunk_content),
+                # 后续可在 joplinai.py 中补充 DeepSeek 生成的摘要或关键词
+            }
+            chunk_dicts.append({
+                "content": chunk_content,
+                "metadata": chunk_metadata
+            })
+        
+        log.info(f"将文本分割成 {len(chunk_dicts)} 个语义块。")
+        return chunk_dicts
+
+# %% [markdown]
+# ### _split_by_sentences(self, text: str) -> List[str]
+
+    # %%
+    def _split_by_sentences(self, text: str) -> List[str]:
+        """按句子分块的回退方法，保持原有逻辑但可调整。"""
+        # 这里可以放入您原有的 _split_text_into_chunks 逻辑，或以下简化版：
+        sentences = re.split(r'[。！？；\n]', text)
+        chunks = []
+        current_chunk = ""
+        for sent in sentences:
+            sent = sent.strip()
+            if not sent:
+                continue
+            if len(current_chunk) + len(sent) <= self.chunk_size:
+                current_chunk += sent + "。"
+            else:
+                if current_chunk:
+                    chunks.append(current_chunk)
+                current_chunk = sent + "。"
+        if current_chunk:
+            chunks.append(current_chunk)
+        return chunks
+
+# %% [markdown]
 # ### _split_text_into_chunks(self, text: str) -> List[str]
 
     # %%
     def _split_text_into_chunks(self, text: str) -> List[str]:
-        """基于字符位置分块，保留完整单词"""
+        """优化分块：优先按自然段落、日期分隔符划分，其次按句子，最后才按字符。"""
+        if len(text) <= self.chunk_size:
+            return [text]
+    
+        chunks = []
+        paragraphs = text.split('\n\n')  # 首先尝试按空行（段落）分割
+    
+        current_chunk = ""
+        for para in paragraphs:
+            # 如果当前段落本身就很长，尝试按句子分割
+            if len(para) > self.chunk_size * 0.8:
+                sentences = re.split(r'[。！？；\n]', para)
+                for sent in sentences:
+                    if len(current_chunk) + len(sent) <= self.chunk_size:
+                        current_chunk += sent
+                    else:
+                        if current_chunk:
+                            chunks.append(current_chunk.strip())
+                        current_chunk = sent
+            # 如果加上这个段落仍小于块大小，则合并
+            elif len(current_chunk) + len(para) <= self.chunk_size:
+                if current_chunk:
+                    current_chunk += "\n\n" + para
+                else:
+                    current_chunk = para
+            else:
+                # 保存当前块，开始新块
+                if current_chunk:
+                    chunks.append(current_chunk.strip())
+                current_chunk = para
+    
+        # 添加最后一个块
+        if current_chunk:
+            chunks.append(current_chunk.strip())
+    
+        # 如果按段落分割后块还是太大，则回退到原有的基于字符的智能分块
+        if any(len(ch) > self.chunk_size * 1.2 for ch in chunks):
+            log.info("部分块过长，启用字符级分块回退")
+            return self._split_text_into_chunks_fallback(text)
+    
+        return chunks
+
+# %% [markdown]
+# ### _split_text_into_chunks_fallback(self, text: str) -> List[str]
+
+    # %%
+    def _split_text_into_chunks_fallback(self, text: str) -> List[str]:
+        """原有的基于字符的智能分块逻辑（作为回退）
+        基于字符位置分块，保留完整单词"""
         if len(text) <= self.chunk_size:
             return [text]
         
