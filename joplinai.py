@@ -84,11 +84,11 @@ except ImportError as e:
 
 # %%
 CONFIG = {
-    "notebook_titles": "顺风顺水, 日新月异, 运营管理",  # 改为笔记本名称列表字符串
+    "notebook_titles": "顺风顺水, 日新白异, 运营管理",  # 改为笔记本名称列表字符串
     "embedding_model": "dengcao/bge-large-zh-v1.5",  # 嵌入模型（Ollama本地模型，优先选dengcao/bge-large-zh-v1.5
     # "embedding_model": "qwen:1.8b",  # 嵌入模型（Ollama本地模型，优先选nomic-embed-text）
-    "chunk_size": 512,  # 文本分块大小（字符数，根据模型上下文调整）
-    "max_context": 512,  # 模型最大上下文（字符数）
+    # "chunk_size": 512,  # 文本分块大小（字符数，根据模型上下文调整）
+    # "max_context": 512,  # 模型最大上下文（字符数）
     "concurrency_type": "thread",  # 固定使用多线程，移除 process 选项
     "max_workers": min(
         8, (os.cpu_count() or 1) * 2
@@ -119,6 +119,33 @@ CONFIG["state_path"] = (
 # #### clean_text(text: str) -> str
 # %%
 def clean_text(text: str) -> str:
+    """清理笔记文本：移除图片、格式符号、多余换行"""
+    if not text:
+        return ""
+
+    # 1. 移除图片链接：![alt](url)
+    text = re.sub(r"!\[.*?\]\(.*?\)", "", text)
+
+    # 2. 特别处理：移除图片链接后的多余空行
+    # 将3个以上连续换行减少为2个
+    text = re.sub(r"\n{3,}", "\n\n", text)
+
+    # 3. 移除Markdown格式符号（保留必要的标点）
+    # 注意：不要移除中文标点符号
+    text = re.sub(r"[#*`>~\-]", "", text)
+
+    # 4. 移除开头和结尾的空白行
+    text = text.strip()
+
+    # 5. 如果清理后文本过短，记录警告
+    if len(text) < 10:  # 少于10个字符
+        log.warning(f"清理后文本过短: {text[:50]}...")
+
+    return text
+
+
+# %%
+def clean_text_other(text: str) -> str:
     """清理笔记文本：移除图片、格式符号、多余换行"""
     if not text:
         return ""
@@ -204,9 +231,20 @@ def process_single_note(
             note_detail.updated_time
         )  # Joplin笔记的更新时间（Unix时间戳）
 
-        # 清理文本（标题+正文）
+        log.info(f"开始处理笔记: 《{note.title}》 (ID: {note.id})")
+        log.debug(f"原始正文长度: {len(note.body)} 字符")
+
+        # 清理文本
         cleaned_body = clean_text(note.body)
-        text = f"{note.title}\n{cleaned_body}"
+        log.debug(f"清理后正文长度: {len(cleaned_body)} 字符")
+        log.debug(f"清理后正文预览: {cleaned_body[:200]}...")
+
+        if len(cleaned_body) < 20:
+            log.warning(f"清理后文本过短，可能全是图片链接")
+            # 尝试使用标题作为主要内容
+            text = note.title
+        else:
+            text = f"{note.title}\n{cleaned_body}"
 
         # 生成嵌入
         embedding = EmbeddingGenerator(config["embedding_model"]).get_merged_embedding(
@@ -283,13 +321,10 @@ def process_single_note(
 # %%
 def process_notes_incremental(notebook_title: str, config: Dict):
     """增量处理笔记本笔记（修复时间处理问题）"""
-    # 动态获取模型最大上下文
     model_name = config["embedding_model"]
-    max_context = EmbeddingGenerator(config["embedding_model"]).chunk_size
-    chunk_size = min(config["chunk_size"], max_context // 2)
-    log.info(
-        f"使用模型“{model_name}”，动态分块配置：chunk_size={chunk_size}，max_context={max_context}"
-    )
+    # 动态获取模型最大上下文
+    # chunk_size = EmbeddingGenerator(config["embedding_model"]).chunk_size
+    log.info(f"使用模型“{model_name}”")
 
     # 初始化向量数据库（在整个处理过程中只初始化一次）
     if not hasattr(process_notes_incremental, "vector_db"):
