@@ -259,8 +259,8 @@ class EmbeddingGenerator:
             chunk_metadata = {
                 "chunk_index": idx,
                 # "content": chunk_content,
-                "parent_note_title": note_title,
-                "parent_note_tags": note_tags,
+                "source_note_title": note_title,
+                "source_note_tags": note_tags,
                 "estimated_date": date_match.group(1) if date_match else "",
                 "word_count": len(chunk_content),
                 # 后续可在 joplinai.py 中补充 DeepSeek 生成的摘要或关键词
