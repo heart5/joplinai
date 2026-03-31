@@ -388,35 +388,51 @@ class JoplinQASystem:
 class OptimizedJoplinQASystem(JoplinQASystem):
     """优化版的问答系统，针对个人笔记"""
 
-    def ask(self, question: str, use_history: bool = True) -> Dict:
-        # 1. 问题预处理
+
+# %% [markdown]
+# ### ask(self, question: str) -> Dict
+
+    # %%
+    def ask(self, question: str) -> Dict:
+        """提问入口，现在基于块进行检索和回答。"""
+        # 1. 预处理问题
         processed_question = self._preprocess_question(question)
-
-        # 2. 检索相关笔记（带过滤）
-        similar_notes = self.vector_db.search_similar_notes(
-            processed_question, n_results=self.config["max_retrieved_notes"]
+        
+        # 2. 获取问题嵌入
+        query_embedding = self.embedding_generator.get_merged_embedding(
+            processed_question, self.config.get("enable_deepseek_embed", False)
         )
-
-        # 3. 过滤和排序
-        filtered_notes = self._filter_and_rank_notes(similar_notes, question)
-
-        # 4. 构建优化上下文
-        context = self._build_optimized_context(filtered_notes, question)
-
-        # 5. 生成答案（带质量检查）
+        if not query_embedding:
+            return {"answer": "无法生成问题嵌入，请检查配置。", "relevant_chunks": []}
+        
+        # 3. 搜索相似块（注意：调用的是 search_similar_chunks）
+        similar_chunks = self.vector_db.search_similar_chunks(
+            query_embedding, 
+            top_k=self.config.get("max_retrieved_chunks", 15)  # 可配置
+        )
+        
+        # 4. 过滤和重排序块
+        filtered_chunks = self._filter_and_rank_chunks(similar_chunks, question)
+        
+        # 5. 构建优化上下文（基于块）
+        context = self._build_optimized_context_from_chunks(filtered_chunks, question)
+        
+        # 6. 生成答案
         answer = self._generate_optimized_answer(question, context)
-
-        # 6. 后处理答案
         final_answer = self._postprocess_answer(answer)
-
+        
         return {
             "question": question,
             "answer": final_answer,
-            "relevant_notes": filtered_notes,
+            "relevant_chunks": filtered_chunks,  # 返回块信息
             "context_length": len(context),
-            "is_based_on_notes": bool(filtered_notes),  # 根据是否有相关笔记判断
+            "is_based_on_notes": bool(filtered_chunks),
         }
 
+# %% [markdown]
+# ### _preprocess_question(self, question: str) -> str
+
+    # %%
     def _preprocess_question(self, question: str) -> str:
         """预处理问题，提高检索效果"""
         # 移除常见疑问词
@@ -434,6 +450,10 @@ class OptimizedJoplinQASystem(JoplinQASystem):
 
         return question.strip()
 
+# %% [markdown]
+# ### _extract_keywords(self, text: str) -> List[str]
+
+    # %%
     def _extract_keywords(self, text: str) -> List[str]:
         """提取关键词（简单实现）"""
         # 移除标点
@@ -457,6 +477,45 @@ class OptimizedJoplinQASystem(JoplinQASystem):
 
         return keywords[:3]
 
+# %% [markdown]
+# ### _filter_and_rank_chunks(self, chunks: List[Dict], question: str) -> List[Dict]
+
+    # %%
+    def _filter_and_rank_chunks(self, chunks: List[Dict], question: str) -> List[Dict]:
+        """过滤和重排序检索到的文本块。"""
+        if not chunks:
+            return []
+    
+        # 1. 按相似度排序
+        chunks.sort(key=lambda x: x["similarity"], reverse=True)
+    
+        # 2. 应用阈值过滤
+        threshold = self.config.get("similarity_threshold", 0.6)
+        filtered = [chunk for chunk in chunks if chunk["similarity"] >= threshold]
+    
+        # 3. 如果过滤后太少，放宽条件
+        if len(filtered) < 3 and len(chunks) > 0:
+            filtered = chunks[:3]
+    
+        # 4. 基于问题关键词进一步过滤（可选）
+        keywords = self._extract_keywords(question)
+        if keywords:
+            scored_chunks = []
+            for chunk in filtered:
+                score = chunk["similarity"]
+                content = chunk["content"].lower()
+                for keyword in keywords:
+                    if keyword in content:
+                        score += 0.1
+                scored_chunks.append((score, chunk))
+            scored_chunks.sort(key=lambda x: x[0], reverse=True)
+            filtered = [chunk for _, chunk in scored_chunks]
+
+
+# %% [markdown]
+# ### _filter_and_rank_notes(self, notes: List[Dict], question: str) -> List[Dict]
+
+    # %%
     def _filter_and_rank_notes(self, notes: List[Dict], question: str) -> List[Dict]:
         """过滤和重排序笔记"""
         if not notes:
@@ -502,6 +561,67 @@ class OptimizedJoplinQASystem(JoplinQASystem):
 
         return filtered
 
+# %% [markdown]
+# ### _build_optimized_context_from_chunks(self, chunks: List[Dict], question: str) -> str
+
+    # %%
+    def _build_optimized_context_from_chunks(self, chunks: List[Dict], question: str) -> str:
+        """基于检索到的块构建问答上下文。"""
+        if not chunks:
+            return "没有找到相关笔记内容。"
+        
+        # 按原始笔记对块进行分组，便于组织
+        from collections import defaultdict
+        notes_dict = defaultdict(list)
+        for chunk in chunks:
+            note_id = chunk["note_id"]
+            notes_dict[note_id].append(chunk)
+        
+        # 构建系统提示
+        system_prompt = """你是我个人的笔记助手，基于Joplin笔记回答问题。
+    笔记记录了工作（轻行动功能饮料、习龙酱酒等）、学习、生活、想法等各种内容。
+    请基于以下相关笔记片段（可能来自同一篇笔记的不同部分）回答问题。
+    如果笔记中没有相关信息，请如实告知。"""
+        
+        # 为每个原始笔记构建上下文部分
+        note_contexts = []
+        for note_id, chunk_list in notes_dict.items():
+            # 取该笔记的第一个块获取标题等信息（假设所有块metadata一致）
+            sample_chunk = chunk_list
+            note_title = sample_chunk["metadata"].get("parent_note_title", "未知标题")
+            note_tags = sample_chunk["metadata"].get("parent_note_tags", "")
+            
+            # 合并该笔记的所有相关块内容
+            combined_content = "\n---\n".join([c["content"] for c in chunk_list])
+            
+            note_context = f"""【笔记：{note_title}】
+    标签：{note_tags}
+    相关内容：
+    {combined_content}
+    """
+            note_contexts.append(note_context)
+        
+        # 组合完整上下文
+        context = f"""{system_prompt}
+    
+    相关笔记内容：
+    {chr(10).join(note_contexts)}
+    
+    我的问题：{question}
+    
+    请基于以上笔记内容回答，如果笔记中没有相关信息，请说明。"""
+        
+        # 限制长度
+        max_len = self.config.get("context_max_length", 2000)  # 可适当提高，因为现在信息更密集
+        if len(context) > max_len:
+            context = context[:max_len] + "..."
+        
+        return context
+
+# %% [markdown]
+# ### _build_optimized_context(self, notes: List[Dict], question: str) -> str
+
+    # %%
     def _build_optimized_context(self, notes: List[Dict], question: str) -> str:
         """构建优化上下文"""
         if not notes:
@@ -550,6 +670,10 @@ class OptimizedJoplinQASystem(JoplinQASystem):
 
         return context
 
+# %% [markdown]
+# ### _extract_relevant_snippet(self, content: str, question: str, max_length: int = 300) -> str
+
+    # %%
     def _extract_relevant_snippet(
         self, content: str, question: str, max_length: int = 300
     ) -> str:
@@ -582,6 +706,10 @@ class OptimizedJoplinQASystem(JoplinQASystem):
             # 没有找到关键词，取开头
             return content[:max_length] + ("..." if len(content) > max_length else "")
 
+# %% [markdown]
+# ### _generate_optimized_answer(self, question: str, context: str) -> str
+
+    # %%
     def _generate_optimized_answer(self, question: str, context: str) -> str:
         """生成优化答案"""
         # 使用DeepSeek
@@ -590,6 +718,10 @@ class OptimizedJoplinQASystem(JoplinQASystem):
         else:
             return self._generate_answer_with_ollama(question, context)
 
+# %% [markdown]
+# ### _generate_answer_with_deepseek_optimized(self, question: str, context: str) -> str
+
+    # %%
     def _generate_answer_with_deepseek_optimized(
         self, question: str, context: str
     ) -> str:
@@ -648,6 +780,10 @@ class OptimizedJoplinQASystem(JoplinQASystem):
             log.error(f"DeepSeek生成答案失败: {e}")
             return f"抱歉，生成答案时出错: {str(e)[:100]}"
 
+# %% [markdown]
+# ### _regenerate_answer(self, question: str, context: str) -> str
+
+    # %%
     def _regenerate_answer(self, question: str, context: str) -> str:
         """重新生成答案（当答案质量不高时）"""
         # 简化上下文，重新生成
@@ -684,6 +820,10 @@ class OptimizedJoplinQASystem(JoplinQASystem):
         except Exception as e:
             return "根据我的笔记，我找到了一些相关信息，但无法生成完整的回答。建议您直接查看相关笔记。"
 
+# %% [markdown]
+# ### _postprocess_answer(self, answer: str) -> str
+
+    # %%
     def _postprocess_answer(self, answer: str) -> str:
         """后处理答案"""
         # 移除多余的空白
