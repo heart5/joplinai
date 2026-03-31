@@ -275,7 +275,7 @@ def process_single_note(
                 enhanced_metadata["chunk_summary"] = summary or ""  # 存入摘要
         except Exception as e:
             log.error(f"笔记《{note.title}》（{note.id}） 嵌入生成失败，跳过。{e}")
-            return false
+            return False
 
         try:
             if config["enable_deepseek_tags"] and config["deepseek_api_key"]:
