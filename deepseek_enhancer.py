@@ -264,7 +264,7 @@ def deepseek_process_note(
         content_hash = _get_content_hash(text[:8000])  # 只哈希前8000字符，兼顾效率
         cached_result = get_cached_result(content_hash, task)
         if cached_result:
-            log.info(f"使用缓存{task}: {content_hash[:8]}")
+            log.info(f"deepseek增强使用缓存{task}: {content_hash[:8]}")
             return cached_result
 
     if task not in prompts:
@@ -300,6 +300,9 @@ def deepseek_process_note(
 
             # 保存到缓存
             if use_cache:
+                log.info(
+                    f"deepseek增强生成并缓存至文件《{CACHE_FILE}》。{task}: {content_hash[:8]}"
+                )
                 save_to_cache(content_hash, task, result)
 
             return result
@@ -318,5 +321,3 @@ if __name__ == "__main__":
         "请在100字之内介绍joplin笔记软件", task="summary", model="deepseek-chat"
     )
     print(result)
-
-# %%
