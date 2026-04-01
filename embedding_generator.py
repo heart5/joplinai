@@ -40,35 +40,6 @@ except ImportError as e:
 
 
 # %% [markdown]
-# ## clean_text(text: str) -> str
-# %%
-def clean_text(text: str) -> str:
-    """清理笔记文本：移除图片、格式符号、多余换行"""
-    if not text:
-        return ""
-
-    # 1. 移除图片链接：![alt](url)
-    text = re.sub(r"!\[.*?\]\(.*?\)", "", text)
-
-    # 2. 特别处理：移除图片链接后的多余空行
-    # 将3个以上连续换行减少为2个
-    text = re.sub(r"\n{3,}", "\n\n", text)
-
-    # 3. 移除Markdown格式符号（保留必要的标点）
-    # 注意：不要移除中文标点符号
-    text = re.sub(r"[#*`>~\-]", "", text)
-
-    # 4. 移除开头和结尾的空白行
-    text = text.strip()
-
-    # 5. 如果清理后文本过短，记录警告
-    if len(text) < 10:  # 少于10个字符
-        log.warning(f"清理后文本过短，不到10个字符。清理前为: {text[:50]}...")
-
-    return text
-
-
-# %% [markdown]
 # ## EmbeddingGenerator类
 
 # %%
@@ -158,6 +129,34 @@ class EmbeddingGenerator:
             self.chunk_size = 1024
 
 # %% [markdown]
+# ### clean_text(text: str) -> str
+    # %%
+    def clean_text(text: str) -> str:
+        """清理笔记文本：移除图片、格式符号、多余换行"""
+        if not text:
+            return ""
+    
+        # 1. 移除图片链接：![alt](url)
+        text = re.sub(r"!\[.*?\]\(.*?\)", "", text)
+    
+        # 2. 特别处理：移除图片链接后的多余空行
+        # 将3个以上连续换行减少为2个
+        text = re.sub(r"\n{3,}", "\n\n", text)
+    
+        # 3. 移除Markdown格式符号（保留必要的标点）
+        # 注意：不要移除中文标点符号
+        text = re.sub(r"[#*`>~\-]", "", text)
+    
+        # 4. 移除开头和结尾的空白行
+        text = text.strip()
+    
+        # 5. 如果清理后文本过短，记录警告
+        if len(text) < 10:  # 少于10个字符
+            log.warning(f"清理后文本过短，不到10个字符。清理前为: {text[:50]}...")
+    
+        return text
+
+# %% [markdown]
 # ### _preprocess_text_for_embedding(self, text: str) -> str
 
     # %%
@@ -245,6 +244,119 @@ class EmbeddingGenerator:
         """
         将文本分割成语义块，并返回块字典列表。
         每个字典包含 'content' 和初步的 'metadata'。
+        【增强】专门处理以 “### YYYY年MM月DD日” 格式开头的日记体笔记。
+        """
+        if not text:
+            return []
+
+        chunks = []  # 最终存储所有文本块的列表
+
+        # ========== 第一步：核心修改 - 按日期标题行进行一级分割 ==========
+        # 匹配 “### 2026年3月22日” 或 “### 2026年3月22号” 及其变体（如可能有多余空格）
+        # 正则解释：r‘^###\s*(\d{4}年\d{1,2}月\d{1,2}日(?:号)?)\s*$’
+        # ^### : 以###开头
+        # \s* : 可能有的空格
+        # (\d{4}年\d{1,2}月\d{1,2}日(?:号)?) : 核心日期格式，日或号
+        # \s*$ : 可能有的空格，然后行结束
+        # 使用 re.MULTILINE 模式让 ^ 和 $ 匹配每行的开头结尾
+        import re
+        date_section_pattern = re.compile(r'^###\s*(\d{4}年\d{1,2}月\d{1,2}日(?:号)?)\s*$', re.MULTILINE)
+
+        # 找到所有日期标题行的位置
+        date_matches = list(date_section_pattern.finditer(text))
+
+        if not date_matches:
+            # 如果没有找到这种格式的日期行，则回退到原有的语义分割逻辑
+            log.debug(“笔记未检测到‘### 日期’格式，回退至通用语义分块。”)
+            major_sections = re.split(r'\n(?:#{1,3}\s+.*?|\-{3,}|\d{4}年\d{1,2}月\d{1,2}日.*?)\n', text)
+            major_sections = [s.strip() for s in major_sections if s.strip()]
+            chunks = major_sections # 后续会对这些块进行大小判断和二次分割
+        else:
+            # 有日期行，按日期行分割成“天单元”
+            log.debug(f"检测到 {len(date_matches)} 个日期标题行，将按此分割。")
+            start_pos = 0
+            for i, match in enumerate(date_matches):
+                date_line_start = match.start()
+                date_line_end = match.end()
+                current_date = match.group(1)  # 提取到的日期字符串，如“2026年3月22日”
+
+                # 确定这个日期单元的内容结束位置（下一个日期行开始，或文本末尾）
+                next_start = date_matches[i + 1].start() if i + 1 < len(date_matches) else len(text)
+
+                # 提取从当前日期行开始，到下一个日期行之前的所有内容作为一个“天单元”
+                # 这保证了日期行（### 2026年3月22日）是此单元的第一行。
+                day_unit = text[date_line_start:next_start].strip()
+
+                # 将这个“天单元”添加到待处理块列表
+                # 注意：此时‘day_unit’可能还很长（包含多个段落），后续会判断是否需要进一步分割。
+                chunks.append(day_unit)
+                start_pos = next_start
+
+            # 处理第一个日期行之前可能存在的文本（如笔记开头的说明）
+            if date_matches[0].start() > 0:
+                preface = text[:date_matches[0].start()].strip()
+                if preface:
+                    chunks.insert(0, preface)  # 将前言作为第一个块
+        # ========== 第一步结束 ==========
+
+        # 后续逻辑：对每个初步分割出的块（可能是“天单元”或前言），检查大小，如果过大则进行二次分割。
+        final_chunks = []
+        for raw_chunk in chunks:
+            if len(raw_chunk) <= self.chunk_size * 1.1:
+                # 如果块大小合理，直接使用
+                final_chunks.append(raw_chunk)
+            else:
+                # 如果块过大（例如某一天的内容特别长），则调用原有的段落/句子级分割函数进行细化
+                # 注意：此时 raw_chunk 可能是一个以日期行开头的“天单元”
+                log.debug(f"初步块过长({len(raw_chunk)}字符)，进行二次语义分割。")
+                sub_chunks = self._split_into_paragraphs_chunks(raw_chunk)
+                final_chunks.extend(sub_chunks)
+
+        # 如果经过上述步骤，分块结果仍然不理想（比如块数太少或太大），启用最终回退
+        if not final_chunks or (len(final_chunks) == 1 and len(final_chunks[0]) >= self.chunk_size * 1.1):
+            log.debug(f"按照语义拆分不太合格：{[len(chunk) for chunk in final_chunks]}")
+            final_chunks = self._split_into_paragraphs_chunks(text)  # 回退到全局段落分割
+            log.debug(f"回退用段落甚至字符拆分后：{[len(chunk) for chunk in final_chunks]}")
+
+        # ========== 构建块字典和元数据 ==========
+        chunk_dicts = []
+        for idx, chunk_content in enumerate(final_chunks):
+            # --- 提取该块的日期 ---
+            # 由于我们确保了日期行在块内，现在可以直接从块内容开头匹配
+            date_in_chunk = date_section_pattern.match(chunk_content) # 使用match从开头匹配
+            if not date_in_chunk:
+                # 如果不是以日期行开头，则在内容中搜索第一个日期（用于前言块或回退分割的块）
+                date_in_chunk = date_section_pattern.search(chunk_content)
+            estimated_date = date_in_chunk.group(1) if date_in_chunk else ""
+            # ---------------------
+
+            chunk_metadata = {
+                "chunk_index": idx,
+                "source_note_title": note_title,
+                "source_note_tags": note_tags,
+                "estimated_date": estimated_date,  # 现在有很大概率能获取到值
+                "word_count": len(chunk_content),
+            }
+            # 清理内容格式
+            content = self.clean_text(chunk_content)
+            if len(content) < 10:
+                content = note_title
+            chunk_dicts.append({
+                "content": content,
+                "metadata": chunk_metadata
+            })
+
+        log.info(f"将文本分割成 {len(chunk_dicts)} 个语义块。")
+        return chunk_dicts
+
+# %% [markdown]
+# ### split_into_semantic_chunks_other(self, text: str, note_title: str = "", note_tags: str = "") -> List[Dict]
+
+    # %%
+    def split_into_semantic_chunks_other(self, text: str, note_title: str = "", note_tags: str = "") -> List[Dict]:
+        """
+        将文本分割成语义块，并返回块字典列表。
+        每个字典包含 'content' 和初步的 'metadata'。
         """
         if not text:
             return []
@@ -296,7 +408,7 @@ class EmbeddingGenerator:
                 # 后续可在 joplinai.py 中补充 DeepSeek 生成的摘要或关键词
             }
             # 到了这里再开始清理内容格式和无用文本
-            content = clean_text(chunk_content)
+            content = self.clean_text(chunk_content)
             if len(content) < 10:
                 content = note_title
             chunk_dicts.append({
