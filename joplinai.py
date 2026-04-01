@@ -347,7 +347,7 @@ def process_note_chunks(
                 )
                 successful_upserts += 1
                 log.info(
-                    f"笔记《{note.title}》的块 {base_metadata['chunk_index']} 向量化入库更新成功。"
+                    f"笔记《{note.title}》的块 {base_metadata['chunk_index']} 向量化入库更新成功，文本块元数据为：{metadata}"
                 )
             except Exception as e:
                 log.error(f"笔记《{note.title}》存储块失败: {e}", exc_info=True)
