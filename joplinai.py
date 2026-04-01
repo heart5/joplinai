@@ -470,15 +470,18 @@ def process_notes_incremental(notebook_title: str, config: Dict):
 # ### 主流程入口
 
 # %% [markdown]
-# #### add_file_lock(lock_name: str = "joplinai.lock", timeout: int = 3600)
+# #### add_file_lock(model_name: str, lock_name: str = "joplinai.lock", timeout: int = 3600)
 
 # %%
-def add_file_lock(lock_name: str = "joplinai.lock", timeout: int = 3600):
+def add_file_lock(
+    model_name: str, lock_name: str = "joplinai.lock", timeout: int = 3600
+):
     """
     在脚本入口创建文件锁，防止多实例并发运行。
 
     Args:
         lock_name: 锁文件名，建议与模型或配置关联以避免不同配置间的冲突。
+        model_name: 嵌入模型名称
         timeout: 锁超时时间（秒），用于处理进程崩溃后锁未释放的情况。
 
     Returns:
@@ -499,7 +502,7 @@ def add_file_lock(lock_name: str = "joplinai.lock", timeout: int = 3600):
         with os.fdopen(lock_fd, "w") as f:
             f.write(f"pid: {os.getpid()}\n")
             f.write(f"time: {datetime.now().isoformat()}\n")
-            f.write(f"model: {dynamic_config.get('embedding_model', 'N/A')}\n")
+            f.write(f"model: {model_name}\n")
 
         log.info(f"文件锁创建成功: {lock_file_path}")
 
@@ -518,13 +521,15 @@ def add_file_lock(lock_name: str = "joplinai.lock", timeout: int = 3600):
     except FileExistsError:
         # 锁文件已存在，检查是否已超时（进程可能已崩溃）
         try:
+            print(lock_file_path.stat().st_mtime)
+            print(time.time() - timeout)
             if lock_file_path.stat().st_mtime < (time.time() - timeout):
                 log.warning(
                     f"检测到过期的锁文件（超过{timeout}秒），将强制清理并继续。"
                 )
                 lock_file_path.unlink()
                 # 递归调用自身以重试获取锁
-                return add_file_lock(lock_name, timeout)
+                return add_file_lock(model_name, lock_name, timeout)
             else:
                 # 锁有效，退出程序
                 log.error(
@@ -601,16 +606,6 @@ def parse_args():
 def main():
     """主函数：执行增量处理"""
     args = parse_args()
-    # ==== 1. 文件锁：防止并发运行 ====
-    # 生成与模型相关的唯一锁名，避免不同模型配置间的冲突
-    model_name_str = args.model.replace(":", "_").replace("/", "_").replace("-", "_")
-    lock_name = f"joplinai_{model_name_str}.lock"
-
-    lock_file, lock_acquired = add_file_lock(lock_name, timeout=10800)  # 3小时超时
-    if not lock_acquired:
-        sys.exit(1)  # 获取锁失败，安全退出
-    # ==== 文件锁结束 ====
-
     # 动态覆盖配置
     dynamic_config = CONFIG.copy()
 
@@ -656,6 +651,20 @@ def main():
         强制更新为{dynamic_config['force_update']} \
         "
     )
+
+    # ==== 1. 文件锁：防止并发运行 ====
+    # 生成与模型相关的唯一锁名，避免不同模型配置间的冲突
+    model_name = dynamic_config["embedding_model"]
+    model_name_str = model_name.replace(":", "_").replace("/", "_").replace("-", "_")
+    lock_name = f"joplinai_{model_name_str}.lock"
+
+    lock_file, lock_acquired = add_file_lock(
+        model_name, lock_name, timeout=10800
+    )  # 3小时超时
+    if not lock_acquired:
+        sys.exit(1)  # 获取锁失败，安全退出
+    # ==== 文件锁结束 ====
+
     # 初始化任务报告器
     from aitaskreporter import JoplinAITaskReporter
 
