@@ -30,11 +30,13 @@
 
 # %%
 import argparse
+import atexit
 import hashlib
 import json
 import logging
 import os
 import re
+import sys
 import time
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from datetime import datetime
@@ -468,6 +470,77 @@ def process_notes_incremental(notebook_title: str, config: Dict):
 # ### 主流程入口
 
 # %% [markdown]
+# #### add_file_lock(lock_name: str = "joplinai.lock", timeout: int = 3600)
+
+# %%
+def add_file_lock(lock_name: str = "joplinai.lock", timeout: int = 3600):
+    """
+    在脚本入口创建文件锁，防止多实例并发运行。
+
+    Args:
+        lock_name: 锁文件名，建议与模型或配置关联以避免不同配置间的冲突。
+        timeout: 锁超时时间（秒），用于处理进程崩溃后锁未释放的情况。
+
+    Returns:
+        lock_file_path (Path): 锁文件路径，用于后续清理。
+        acquired (bool): 是否成功获取锁。
+    """
+    # 确定锁文件存放目录，优先使用临时目录，其次使用脚本数据目录
+    temp_dir = Path(os.getenv("TEMP", "/tmp"))
+    lock_dir = temp_dir if temp_dir.exists() else getdirmain() / "data"
+    lock_dir.mkdir(parents=True, exist_ok=True)
+
+    lock_file_path = lock_dir / lock_name
+
+    try:
+        # 尝试创建锁文件（以独占模式打开，如果文件已存在则失败）
+        lock_fd = os.open(lock_file_path, os.O_CREAT | os.O_EXCL | os.O_RDWR)
+        # 写入当前进程信息，便于调试
+        with os.fdopen(lock_fd, "w") as f:
+            f.write(f"pid: {os.getpid()}\n")
+            f.write(f"time: {datetime.now().isoformat()}\n")
+            f.write(f"model: {dynamic_config.get('embedding_model', 'N/A')}\n")
+
+        log.info(f"文件锁创建成功: {lock_file_path}")
+
+        # 注册退出时的清理函数
+        def cleanup_lock():
+            try:
+                if lock_file_path.exists():
+                    lock_file_path.unlink()
+                    log.info(f"文件锁已清理: {lock_file_path}")
+            except Exception as e:
+                log.warning(f"清理锁文件时出错: {e}")
+
+        atexit.register(cleanup_lock)
+        return lock_file_path, True
+
+    except FileExistsError:
+        # 锁文件已存在，检查是否已超时（进程可能已崩溃）
+        try:
+            if lock_file_path.stat().st_mtime < (time.time() - timeout):
+                log.warning(
+                    f"检测到过期的锁文件（超过{timeout}秒），将强制清理并继续。"
+                )
+                lock_file_path.unlink()
+                # 递归调用自身以重试获取锁
+                return add_file_lock(lock_name, timeout)
+            else:
+                # 锁有效，退出程序
+                log.error(
+                    f"另一个 joplinai.py 实例正在运行或上次运行未正常结束。\n"
+                    f"锁文件: {lock_file_path}\n"
+                    f"如需强制运行，请手动删除锁文件。"
+                )
+                return lock_file_path, False
+        except Exception as e:
+            log.error(f"检查锁文件状态时出错: {e}")
+            return lock_file_path, False
+    except Exception as e:
+        log.error(f"创建文件锁时发生未知错误: {e}")
+        return None, False
+
+# %% [markdown]
 # #### parse_args()
 
 
@@ -528,6 +601,16 @@ def parse_args():
 def main():
     """主函数：执行增量处理"""
     args = parse_args()
+    # ==== 1. 文件锁：防止并发运行 ====
+    # 生成与模型相关的唯一锁名，避免不同模型配置间的冲突
+    model_name_str = args.model.replace(":", "_").replace("/", "_").replace("-", "_")
+    lock_name = f"joplinai_{model_name_str}.lock"
+
+    lock_file, lock_acquired = add_file_lock(lock_name, timeout=10800)  # 3小时超时
+    if not lock_acquired:
+        sys.exit(1)  # 获取锁失败，安全退出
+    # ==== 文件锁结束 ====
+
     # 动态覆盖配置
     dynamic_config = CONFIG.copy()
 
