@@ -304,7 +304,7 @@ class EmbeddingGenerator:
         #   “2024-01-01”
         #   “2024/01/01”
         unified_date_pattern = re.compile(
-            r"^(?:###\s*)?(\d{4}[-年/]\d{1,2}[-月/]\d{1,2}[日号]?)\s*$", re.MULTILINE
+            r"^(?:###\s*)?(\d{4}[-年/]\d{1,2}[-月/]\d{1,2}[日号])\s*$", re.MULTILINE
         )
         date_matches = list(unified_date_pattern.finditer(text))
 
