@@ -115,35 +115,6 @@ CONFIG["state_path"] = (
 # ## 功能函数集
 # %% [markdown]
 # ### 工具小集合
-# %% [markdown]
-# #### clean_text(text: str) -> str
-# %%
-def clean_text(text: str) -> str:
-    """清理笔记文本：移除图片、格式符号、多余换行"""
-    if not text:
-        return ""
-
-    # 1. 移除图片链接：![alt](url)
-    text = re.sub(r"!\[.*?\]\(.*?\)", "", text)
-
-    # 2. 特别处理：移除图片链接后的多余空行
-    # 将3个以上连续换行减少为2个
-    text = re.sub(r"\n{3,}", "\n\n", text)
-
-    # 3. 移除Markdown格式符号（保留必要的标点）
-    # 注意：不要移除中文标点符号
-    text = re.sub(r"[#*`>~\-]", "", text)
-
-    # 4. 移除开头和结尾的空白行
-    text = text.strip()
-
-    # 5. 如果清理后文本过短，记录警告
-    if len(text) < 10:  # 少于10个字符
-        log.warning(f"清理后文本过短: {text[:50]}...")
-
-    return text
-
-
 # %%
 def clean_text_other(text: str) -> str:
     """清理笔记文本：移除图片、格式符号、多余换行"""
@@ -234,25 +205,19 @@ def process_note_chunks(
         log.info(f"开始处理笔记: 《{note.title}》 (ID: {note.id})")
         log.debug(f"原始正文长度: {len(note.body)} 字符")
 
-        # 清理文本
-        # cleaned_body = note.body
-        cleaned_body = clean_text(note.body)
-        log.debug(f"清理后正文长度: {len(cleaned_body)} 字符")
-        log.debug(f"清理后正文预览: {cleaned_body[:200]}...")
-
-        if len(cleaned_body) < 20:
+        if len(note.body) < 20:
             log.warning(f"清理后文本过短，可能全是图片链接")
             # 尝试使用标题作为主要内容
             text = note.title
         else:
-            text = f"{note.title}\n{cleaned_body}"
+            text = f"{note.title}\n{note.body}"
 
         # 获取标签
         local_tags = get_tag_titles(note.id)  # 项目函数：获取笔记标签列表
         tags_str = ",".join(local_tags) if local_tags else ""
         # 关键修改：使用新的语义分块函数
         chunk_dicts = embedding_generator.split_into_semantic_chunks(
-            text=cleaned_body, note_title=note.title, note_tags=tags_str
+            text=text, note_title=note.title, note_tags=tags_str
         )
 
         if not chunk_dicts:
