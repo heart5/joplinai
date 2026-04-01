@@ -303,7 +303,7 @@ class VectorDBManager:
         """删除笔记向量数据"""
         # ========== joplinai.py 的功能 ==========
         if not self.collection:
-            log.error("集合未加载")
+            log.error(f"集合《{self.collection_name}》未加载")
             return
         
         self.collection.delete(ids=[note_id])
@@ -324,8 +324,49 @@ class VectorDBManager:
                 self.collection.delete(ids=results['ids'])
                 return len(results['ids'])
         except Exception as e:
-            log.error(f"按笔记ID删除块失败: {e}")
+            log.error(f"从集合《{self.collection_name}》按笔记ID删除块失败: {e}")
         return 0
+
+# %% [markdown]
+# ### get_existing_chunk_hashes(self, note_id: str) -> Dict[str, str]
+
+    # %%
+    def get_existing_chunk_hashes(self, note_id: str) -> Dict[str, str]:
+        """
+        查询某个笔记下所有已存在的块，返回 块ID -> 内容哈希 的映射。
+        用于后续的比对和清理。
+        """
+        if not self.collection:
+            return {}
+        try:
+            # 查询 metadata 中 source_note_id 等于给定 note_id 的所有记录
+            results = self.collection.get(where={"source_note_id": note_id})
+            if not results or not results['ids']:
+                return {}
+
+            hash_map = {}
+            for chunk_id, metadata in zip(results['ids'], results['metadatas']):
+                # 从元数据中取出我们之前存入的 content_hash
+                hash_map[chunk_id] = metadata.get("content_hash", "")
+            return hash_map
+        except Exception as e:
+            log.error(f"从集合《{self.collection_name}》中查询笔记 {note_id} 的现有块哈希失败: {e}")
+            return {}
+
+# %% [markdown]
+# ### delete_chunks_by_id_list(self, chunk_id_list: List[str]) -> int
+
+    # %%
+    def delete_chunks_by_id_list(self, chunk_id_list: List[str]) -> int:
+        """根据块ID列表批量删除块"""
+        if not self.collection or not chunk_id_list:
+            return 0
+        try:
+            self.collection.delete(ids=chunk_id_list)
+            return len(chunk_id_list)
+        except Exception as e:
+            log.error(f"从集合《{self.collection_name}》中批量删除块失败: {e}")
+            return 0
 
 # %% [markdown]
 # ### search_similar_notes(self, query: str, n_results: int = 5) -> List[Dict]
@@ -335,17 +376,17 @@ class VectorDBManager:
         """搜索与查询相似的笔记"""
         # ========== joplin_qa.py 的功能 ==========
         if not self.collection:
-            log.error("向量数据库集合未加载")
+            log.error(f"集合《{self.collection_name}》中未加载")
             return []
         
         try:
             # 生成查询的嵌入向量
             query_embedding = self._generate_query_embedding(query)
             if not query_embedding:
-                log.error("查询嵌入生成失败")
+                log.error(f"从集合《{self.collection_name}》中查询嵌入生成失败")
                 return []
             
-            log.info(f"查询嵌入维度: {len(query_embedding)}")
+            log.info(f"集合《{self.collection_name}》查询嵌入维度: {len(query_embedding)}")
             
             # 在向量数据库中搜索
             results = self.collection.query(
