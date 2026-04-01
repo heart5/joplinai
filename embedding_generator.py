@@ -224,11 +224,11 @@ class EmbeddingGenerator:
     # %%
     def _aggressive_text_reduction(self, text: str) -> str:
         """当模型明确报告超长时，采取更激进的文本缩减策略"""
-        # 1. 直接截取前300个字符（保证极短）
-        safe_length = 300
+        # 1. 直接截取前400个字符（保证极短）
+        safe_length = 400
         if len(text) > safe_length:
             text = text[:safe_length]
-            log.debug(f"激进缩减至{safe_length}字符")
+            log.debug(f"激进缩减，从{len(text)}缩减至{safe_length}个字符")
         
         # 2. 进一步移除所有重复字符模式
         import re
