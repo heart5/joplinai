@@ -236,11 +236,131 @@ class EmbeddingGenerator:
         
         return text
 
+
 # %% [markdown]
 # ### split_into_semantic_chunks(self, text: str, note_title: str = "", note_tags: str = "") -> List[Dict]
 
+# %%
+def split_into_semantic_chunks(self, text: str, note_title: str = "", note_tags: str = "") -> List[Dict]:
+    """将文本分割成语义块，并返回块字典列表。
+    【增强】使用统一的正则表达式处理带`###`或不带的日期行，确保日期保留在块头部并被提取。
+    """
+    if not text:
+        return []
+
+    chunks = []  # 存储初步分割的文本块
+
+    # ========== 第一步：统一按日期行进行一级分割 ==========
+    # 核心优化：使用一个正则，同时匹配“### 日期”和“日期”两种格式，并捕获日期部分
+    # 正则解释：
+    # ^                    : 行的开始（配合 re.MULTILINE）
+    # (?:###\s*)?          : 非捕获组，匹配可选的“###”及可能跟随的空格
+    # (\d{4}[-年/]\d{1,2}[-月/]\d{1,2}日?) : 捕获组1，匹配核心日期格式
+    # \s*$                 : 行尾可能有的空格
+    # 支持格式示例：
+    #   “### 2024年1月1日”
+    #   “2024年1月1日”
+    #   “2024-01-01”
+    #   “2024/01/01”
+    unified_date_pattern = re.compile(
+        r'^(?:###\s*)?(\d{4}[-年/]\d{1,2}[-月/]\d{1,2}[日号]?)\s*$',
+        re.MULTILINE
+    )
+    date_matches = list(unified_date_pattern.finditer(text))
+
+    if not date_matches:
+        # 如果没有找到任何日期行，回退到原有的按章节分割逻辑
+        log.debug("笔记未检测到任何日期标题行，回退至通用章节分块。")
+        major_sections = re.split(r'\n(?:#{1,3}\s+.*?|\-{3,})\n', text)
+        major_sections = [s.strip() for s in major_sections if s.strip()]
+        chunks = major_sections
+    else:
+        # 找到日期行，统一按日期行分割，并确保日期行保留在块内
+        log.debug(f"检测到 {len(date_matches)} 个日期标题行（含###或不含），将按此分割。")
+        start_pos = 0
+        for i, match in enumerate(date_matches):
+            date_line_start = match.start()
+            date_line_end = match.end()
+            # match.group(1) 是捕获的纯日期字符串，如“2024年1月1日”
+            current_date = match.group(1)
+
+            # 确定这个日期单元的内容结束位置（下一个日期行开始，或文本末尾）
+            next_start = date_matches[i + 1].start() if i + 1 < len(date_matches) else len(text)
+
+            # 提取从当前日期行开始，到下一个日期行之前的所有内容作为一个“天单元”
+            # 这保证了日期行（无论有无###）是此单元的第一行。
+            day_unit = text[date_line_start:next_start]  # 注意：这里不strip()，保留原始格式和换行
+
+            # 将这个“天单元”添加到待处理块列表
+            chunks.append(day_unit)
+            start_pos = next_start
+
+        # 处理第一个日期行之前可能存在的文本（如笔记开头的说明）
+        if date_matches[0].start() > 0:
+            preface = text[:date_matches[0].start()].strip()
+            if preface:
+                chunks.insert(0, preface)  # 将前言作为第一个块
+    # ========== 第一步结束 ==========
+
+    # 后续逻辑保持不变：对每个初步分割出的块，检查大小，如果过大则进行二次分割。
+    final_chunks = []
+    for raw_chunk in chunks:
+        if len(raw_chunk) <= self.chunk_size * 1.1:
+            # 如果块大小合理，直接使用
+            final_chunks.append(raw_chunk)
+        else:
+            # 如果块过大，则调用原有的段落/句子级分割函数进行细化
+            log.debug(f"初步块过长({len(raw_chunk)}字符)，进行二次语义分割。")
+            sub_chunks = self._split_into_paragraphs_chunks(raw_chunk)
+            final_chunks.extend(sub_chunks)
+
+    # 如果经过上述步骤，分块结果仍然不理想，启用最终回退
+    if not final_chunks or (len(final_chunks) == 1 and len(final_chunks[0](@ref) >= self.chunk_size * 1.1):
+        log.debug(f"按照语义拆分不太合格：{[len(chunk) for chunk in final_chunks]}")
+        final_chunks = self._split_into_paragraphs_chunks(text)
+        log.debug(f"回退用段落甚至字符拆分后：{[len(chunk) for chunk in final_chunks]}")
+
+    # ========== 构建块字典和元数据 ==========
+    chunk_dicts = []
+    # 复用第一步的统一正则进行日期提取，确保一致性
+    for idx, chunk_content in enumerate(final_chunks):
+        estimated_date = ""
+        # 优先从块的开头匹配日期（因为分割逻辑已保证日期行在头部）
+        # 再次使用相同的 unified_date_pattern，但用 match 从开头搜索
+        date_at_start = unified_date_pattern.match(chunk_content.strip())
+        if date_at_start:
+            estimated_date = date_at_start.group(1)
+        else:
+            # 如果开头没有（例如是前言块），则在块内搜索第一个日期作为估算
+            date_in_chunk = unified_date_pattern.search(chunk_content)
+            if date_in_chunk:
+                estimated_date = date_in_chunk.group(1)
+
+        chunk_metadata = {
+            "chunk_index": idx,
+            "source_note_title": note_title,
+            "source_note_tags": note_tags,
+            "estimated_date": estimated_date,  # 现在能正确提取
+            "word_count": len(chunk_content),
+        }
+        # 清理内容格式
+        content = self.clean_text(chunk_content)
+        if len(content) < 10:
+            content = note_title
+        chunk_dicts.append({
+            "content": content,
+            "metadata": chunk_metadata
+        })
+
+    log.info(f"将文本分割成 {len(chunk_dicts)} 个语义块。")
+    return chunk_dicts
+
+
+# %% [markdown]
+# ### split_into_semantic_chunks_other2(self, text: str, note_title: str = "", note_tags: str = "") -> List[Dict]
+
     # %%
-    def split_into_semantic_chunks(self, text: str, note_title: str = "", note_tags: str = "") -> List[Dict]:
+    def split_into_semantic_chunks_other2(self, text: str, note_title: str = "", note_tags: str = "") -> List[Dict]:
         """
         将文本分割成语义块，并返回块字典列表。
         每个字典包含 'content' 和初步的 'metadata'。
