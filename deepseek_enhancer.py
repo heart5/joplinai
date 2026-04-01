@@ -163,8 +163,8 @@ def save_to_cache(content_hash: str, task: str, result: str):
         "task": task,
     }
 
-    # 限制缓存大小（最多保存1000条记录）
-    if len(cache) > 1000:
+    # 限制缓存大小（最多保存10000条记录）
+    if len(cache) > 10000:
         # 删除最旧的记录
         oldest_keys = sorted(cache.keys(), key=lambda k: cache[k]["timestamp"])[:100]
         for key in oldest_keys:
