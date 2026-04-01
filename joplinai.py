@@ -226,7 +226,20 @@ def process_note_chunks(
     config: Dict,
 ) -> bool:
     """处理单条笔记（清理→分块→嵌入→入库），返回是否成功"""
+
     try:
+        # === 新增：在开始处理前，清理此笔记所有旧块，避免出现孤儿块影响精度，造成干扰 ===
+        try:
+            # 假设 vector_db 有一个 delete_chunks_by_note_id 方法
+            deleted_count = vector_db.delete_chunks_by_note_id(note.id)
+            log.info(f"已清理笔记《{note.title}》的旧块，数量: {deleted_count}")
+        except Exception as e:
+            log.warning(f"清理笔记《{note.title}》旧块时失败: {e}，继续处理")
+            return (
+                False  # 从向量库清理指定笔记的相关块数据失败则返回False，方便后续处置
+            )
+        # === 清理结束 ===
+
         # 获取笔记完整信息（含更新时间）
         note_detail = getnote(note.id)
         if not note_detail:
