@@ -40,6 +40,35 @@ except ImportError as e:
 
 
 # %% [markdown]
+# ## clean_text(text: str) -> str
+# %%
+def clean_text(text: str) -> str:
+    """清理笔记文本：移除图片、格式符号、多余换行"""
+    if not text:
+        return ""
+
+    # 1. 移除图片链接：![alt](url)
+    text = re.sub(r"!\[.*?\]\(.*?\)", "", text)
+
+    # 2. 特别处理：移除图片链接后的多余空行
+    # 将3个以上连续换行减少为2个
+    text = re.sub(r"\n{3,}", "\n\n", text)
+
+    # 3. 移除Markdown格式符号（保留必要的标点）
+    # 注意：不要移除中文标点符号
+    text = re.sub(r"[#*`>~\-]", "", text)
+
+    # 4. 移除开头和结尾的空白行
+    text = text.strip()
+
+    # 5. 如果清理后文本过短，记录警告
+    if len(text) < 10:  # 少于10个字符
+        log.warning(f"清理后文本过短，不到10个字符。清理前为: {text[:50]}...")
+
+    return text
+
+
+# %% [markdown]
 # ## EmbeddingGenerator类
 
 # %%
@@ -135,22 +164,22 @@ class EmbeddingGenerator:
     def _preprocess_text_for_embedding(self, text: str) -> str:
         """专门为嵌入模型设计的文本预处理"""
         import re
-        
+
         # 1. 移除或替换可能引起问题的特殊字符和模式
         # 例如：过多的换行符合并
         text = re.sub(r'\n{3,}', '\n\n', text)
         # 例如：将多个连续相同字符缩减（针对“哈哈哈...”）
         text = re.sub(r'(.)\1{4,}', r'\1\1\1', text)  # 5个以上相同字符保留3个
-        
+
         # 2. 移除或替换无语义的极端口语词（可选，根据需求调整）
         # 这里示例移除一些可能无实际语义的强感叹词，避免影响核心语义
         strong_interjections = [r'我操\s*', r'他妈\s*的', r'哈哈哈\s*']
         for pattern in strong_interjections:
             text = re.sub(pattern, '', text)
-        
+
         # 3. 确保文本两端无多余空格
         text = text.strip()
-        
+
         return text
 
 # %% [markdown]
@@ -219,14 +248,14 @@ class EmbeddingGenerator:
         """
         if not text:
             return []
-        
+
         chunks = []
-        
+
         # 1. 首先尝试按明显的章节或日期分割（针对日志）
         # 例如：按 "## "、"---"、日期行 "2025年11月27日" 分割
         major_sections = re.split(r'\n(?:#{1,3}\s+.*?|\-{3,}|\d{4}年\d{1,2}月\d{1,2}日.*?)\n', text)
         major_sections = [s.strip() for s in major_sections if s.strip()]
-        
+
         for section in major_sections:
             if len(section) <= self.chunk_size:
                 # 如果整个章节已经很小，直接作为一个块
@@ -244,12 +273,13 @@ class EmbeddingGenerator:
                         current_chunk = para + "\n\n"
                 if current_chunk:
                     chunks.append(current_chunk.strip())
-        
+
         # 3. 如果上述分割结果块数太少或太大，回退到句子级分块
         if len(chunks) == 0 or max(len(c) for c in chunks) > self.chunk_size * 1.5:
-            log.debug("启用句子级分块回退")
-            chunks = self._split_by_sentences(text)
-        
+            log.debug(f"按照语义拆分不太合格：{[len(chunk) for chunk in chunks]}")
+            chunks = self._split_into_paragraphs_chunks(text)
+            log.debug(f"回退用段落甚至字符拆分后：{[len(chunk) for chunk in chunks]}")
+
         # 4. 为每个块构建初步元数据
         chunk_dicts = []
         for idx, chunk_content in enumerate(chunks):
@@ -265,43 +295,23 @@ class EmbeddingGenerator:
                 "word_count": len(chunk_content),
                 # 后续可在 joplinai.py 中补充 DeepSeek 生成的摘要或关键词
             }
+            # 到了这里再开始清理内容格式和无用文本
+            content = clean_text(chunk_content)
+            if len(content) < 10:
+                content = note_title
             chunk_dicts.append({
-                "content": chunk_content,
+                "content": content,
                 "metadata": chunk_metadata
             })
-        
+
         log.info(f"将文本分割成 {len(chunk_dicts)} 个语义块。")
         return chunk_dicts
 
 # %% [markdown]
-# ### _split_by_sentences(self, text: str) -> List[str]
+# ### _split_into_paragraphs_chunks(self, text: str) -> List[str]
 
     # %%
-    def _split_by_sentences(self, text: str) -> List[str]:
-        """按句子分块的回退方法，保持原有逻辑但可调整。"""
-        # 这里可以放入您原有的 _split_text_into_chunks 逻辑，或以下简化版：
-        sentences = re.split(r'[。！？；\n]', text)
-        chunks = []
-        current_chunk = ""
-        for sent in sentences:
-            sent = sent.strip()
-            if not sent:
-                continue
-            if len(current_chunk) + len(sent) <= self.chunk_size:
-                current_chunk += sent + "。"
-            else:
-                if current_chunk:
-                    chunks.append(current_chunk)
-                current_chunk = sent + "。"
-        if current_chunk:
-            chunks.append(current_chunk)
-        return chunks
-
-# %% [markdown]
-# ### _split_text_into_chunks(self, text: str) -> List[str]
-
-    # %%
-    def _split_text_into_chunks(self, text: str) -> List[str]:
+    def _split_into_paragraphs_chunks(self, text: str) -> List[str]:
         """优化分块：优先按自然段落、日期分隔符划分，其次按句子，最后才按字符。"""
         if len(text) <= self.chunk_size:
             return [text]
@@ -391,14 +401,15 @@ class EmbeddingGenerator:
     # %%
     def get_ollama_embedding_safe(self, text: str, max_retries: int = 3) -> list:
         """调用本地Ollama服务生成嵌入，增加对长文本/异常文本的容错处理"""
-        if not text or len(text.strip()) < 1:
-            log.warning("输入文本为空或过短，返回零向量")
-            # return [0.0] * self.embedding_dim
-            return []
-    
         # 1. 关键预处理：对文本进行清洗和规范化
         processed_text = self._preprocess_text_for_embedding(text)
-    
+
+        if not processed_text or len(processed_text.strip()) < 6:
+            # log.warning("输入文本为空或过短，返回零向量")
+            # return [0.0] * self.embedding_dim
+            log.warning("输入文本为空或过短，返回空列表")
+            return []
+
         # 2. (可选但推荐) 估算token长度并主动截断
         # 假设模型最大上下文为512 tokens，我们设定一个安全阈值（如450 tokens）
         estimated_tokens = self._estimate_token_count(processed_text)
@@ -408,8 +419,8 @@ class EmbeddingGenerator:
                 f"文本预估token数({estimated_tokens})超过安全阈值({safe_token_limit})，将进行智能截断"
             )
             processed_text = self._smart_truncate(processed_text, safe_token_limit)
-            log.debug(f"截断后文本预览: {processed_text[:100]}...")
-    
+            log.debug(f"截断后文本预览: {processed_text[:50]}...")
+
         # 3. 带重试的请求逻辑，并特别处理“长度超限”错误
         for attempt in range(max_retries):
             try:
@@ -441,7 +452,7 @@ class EmbeddingGenerator:
                         )
                         time.sleep(1)
                         continue
-    
+
                 response.raise_for_status()
                 result = response.json()
                 embedding = result.get("embedding")
@@ -452,17 +463,17 @@ class EmbeddingGenerator:
                         f"返回的嵌入向量格式异常或维度不符，尝试 {attempt + 1}/{max_retries}"
                     )
                     time.sleep(1)
-    
+
             except Exception as e:
                 log.error(f"请求Ollama API失败(尝试{attempt + 1}/{max_retries}): {e}")
                 if attempt == max_retries - 1:
                     break
                 time.sleep(2**attempt)  # 指数退避
-    
+
         # 所有重试均失败后的降级策略
-        log.error(f"为文本生成嵌入最终失败，文本预览: '{text[:150]}...'。将返回安全向量。")
         # 返回一个零向量或随机向量，确保流程不中断
         # return [0.0] * self.embedding_dim
+        log.error(f"为文本生成嵌入最终失败，将返回空列表，该文本如下: '{text[:50]}...'")
         return []
 
 # %% [markdown]
@@ -521,42 +532,16 @@ class EmbeddingGenerator:
             return embedding
         else:
             # 默认用本地Ollama嵌入（保留您已优化的分块逻辑）
-            log.info("使用本地Ollama嵌入")
-            self.get_model_max_context()
-            chunks = self._split_text_into_chunks(text)
+            log.info(f"使用本地Ollama嵌入，模型为：{self.model_name}")
+            embedding = self.get_ollama_embedding(text)
+            # 如果文本块中有嵌入量化操作失败，返回空列表，方便后面捕捉，避免写入残值导致误判
+            if not embedding:
+                log.debug(f"问题文本块如下：\n{text}\n再次用更保守又是更安全的方式处理…………")
+                embedding = self.get_ollama_embedding_safe(text)
+                if not embedding:
+                    log.error(f"多次尝试处理问题文本块仍然失败，返回空向量列表。问题文本块如下：\n{text}")
+                    return []
 
-            if not chunks:
-                return []
-
-            log.info(
-                f"文本分块: {len(chunks)}块（每块{self.chunk_size}字符），实际每块字符数量{[len(chunk) for chunk in chunks]}"
-            )
-
-            # 顺序处理（避免并发问题）
-            embeddings = []
-            for i, chunk in enumerate(chunks):
-                emb = self.get_ollama_embedding(chunk)
-                if emb:
-                    embeddings.append(emb)
-                else:  # 如果文本块中有嵌入量化操作失败，返回空列表，方便后面捕捉，避免写入残值导致误判
-                    log.error(
-                        f"处理文本块列表{[len(chunk) for chunk in chunks]}的第{i}块时出错，未有效获取嵌入向量"
-                    )
-                    log.debug(f"问题文本块如下：\n{chunk}\n再次用更保守又是更安全的方式处理…………")
-                    emb = self.get_ollama_embedding_safe(chunk)
-                    if emb:
-                        embeddings.append(emb)
-                    else:
-                        log.error(
-                            f"多次尝试处理文本块列表{[len(chunk) for chunk in chunks]}的第{i}块时出错，未有效获取嵌入向量"
-                        )
-                        return []
-
-            if not embeddings:
-                return []
-
-            # 简单平均合并
-            embedding = [sum(dim) / len(embeddings) for dim in zip(*embeddings)]
             # 存储到缓存
             if embedding:
                 self.embedding_cache[text_hash] = embedding
