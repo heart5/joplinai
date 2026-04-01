@@ -310,6 +310,24 @@ class VectorDBManager:
 
 
 # %% [markdown]
+# ### delete_chunks_by_note_id(self, note_id: str) -> int
+
+    # %%
+    def delete_chunks_by_note_id(self, note_id: str) -> int:
+        """删除属于某个笔记的所有块"""
+        if not self.collection:
+            return 0
+        try:
+            # 查询所有包含此 note_id 的块
+            results = self.collection.get(where={"source_note_id": note_id})
+            if results and results['ids']:
+                self.collection.delete(ids=results['ids'])
+                return len(results['ids'])
+        except Exception as e:
+            log.error(f"按笔记ID删除块失败: {e}")
+        return 0
+
+# %% [markdown]
 # ### search_similar_notes(self, query: str, n_results: int = 5) -> List[Dict]
 
     # %%
