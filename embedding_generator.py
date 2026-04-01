@@ -131,7 +131,7 @@ class EmbeddingGenerator:
 # %% [markdown]
 # ### clean_text(text: str) -> str
     # %%
-    def clean_text(text: str) -> str:
+    def clean_text(self, text: str) -> str:
         """清理笔记文本：移除图片、格式符号、多余换行"""
         if not text:
             return ""
@@ -267,7 +267,7 @@ class EmbeddingGenerator:
 
         if not date_matches:
             # 如果没有找到这种格式的日期行，则回退到原有的语义分割逻辑
-            log.debug(“笔记未检测到‘### 日期’格式，回退至通用语义分块。”)
+            log.debug("笔记未检测到‘### 日期’格式，回退至通用语义分块。")
             major_sections = re.split(r'\n(?:#{1,3}\s+.*?|\-{3,}|\d{4}年\d{1,2}月\d{1,2}日.*?)\n', text)
             major_sections = [s.strip() for s in major_sections if s.strip()]
             chunks = major_sections # 后续会对这些块进行大小判断和二次分割
