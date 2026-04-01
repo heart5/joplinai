@@ -182,6 +182,46 @@ class EmbeddingGenerator:
         return text
 
 # %% [markdown]
+# ### _convert_health_data_to_text(self, raw_content: str) -> str
+
+    # %%
+    def _convert_health_data_to_text(self, raw_content: str) -> str:
+        """
+        将健康笔记中的结构化数据行转换为自然语言描述。
+        示例输入: "110，4：14" -> "今日步数110步，睡眠时长4小时14分钟。"
+        示例输入: "799，7：44，1" -> "今日步数799步，睡眠时长7小时44分钟，喝啤酒1瓶。"
+        """
+        lines = raw_content.strip().split('\n')
+        converted_lines = []
+        
+        for line in lines:
+            line = line.strip()
+            # 匹配数字模式：如 "110，4：14" 或 "11033，4：7，4"
+            if re.match(r'^\d+[，,]\s*\d+[:：]\d+([，,]\s*\d+)?$', line):
+                parts = re.split(r'[，,]\s*', line)
+                if len(parts) >= 2:
+                    # 解析步数
+                    steps = parts
+                    desc = f"今日步数{steps}步，"
+                    
+                    # 解析睡眠时间（格式如 4:14 或 4：14）
+                    sleep_time = parts[1].replace('：', ':')
+                    if ':' in sleep_time:
+                        sleep_parts = sleep_time.split(':')
+                        if len(sleep_parts) == 2:
+                            desc += f"睡眠时长{sleep_parts[0]}小时{sleep_parts[1]}分钟"
+                    
+                    # 解析啤酒数量（如果有）
+                    if len(parts) >= 3 and parts[2].isdigit():
+                        beer_count = parts
+                        desc += f"，喝啤酒{beer_count}瓶"
+                    
+                    line = desc + "。"
+            converted_lines.append(line)
+        
+        return '\n'.join(converted_lines)
+
+# %% [markdown]
 # ### _estimate_token_count(self, text: str) -> int
 
     # %%
@@ -311,13 +351,15 @@ class EmbeddingGenerator:
         # 后续逻辑保持不变：对每个初步分割出的块，检查大小，如果过大则进行二次分割。
         final_chunks = []
         for raw_chunk in chunks:
-            if len(raw_chunk) <= self.chunk_size * 1.1:
+            # 在分割逻辑中，对每个 raw_chunk 进行转换，当下仅针对《健康运动笔记》
+            converted_chunk = self._convert_health_data_to_text(raw_chunk)
+            if len(converted_chunk) <= self.chunk_size * 1.1:
                 # 如果块大小合理，直接使用
-                final_chunks.append(raw_chunk)
+                final_chunks.append(converted_chunk)
             else:
                 # 如果块过大，则调用原有的段落/句子级分割函数进行细化
-                log.debug(f"初步块过长({len(raw_chunk)}字符)，进行二次语义分割。")
-                sub_chunks = self._split_into_paragraphs_chunks(raw_chunk)
+                log.debug(f"初步块过长({len(converted_chunk)}字符)，进行二次语义分割。")
+                sub_chunks = self._split_into_paragraphs_chunks(converted_chunk)
                 final_chunks.extend(sub_chunks)
 
         # 如果经过上述步骤，分块结果仍然不理想，启用最终回退
