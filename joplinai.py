@@ -225,125 +225,163 @@ def process_note_chunks(
     embedding_generator: EmbeddingGenerator,
     config: Dict,
 ) -> bool:
-    """处理单条笔记（清理→分块→嵌入→入库），返回是否成功"""
-
+    """处理单条笔记（块级增量更新），返回是否成功"""
     try:
-        # === 新增：在开始处理前，清理此笔记所有旧块，避免出现孤儿块影响精度，造成干扰 ===
-        try:
-            # 假设 vector_db 有一个 delete_chunks_by_note_id 方法
-            deleted_count = vector_db.delete_chunks_by_note_id(note.id)
-            log.info(f"已清理笔记《{note.title}》的旧块，数量: {deleted_count}")
-        except Exception as e:
-            log.warning(f"清理笔记《{note.title}》旧块时失败: {e}，继续处理")
-            return (
-                False  # 从向量库清理指定笔记的相关块数据失败则返回False，方便后续处置
-            )
-        # === 清理结束 ===
-
-        # 获取笔记完整信息（含更新时间）
         note_detail = getnote(note.id)
         if not note_detail:
             log.warning(f"笔记《{note.title}》（{note.id}） 获取失败，跳过")
             return False
 
-        # 计算内容哈希（标题+正文）
-        current_hash = compute_content_hash(note.title, note.body)
-        current_update_time = (
-            note_detail.updated_time
-        )  # Joplin笔记的更新时间（Unix时间戳）
+        log.info(f"开始块级增量处理笔记: 《{note.title}》 (ID: {note.id})")
 
-        log.info(f"开始处理笔记: 《{note.title}》 (ID: {note.id})")
-        log.debug(f"原始正文长度: {len(note.body)} 字符")
+        # 1. 获取此笔记在向量库中所有现有块的 块ID->哈希 映射
+        existing_chunks_map = vector_db.get_existing_chunk_hashes(note.id)
+        log.info(
+            f"笔记《{note.title}》在向量库中存在 {len(existing_chunks_map)} 个旧块。"
+        )
 
+        # 2. 准备笔记文本并分块
         if len(note.body) < 20:
-            log.warning(f"清理后文本过短，可能全是图片链接")
-            # 尝试使用标题作为主要内容
             text = note.title
         else:
             text = f"{note.title}\n{note.body}"
-
-        # 获取标签
-        local_tags = get_tag_titles(note.id)  # 项目函数：获取笔记标签列表
+        local_tags = get_tag_titles(note.id)
         tags_str = ",".join(local_tags) if local_tags else ""
 
-        # 使用新的语义分块函数，返回字典，每个块包含元数据结构和文本块的基本信息
+        # 分块（此时每个块的 metadata 已包含 content_hash）
         chunk_dicts = embedding_generator.split_into_semantic_chunks(
             text=text, note_title=note.title, note_tags=tags_str
         )
-
         if not chunk_dicts:
             log.warning(f"笔记《{note.title}》分块后无内容，跳过。")
             return False
 
-        log.info(
-            f"笔记《{note.title}》（{note.id}）准备分块入库，嵌入维度：{embedding_generator.embedding_dim}"
-        )
+        # 3. 遍历新分出的每个块，决定是否需要处理
+        chunks_to_upsert = []  # 存放需要更新/插入的块信息
+        new_chunk_hashes = {}  # 记录本次处理所有新块的 预期块ID -> 内容哈希
+        skipped_chunks = 0
 
-        successful_chunks = 0
         for chunk_info in chunk_dicts:
             chunk_content = chunk_info["content"]
             base_metadata = chunk_info["metadata"]
+            chunk_hash = base_metadata.get("content_hash", "")  # 从元数据中取出哈希
 
-            # 为每个块生成嵌入
+            # 构建此块预期的最终块ID (与原有逻辑保持一致)
+            expected_chunk_id = f"{note.id}_chunk_{base_metadata['chunk_index']}"
+            new_chunk_hashes[expected_chunk_id] = chunk_hash  # 记录
+
+            # 检查是否需要处理此块
+            need_process = True
+            if expected_chunk_id in existing_chunks_map:
+                # 如果块ID已存在，且哈希值相同，则跳过
+                if existing_chunks_map[expected_chunk_id] == chunk_hash:
+                    log.debug(
+                        f"笔记《{note.title}》中的块 {base_metadata['chunk_index']} 内容未变，跳过嵌入生成。"
+                    )
+                    need_process = False
+                    skipped_chunks += 1
+                else:
+                    log.info(
+                        f"笔记《{note.title}》中的块 {base_metadata['chunk_index']} 内容哈希已变化，需要重新嵌入。"
+                    )
+            # 如果块ID不存在，则是全新块，需要处理
+
+            if need_process:
+                # 此块需要处理，加入待处理列表
+                chunks_to_upsert.append(
+                    {
+                        "chunk_id": expected_chunk_id,
+                        "content": chunk_content,
+                        "base_metadata": base_metadata,
+                    }
+                )
+
+        log.info(
+            f"笔记《{note.title}》共 {len(chunk_dicts)} 个块，其中 {skipped_chunks} 个跳过，{len(chunks_to_upsert)} 个需要处理。"
+        )
+
+        # 4. 处理所有需要更新的块
+        successful_upserts = 0
+        for chunk_data in chunks_to_upsert:
+            chunk_id = chunk_data["chunk_id"]
+            chunk_content = chunk_data["content"]
+            base_metadata = chunk_data["base_metadata"]
+
+            # 生成嵌入
             embedding = embedding_generator.get_merged_embedding(
                 chunk_content, config["enable_deepseek_embed"]
             )
             if not embedding:
                 log.warning(
-                    f"笔记《{note.title}》第{base_metadata['chunk_index']}块嵌入生成失败，跳过此块。"
+                    f"笔记《{note.title}》块 {base_metadata['chunk_index']} 嵌入生成失败，跳过此块。"
                 )
                 continue
 
-            # 存入向量数据库（以块为单位）
+            # DeepSeek 增强生成摘要和标签
+            enhanced_metadata = {}
             try:
-                # deepseek 生成 summary 和 tags
-                enhanced_metadata = {}
-                try:
-                    enhanced_metadata = enhance_by_deepseek_for_summary_tags(
-                        note, chunk_content, config
-                    )
-                except Exception as e:
-                    log.error(
-                        f"笔记《{note.title}》第{base_metadata['chunk_index']}块用deepseek增强生成小结和标签时失败: {e}",
-                        exc_info=True,
-                    )
-                # 构建完整的块元数据
-                metadata = {
-                    **base_metadata,
-                    **enhanced_metadata,
-                    "source_note_id": note.id,
-                }
-                vector_db.upsert_chunk(
-                    chunk_id=f"{note.id}_chunk_{base_metadata['chunk_index']}",  # 例如: f"{note.id}_chunk_{chunk_index}"
-                    text=chunk_content,
-                    embedding=embedding,
-                    tags=[
-                        tag.strip() for tag in metadata.get("tags", "").split(",")
-                    ],  # 或 应该是list类型
-                    metadata=metadata,
-                )
-                successful_chunks += 1
-                log.info(
-                    f"笔记《{note.title}》第{base_metadata['chunk_index']}块的增强元数据：{metadata}"
+                enhanced_metadata = enhance_by_deepseek_for_summary_tags(
+                    note, chunk_content, config
                 )
             except Exception as e:
                 log.error(
-                    f"笔记《{note.title}》第{base_metadata['chunk_index']}块存储块失败: {e}",
+                    f"对笔记《{note.title}》的块进行DeepSeek增强时失败: {e}",
                     exc_info=True,
                 )
 
-        if successful_chunks > 0:
+            # 构建完整元数据
+            metadata = {
+                **base_metadata,  # 包含 content_hash, estimated_date 等
+                **enhanced_metadata,  # 包含 chunk_summary, tags 等
+                "source_note_id": note.id,
+            }
+
+            # 存入向量数据库
+            try:
+                vector_db.upsert_chunk(
+                    chunk_id=chunk_id,
+                    text=chunk_content,
+                    embedding=embedding,
+                    tags=[tag.strip() for tag in metadata.get("tags", "").split(",")],
+                    metadata=metadata,
+                )
+                successful_upserts += 1
+                log.info(
+                    f"笔记《{note.title}》的块 {base_metadata['chunk_index']} 向量化入库更新成功。"
+                )
+            except Exception as e:
+                log.error(f"笔记《{note.title}》存储块失败: {e}", exc_info=True)
+
+        # 5. 智能清理“孤儿块”
+        # 找出那些存在于 existing_chunks_map，但不在本次新块列表 new_chunk_hashes 中的块ID
+        orphan_chunk_ids = [
+            chunk_id
+            for chunk_id in existing_chunks_map
+            if chunk_id not in new_chunk_hashes
+        ]
+        if orphan_chunk_ids:
+            deleted_count = vector_db.delete_chunks_by_id_list(orphan_chunk_ids)
             log.info(
-                f"笔记《{note.title}》处理完成，成功存储 {successful_chunks}/{len(chunk_dicts)} 个块。"
+                f"清理了笔记《{note.title}》相关的 {deleted_count} 个孤儿块（ID不在新分块中）。"
+            )
+        else:
+            log.info(f"未发现笔记《{note.title}》相关需要清理的孤儿块。")
+
+        # 6. 最终判断
+        total_processed = successful_upserts + skipped_chunks
+        if total_processed == len(chunk_dicts):
+            log.info(
+                f"笔记《{note.title}》块级增量处理完成。成功更新 {successful_upserts} 个块，跳过 {skipped_chunks} 个块。"
             )
             return True
         else:
-            log.error(f"笔记《{note.title}》所有块处理均失败。")
+            log.error(
+                f"笔记《{note.title}》处理不完整。预期{len(chunk_dicts)}块，实际处理{total_processed}块。"
+            )
             return False
+
     except Exception as e:
-        log.error(
-            f"向量化处理笔记《{note.title}》（{note.id}）失败: {e}", exc_info=True
-        )
+        log.error(f"块级增量处理笔记《{note.title}》失败: {e}", exc_info=True)
         return False
 
 
