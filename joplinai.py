@@ -180,6 +180,41 @@ def save_process_state(state: Dict, state_path: Path):
 # %% [markdown]
 # ### 笔记处理核心逻辑（增量更新+入库）
 # %% [markdown]
+# #### enhance_by_deepseek_for_summary_tags(note, chunk: str, config: Dict)
+
+# %%
+def enhance_by_deepseek_for_summary_tags(note, chunk: str, config: Dict):
+    """DeepSeek 官方模型增强生成小结和标签（和笔记既有标签进行融合）"""
+
+    from deepseek_enhancer import deepseek_process_note
+
+    enhanced_metadata = {}
+    if config["enable_deepseek_summary"]:
+        summary = deepseek_process_note(
+            chunk,
+            task="summary",
+            model=config.get("deepseek_chat_model", "deepseek-chat"),
+            use_cache=True,  # 启用缓存
+        )
+        enhanced_metadata["chunk_summary"] = summary or ""  # 存入摘要
+
+    if config["enable_deepseek_tags"]:
+        tags_str = deepseek_process_note(
+            chunk,
+            task="tags",
+            model=config.get("deepseek_chat_model", "deepseek-chat"),
+            use_cache=True,  # 启用缓存
+        )
+        deepseek_tags = [t.strip() for t in tags_str.split(",")] if tags_str else []
+        # 合并本地标签与DeepSeek标签（去重）
+        local_tags = get_tag_titles(note.id)  # 项目函数：获取笔记标签列表
+        enhanced_tags = list(set(local_tags + deepseek_tags))
+        enhanced_metadata["tags"] = ",".join(enhanced_tags)
+
+    return enhanced_metadata
+
+
+# %% [markdown]
 # #### process_note_chunks(note, vector_db: VectorDBManager, embedding_generator: EmbeddingGenerator, config: Dict,) -> bool
 # %%
 def process_note_chunks(
@@ -215,7 +250,8 @@ def process_note_chunks(
         # 获取标签
         local_tags = get_tag_titles(note.id)  # 项目函数：获取笔记标签列表
         tags_str = ",".join(local_tags) if local_tags else ""
-        # 关键修改：使用新的语义分块函数
+
+        # 使用新的语义分块函数，返回字典，每个块包含元数据结构和文本块的基本信息
         chunk_dicts = embedding_generator.split_into_semantic_chunks(
             text=text, note_title=note.title, note_tags=tags_str
         )
@@ -223,47 +259,6 @@ def process_note_chunks(
         if not chunk_dicts:
             log.warning(f"笔记《{note.title}》分块后无内容，跳过。")
             return False
-
-        # -------------------------- DeepSeek增强加工（可选） --------------------------
-        enhanced_metadata = {}
-        # enhanced_metadata["note_id"] = note.id
-        try:
-            if config["enable_deepseek_summary"] and config["deepseek_api_key"]:
-                from deepseek_enhancer import deepseek_process_note
-
-                summary = deepseek_process_note(
-                    text,
-                    task="summary",
-                    model=config.get("deepseek_chat_model", "deepseek-chat"),
-                    use_cache=True,  # 启用缓存
-                )
-                enhanced_metadata["chunk_summary"] = summary or ""  # 存入摘要
-        except Exception as e:
-            log.error(f"笔记《{note.title}》（{note.id}） 嵌入生成失败，跳过。{e}")
-            return False
-
-        try:
-            if config["enable_deepseek_tags"] and config["deepseek_api_key"]:
-                tags_str = deepseek_process_note(
-                    text,
-                    task="tags",
-                    model=config.get("deepseek_chat_model", "deepseek-chat"),
-                    use_cache=True,  # 启用缓存
-                )
-                deepseek_tags = (
-                    [t.strip() for t in tags_str.split(",")] if tags_str else []
-                )
-                # 合并本地标签与DeepSeek标签（去重）
-                enhanced_tags = list(set(local_tags + deepseek_tags))
-            else:
-                enhanced_tags = local_tags
-
-            enhanced_metadata["tags"] = ",".join(enhanced_tags)
-        except Exception as e:
-            log.error(f"笔记《{note.title}》（{note.id}） 嵌入生成失败，跳过。{e}")
-            return false
-
-        log.debug(f"笔记《{note.title}》（{note.id}）增强元数据: {enhanced_metadata}")
 
         log.info(
             f"笔记《{note.title}》（{note.id}）准备分块入库，嵌入维度：{embedding_generator.embedding_dim}"
@@ -286,21 +281,36 @@ def process_note_chunks(
 
             # 存入向量数据库（以块为单位）
             try:
+                # deepseek 生成 summary 和 tags
+                enhanced_metadata = {}
+                try:
+                    enhanced_metadata = enhance_by_deepseek_for_summary_tags(
+                        note, chunk_content, config
+                    )
+                except Exception as e:
+                    log.error(
+                        f"笔记《{note.title}》第{base_metadata['chunk_index']}块用deepseek增强生成小结和标签时失败: {e}",
+                        exc_info=True,
+                    )
                 # 构建完整的块元数据
                 metadata = {
                     **base_metadata,
-                    **enhanced_metadata,  # 包含 deepseek 生成的 summary 和 tags
+                    **enhanced_metadata,
                     "source_note_id": note.id,
                 }
                 vector_db.upsert_chunk(
                     chunk_id=f"{note.id}_chunk_{base_metadata['chunk_index']}",  # 例如: f"{note.id}_chunk_{chunk_index}"
                     text=chunk_content,
                     embedding=embedding,
-                    tags=enhanced_tags,  # 或 local_tags，list类型
+                    tags=[
+                        tag.strip() for tag in metadata.get("tags", "").split(",")
+                    ],  # 或 应该是list类型
                     metadata=metadata,
                 )
                 successful_chunks += 1
-                log.info(f"{metadata}")
+                log.info(
+                    f"笔记《{note.title}》第{base_metadata['chunk_index']}块的增强元数据：{metadata}"
+                )
             except Exception as e:
                 log.error(
                     f"笔记《{note.title}》第{base_metadata['chunk_index']}块存储块失败: {e}",
