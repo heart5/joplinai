@@ -188,7 +188,9 @@ def save_process_state(state: Dict, state_path: Path):
 def enhance_by_deepseek_for_summary_tags(note, chunk: str, config: Dict):
     """DeepSeek 官方模型增强生成小结和标签（和笔记既有标签进行融合）"""
 
-    from deepseek_enhancer import deepseek_process_note
+    from deepseek_enhancer import deepseek_process_note, get_cache_manager
+
+    log.info(get_cache_manager.get_stats())
 
     enhanced_metadata = {}
     if config["enable_deepseek_summary"]:
