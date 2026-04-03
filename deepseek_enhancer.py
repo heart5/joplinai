@@ -102,6 +102,8 @@ def get_cache_manager():
     _ensure_cache_dir()
     if _CACHE_MANAGER is None:
         _CACHE_MANAGER = SQLiteCacheManager(db_path=CACHE_FILE)
+    # _CACHE_MANAGER.import_from_json_directory(CACHE_DIR, clear_existing=True)
+    _CACHE_MANAGER.import_from_json_directory(CACHE_DIR)
     return _CACHE_MANAGER
 
 
@@ -115,25 +117,10 @@ def _get_content_hash(text: str) -> str:
 
 
 # %% [markdown]
-# ## get_cached_result(content_hash: str, task: str) -> Optional[str]
-
-# %%
-def get_cached_result(content_hash: str, task: str) -> Optional[str]:
-    """获取缓存结果"""
-    return get_cache_manager().get(content_hash, task)
-
-
-# %% [markdown]
-# ## save_to_cache(content_hash: str, task: str, result: str)
-
-# %%
-def save_to_cache(content_hash: str, task: str, result: str):
-    """保存结果到缓存"""
-    get_cache_manager().set(content_hash, task, result)
-
-
-# %% [markdown]
 # # 增强功能1：DeepSeek嵌入（提升向量质量）
+
+# %% [markdown]
+# ## get_deepseek_embedding(text: str, model: str = DEFAULT_EMBED_MODEL, max_retries: int = 3) -> Optional[List[float]]
 
 # %%
 @timethis
@@ -187,6 +174,9 @@ def get_deepseek_embedding(
 # %% [markdown]
 # # 增强功能2：DeepSeek大模型（笔记智能加工）
 
+# %% [markdown]
+# ## deepseek_process_note(text: str, task: str = "summary", model: str = DEFAULT_CHAT_MODEL, max_retries: int = 3, use_cache: bool = True,) -> Optional[str]
+
 # %%
 @timethis
 def deepseek_process_note(
@@ -194,9 +184,119 @@ def deepseek_process_note(
     task: str = "summary",
     model: str = DEFAULT_CHAT_MODEL,
     max_retries: int = 3,
-    use_cache: bool = True,  # 新增参数，控制是否使用缓存
+    use_cache: bool = True,
 ) -> Optional[str]:
-    """DeepSeek大模型处理"""
+    """DeepSeek大模型处理（集成智能验证机制）"""
+    if not DEEPSEEK_API_KEY:
+        log.warning("未配置DeepSeek API Key")
+        return None
+
+    if not use_cache:
+        # 不使用缓存，直接调用API
+        return _call_deepseek_api_directly(text, task, model, max_retries)
+
+    # 使用缓存流程
+    content_hash = _get_content_hash(text[:8000])
+    cache_manager = get_cache_manager()
+
+    # 1. 查询缓存（此时cache_manager只返回数据，不调用API）
+    cache_result = cache_manager.get(content_hash, task)
+
+    if cache_result.content is not None:
+        # 缓存命中
+        log.info(f"缓存命中 {task}: {content_hash[:12]}")
+
+        # 2. 检查是否需要验证
+        if cache_result.requires_validation:
+            log.info(f"缓存条目达到验证阈值，启动异步验证: {content_hash[:12]}")
+            # 重要：这里可以同步验证，但为了不阻塞当前请求，建议异步或后台执行。
+            # 以下是同步验证的示例（可能会增加本次请求的延迟）：
+            _validate_cache_entry_in_background(
+                original_text=text[:8000],
+                task=task,
+                cache_key=cache_result.cache_key,
+                cached_content=cache_result.content,
+                model=model,
+                max_retries=max_retries,
+            )
+            # 注意：_validate_cache_entry_in_background 函数应立即返回，实际验证在后台线程进行。
+
+        # 3. 无论是否需要验证，都先返回当前缓存的内容
+        return cache_result.content
+
+    # 缓存未命中，调用API获取新结果
+    log.info(f"缓存未命中，调用API: {task} for {content_hash[:12]}")
+    new_result = _call_deepseek_api_directly(text, task, model, max_retries)
+
+    if new_result:
+        # 将新结果保存到缓存
+        cache_manager.set(content_hash, task, new_result)
+        log.info(f"新结果已缓存: {content_hash[:12]}")
+
+    return new_result
+
+
+# %% [markdown]
+# ## _validate_cache_entry_in_background(original_text: str, task: str, cache_key: str, cached_content: str, model: str, max_retries: int)
+
+# %%
+def _validate_cache_entry_in_background(
+    original_text: str,
+    task: str,
+    cache_key: str,
+    cached_content: str,
+    model: str,
+    max_retries: int,
+):
+    """
+    在后台执行验证的逻辑。
+    实际部署时，可以将此函数放入线程池、任务队列或异步框架中。
+    """
+    # 这里为了简化，展示同步逻辑。生产环境应使用 threading.Thread 或 asyncio。
+    try:
+        # 发起一次新的、不经过缓存的API调用
+        new_result = _call_deepseek_api_directly(
+            original_text, task, model, max_retries, use_cache=False
+        )
+
+        if new_result is None:
+            # API调用失败
+            get_cache_manager().update_on_validation(
+                cache_key, None, validation_successful=False
+            )
+            return
+
+        # 对比结果
+        if new_result.strip() == cached_content.strip():
+            # 内容未变
+            get_cache_manager().update_on_validation(
+                cache_key, None, validation_successful=True
+            )
+        else:
+            # 内容已变，更新缓存
+            log.warning(f"验证发现内容变化，更新缓存: {cache_key[:12]}...")
+            get_cache_manager().update_on_validation(
+                cache_key, new_result, validation_successful=True
+            )
+    except Exception as e:
+        log.error(f"后台验证过程异常: {e}")
+        get_cache_manager().update_on_validation(
+            cache_key, None, validation_successful=False
+        )
+
+
+# %% [markdown]
+# ## _call_deepseek_api_directly(text: str, task: str, model: str, max_retries: int, use_cache: bool = False) -> Optional[str]
+
+# %%
+@timethis
+def _call_deepseek_api_directly(
+    text: str, task: str, model: str, max_retries: int, use_cache: bool = False
+) -> Optional[str]:
+    """DeepSeek大模型处理
+    直接调用DeepSeek API的核心函数。
+    注意：这个函数内部不应该再调用缓存逻辑，避免循环。
+    """
     if not DEEPSEEK_API_KEY:
         log.warning("未配置DeepSeek API Key")
         return None
@@ -217,14 +317,6 @@ def deepseek_process_note(
     
     请直接输出标签，不要有其他说明。""",
     }
-
-    # 缓存逻辑
-    if use_cache:
-        content_hash = _get_content_hash(text[:8000])  # 只哈希前8000字符，兼顾效率
-        cached_result = get_cached_result(content_hash, task)
-        if cached_result:
-            log.info(f"deepseek增强使用缓存{task}: {content_hash[:8]}")
-            return cached_result
 
     if task not in prompts:
         log.error(f"不支持的任务类型: {task}")
@@ -257,13 +349,6 @@ def deepseek_process_note(
             # print(response.json())
             result = response.json()["choices"][0]["message"]["content"].strip()
 
-            # 保存到缓存
-            if use_cache:
-                log.info(
-                    f"deepseek增强生成并缓存至文件《{CACHE_FILE}》。{task}: {content_hash[:8]}"
-                )
-                save_to_cache(content_hash, task, result)
-
             return result
         except Exception as e:
             log.warning(f"大模型调用失败({attempt + 1}/{max_retries}): {str(e)[:100]}")
@@ -280,3 +365,6 @@ if __name__ == "__main__":
         "请在100字之内介绍joplin笔记软件", task="summary", model="deepseek-chat"
     )
     print(result)
+
+# %%
+_CACHE_MANAGER.get_stats()
