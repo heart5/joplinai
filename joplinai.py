@@ -190,7 +190,7 @@ def enhance_by_deepseek_for_summary_tags(note, chunk: str, config: Dict):
 
     from deepseek_enhancer import deepseek_process_note, get_cache_manager
 
-    log.info(get_cache_manager.get_stats())
+    log.info(get_cache_manager().get_stats())
 
     enhanced_metadata = {}
     if config["enable_deepseek_summary"]:
