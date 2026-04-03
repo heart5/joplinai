@@ -369,6 +369,3 @@ if __name__ == "__main__":
         "请在100字之内介绍joplin笔记软件", task="summary", model="deepseek-chat"
     )
     print(result)
-
-# %%
-_CACHE_MANAGER.get_stats()
