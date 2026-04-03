@@ -372,6 +372,7 @@ class EmbeddingGenerator:
             log.debug(f"回退用段落甚至字符拆分后：{[len(chunk) for chunk in final_chunks]}")
 
         # ========== 构建块字典和元数据 ==========
+        final_chunks.reverse()  # 核心操作：反转列表，确保最早日期的idx稳定
         chunk_dicts = []
         # 复用第一步的统一正则进行日期提取，确保一致性
         for idx, chunk_content in enumerate(final_chunks):
