@@ -28,6 +28,7 @@ from datetime import datetime
 from typing import Dict, List, Optional
 
 import requests
+from cache_manager import SQLiteCacheManager
 
 # %%
 try:
@@ -73,12 +74,13 @@ DEFAULT_CHAT_MODEL = "deepseek-chat"  # DeepSeek大模型（示例）
 # # 缓存支持
 
 # %% [markdown]
-# ## 缓存路径
+# ## 初始化全局缓存管理器
 
 # %%
-# 缓存文件路径
+# 初始化全局缓存管理器（单例模式）
+_CACHE_MANAGER = None
 CACHE_DIR = getdirmain() / "data" / ".deepseek_cache"
-CACHE_FILE = CACHE_DIR / "note_processing_cache.json"
+CACHE_FILE = CACHE_DIR / "deepseek_cache.db"
 
 
 # %% [markdown]
@@ -92,6 +94,18 @@ def _ensure_cache_dir():
 
 
 # %% [markdown]
+# ## get_cache_manager()
+
+# %%
+def get_cache_manager():
+    global _CACHE_MANAGER
+    _ensure_cache_dir()
+    if _CACHE_MANAGER is None:
+        _CACHE_MANAGER = SQLiteCacheManager(db_path=CACHE_FILE)
+    return _CACHE_MANAGER
+
+
+# %% [markdown]
 # ## _get_content_hash(text: str) -> str
 
 # %%
@@ -101,51 +115,12 @@ def _get_content_hash(text: str) -> str:
 
 
 # %% [markdown]
-# ## _load_cache() -> Dict
-
-# %%
-def _load_cache() -> Dict:
-    """加载缓存文件"""
-    _ensure_cache_dir()
-    if os.path.exists(CACHE_FILE):
-        try:
-            with open(CACHE_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except:
-            return {}
-    return {}
-
-
-# %% [markdown]
-# ## _save_cache(cache_data: Dict)
-
-# %%
-def _save_cache(cache_data: Dict):
-    """保存缓存到文件"""
-    _ensure_cache_dir()
-    try:
-        with open(CACHE_FILE, "w", encoding="utf-8") as f:
-            json.dump(cache_data, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        log.warning(f"保存缓存失败: {e}")
-
-
-# %% [markdown]
 # ## get_cached_result(content_hash: str, task: str) -> Optional[str]
 
 # %%
 def get_cached_result(content_hash: str, task: str) -> Optional[str]:
     """获取缓存结果"""
-    cache = _load_cache()
-    cache_key = f"{content_hash}_{task}"
-
-    if cache_key in cache:
-        cached_item = cache[cache_key]
-        # 可选：检查缓存时间，设置过期（如30天）
-        # cache_time = datetime.fromisoformat(cached_item["timestamp"])
-        # if (datetime.now() - cache_time).days < 30:
-        return cached_item["result"]
-    return None
+    return get_cache_manager().get(content_hash, task)
 
 
 # %% [markdown]
@@ -154,23 +129,7 @@ def get_cached_result(content_hash: str, task: str) -> Optional[str]:
 # %%
 def save_to_cache(content_hash: str, task: str, result: str):
     """保存结果到缓存"""
-    cache = _load_cache()
-    cache_key = f"{content_hash}_{task}"
-
-    cache[cache_key] = {
-        "result": result,
-        "timestamp": datetime.now().isoformat(),
-        "task": task,
-    }
-
-    # 限制缓存大小（最多保存100000，十万条记录）
-    if len(cache) > 100000:
-        # 删除最旧的记录
-        oldest_keys = sorted(cache.keys(), key=lambda k: cache[k]["timestamp"])[:1000]
-        for key in oldest_keys:
-            del cache[key]
-
-    _save_cache(cache)
+    get_cache_manager().set(content_hash, task, result)
 
 
 # %% [markdown]
