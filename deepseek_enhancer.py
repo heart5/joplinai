@@ -204,11 +204,13 @@ def deepseek_process_note(
 
     if cache_result.content is not None:
         # 缓存命中
-        log.info(f"缓存命中 {task}: {content_hash[:12]}")
+        log.info(f"deepseek增强缓存命中 {task}: {content_hash[:12]}")
 
         # 2. 检查是否需要验证
         if cache_result.requires_validation:
-            log.info(f"缓存条目达到验证阈值，启动异步验证: {content_hash[:12]}")
+            log.info(
+                f"deepseek增强缓存条目达到验证阈值，启动异步验证: {content_hash[:12]}"
+            )
             # 重要：这里可以同步验证，但为了不阻塞当前请求，建议异步或后台执行。
             # 以下是同步验证的示例（可能会增加本次请求的延迟）：
             _validate_cache_entry_in_background(
@@ -225,13 +227,13 @@ def deepseek_process_note(
         return cache_result.content
 
     # 缓存未命中，调用API获取新结果
-    log.info(f"缓存未命中，调用API: {task} for {content_hash[:12]}")
+    log.info(f"deepseek增强缓存未命中，调用API: {task} for {content_hash[:12]}")
     new_result = _call_deepseek_api_directly(text, task, model, max_retries)
 
     if new_result:
         # 将新结果保存到缓存
         cache_manager.set(content_hash, task, new_result)
-        log.info(f"新结果已缓存: {content_hash[:12]}")
+        log.info(f"deepseek增强新结果已缓存: {content_hash[:12]}")
 
     return new_result
 
@@ -274,12 +276,12 @@ def _validate_cache_entry_in_background(
             )
         else:
             # 内容已变，更新缓存
-            log.warning(f"验证发现内容变化，更新缓存: {cache_key[:12]}...")
+            log.warning(f"deepseek增强验证发现内容变化，更新缓存: {cache_key[:12]}...")
             get_cache_manager().update_on_validation(
                 cache_key, new_result, validation_successful=True
             )
     except Exception as e:
-        log.error(f"后台验证过程异常: {e}")
+        log.error(f"deepseek增强后台验证过程异常: {e}")
         get_cache_manager().update_on_validation(
             cache_key, None, validation_successful=False
         )
@@ -319,7 +321,7 @@ def _call_deepseek_api_directly(
     }
 
     if task not in prompts:
-        log.error(f"不支持的任务类型: {task}")
+        log.error(f"deepseek增强不支持的任务类型: {task}")
         return None
 
     # 使用 % 格式化，避免花括号问题
@@ -343,7 +345,7 @@ def _call_deepseek_api_directly(
                 DEEPSEEK_CHAT_URL, headers=headers, json=payload, timeout=30
             )
             if response.status_code == 400:
-                log.error(f"聊天API 400错误: {response.text}")
+                log.error(f"deepseek增强聊天API 400错误: {response.text}")
                 return None
             response.raise_for_status()
             # print(response.json())
@@ -351,7 +353,9 @@ def _call_deepseek_api_directly(
 
             return result
         except Exception as e:
-            log.warning(f"大模型调用失败({attempt + 1}/{max_retries}): {str(e)[:100]}")
+            log.warning(
+                f"deepseek增强大模型调用失败({attempt + 1}/{max_retries}): {str(e)[:100]}"
+            )
             time.sleep(2**attempt)
     return None
 
