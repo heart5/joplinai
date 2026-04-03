@@ -284,6 +284,7 @@ class VectorDBManager:
             # "note_title": metadata.get("note_title", ""), # 也可能叫 note_title
             # 可以根据需要添加其他字段，如 chunk_index
             "chunk_index": metadata.get("chunk_index", 0),
+            "content_hash": metadata.get("content_hash", ""),
         }
 
         # 确保使用 upsert 方法
