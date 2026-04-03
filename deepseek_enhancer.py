@@ -103,7 +103,7 @@ def get_cache_manager():
     if _CACHE_MANAGER is None:
         _CACHE_MANAGER = SQLiteCacheManager(db_path=CACHE_FILE)
     # _CACHE_MANAGER.import_from_json_directory(CACHE_DIR, clear_existing=True)
-    _CACHE_MANAGER.import_from_json_directory(CACHE_DIR)
+    # _CACHE_MANAGER.import_from_json_directory(CACHE_DIR)
     return _CACHE_MANAGER
 
 
@@ -291,7 +291,6 @@ def _validate_cache_entry_in_background(
 # ## _call_deepseek_api_directly(text: str, task: str, model: str, max_retries: int, use_cache: bool = False) -> Optional[str]
 
 # %%
-@timethis
 def _call_deepseek_api_directly(
     text: str, task: str, model: str, max_retries: int, use_cache: bool = False
 ) -> Optional[str]:
