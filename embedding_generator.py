@@ -265,7 +265,7 @@ class EmbeddingGenerator:
     def _aggressive_text_reduction(self, text: str) -> str:
         """当模型明确报告超长时，采取更激进的文本缩减策略"""
         # 1. 直接截取前400个字符（保证极短）
-        safe_length = 400
+        safe_length = 450
         len_text = len(text)
         if len_text > safe_length:
             text = text[:safe_length]
@@ -278,10 +278,174 @@ class EmbeddingGenerator:
         return text
 
 # %% [markdown]
+# ### _normalize_single_date_unit(self, raw_text: str, captured_date: str) -> str
+
+    # %%
+    def _normalize_single_date_unit(self, raw_text: str, captured_date: str) -> str:
+        """
+        规范化单个日期单元的文本。
+        输入: 原始切片字符串 (如 "### 2026年4月3日\n16938，5：46，3\n...")
+        输出: 格式统一的字符串，确保相同日期的输出绝对一致。
+        """
+        lines = raw_text.splitlines()
+        if not lines:
+            return ""
+        
+        # 1. 规范化标题行：统一为 “### YYYY年MM月DD日” 格式
+        # 使用正则捕获的纯日期，避免原文本中“号”或空格的差异
+        normalized_header = f"### {captured_date}"
+        
+        # 2. 处理主体内容：去除标题行之后的连续空行，以及单元末尾的连续空行
+        body_lines = []
+        for line in lines[1:]:  # 从标题行之后开始
+            # 跳过开头的连续空行，直到遇到第一个非空行
+            if body_lines or line.strip():
+                body_lines.append(line.rstrip())  # 同时去除每行右侧空格
+        
+        # 去除末尾的连续空行
+        while body_lines and not body_lines[-1].strip():
+            body_lines.pop()
+        
+        # 3. 重新组装
+        # 如果主体为空，只返回标题行；否则用两个换行符连接标题和主体（常见格式）
+        if not body_lines:
+            return normalized_header
+        else:
+            # 注意：这里保持主体内部原有的换行结构，只规范边界
+            normalized_body = '\n'.join(body_lines)
+            return f"{normalized_header}\n\n{normalized_body}"
+
+# %% [markdown]
 # ### split_into_semantic_chunks(self, text: str, note_title: str = "", note_tags: str = "") -> List[Dict]
 
     # %%
     def split_into_semantic_chunks(
+        self, text: str, note_title: str = "", note_tags: str = ""
+    ) -> List[Dict]:
+        """将文本分割成语义块，并返回块字典列表。
+        【增强】使用统一的正则表达式处理带`###`或不带的日期行，确保日期保留在块头部并被提取。
+        """
+        if not text:
+            return []
+
+        chunks = []  # 存储初步分割的文本块
+
+        # ========== 第一步：统一按日期行进行一级分割 ==========
+        # 核心优化：使用一个正则，同时匹配“### 日期”和“日期”两种格式，并捕获日期部分
+        # 正则解释：
+        # ^                    : 行的开始（配合 re.MULTILINE）
+        # (?:###\s*)?          : 非捕获组，匹配可选的“###”及可能跟随的空格
+        # (\d{4}[-年/]\d{1,2}[-月/]\d{1,2}日?) : 捕获组1，匹配核心日期格式
+        # \s*$                 : 行尾可能有的空格
+        # 支持格式示例：
+        #   “### 2024年1月1日”
+        #   “2024年1月1日”
+        #   “2024-01-01”
+        #   “2024/01/01”
+        unified_date_pattern = re.compile(
+            r"^(?:###\s*)?(\d{4}[-年/]\d{1,2}[-月/]\d{1,2}[日号])\s*$", re.MULTILINE
+        )
+        date_matches = list(unified_date_pattern.finditer(text))
+
+        if not date_matches:
+            # 如果没有找到任何日期行，回退到原有的按章节分割逻辑
+            log.debug("笔记未检测到任何日期标题行，回退至通用章节分块。")
+            major_sections = re.split(r"\n(?:#{1,3}\s+.*?|\-{3,})\n", text)
+            major_sections = [s.strip() for s in major_sections if s.strip()]
+            chunks = major_sections
+        else:
+            # 找到日期行，统一按日期行分割，并确保日期行保留在块内
+            log.debug(
+                f"检测到 {len(date_matches)} 个日期标题行（含###或不含），将按此分割。"
+            )
+            for i, match in enumerate(date_matches):
+                date_line_start = match.start()
+                captured_date = match.group(1)  # 正则捕获的纯日期，如“2026年4月3日”
+                next_start = date_matches[i + 1].start() if i + 1 < len(date_matches) else len(text)
+
+                # 1. 提取原始日期单元字符串
+                raw_day_unit = text[date_line_start:next_start]
+
+                # 2. 【核心】规范化此日期单元
+                # 目标：统一格式，消除因文本全局位置变化带来的边界差异
+                normalized_unit = self._normalize_single_date_unit(raw_day_unit, captured_date)
+
+                # 3. 将规范化后的单元加入列表
+                chunks.append(normalized_unit)
+            # 处理第一个日期行之前可能存在的文本（如笔记开头的说明）
+            if date_matches[0].start() > 0:
+                preface = text[: date_matches[0].start()].strip()
+                if preface:
+                    chunks.insert(0, preface)  # 将前言作为第一个块
+        # 利用“日期倒序更新”特征，反转后，最早的日期块索引永远为0
+        chunks.reverse()
+        log.debug(f"笔记《{note_title}》完成日期单元规范化与列表反转，共得到 {len(chunks)} 个块。")
+        # ========== 第一步结束 ==========
+
+        # 后续逻辑保持不变：对每个初步分割出的块，检查大小，如果过大则进行二次分割。
+        final_chunks = []
+        for raw_chunk in chunks:
+            # 在分割逻辑中，对每个 raw_chunk 进行转换，当下仅针对《健康运动笔记》
+            converted_chunk = self._convert_health_data_to_text(raw_chunk)
+            if len(converted_chunk) <= self.chunk_size * 1.1:
+                # 如果块大小合理，直接使用
+                final_chunks.append(converted_chunk)
+            else:
+                # 如果块过大，则调用原有的段落/句子级分割函数进行细化
+                log.debug(f"初步块过长({len(converted_chunk)}字符)，进行二次语义分割。")
+                sub_chunks = self._split_into_paragraphs_chunks(converted_chunk)
+                final_chunks.extend(sub_chunks)
+
+        # 如果经过上述步骤，分块结果仍然不理想，启用最终回退
+        if not final_chunks or (
+            len(final_chunks) == 1 and len(final_chunks[0]) >= self.chunk_size * 1.1
+        ):
+            log.debug(f"按照语义拆分不太合格：{[len(chunk) for chunk in final_chunks]}")
+            final_chunks = self._split_into_paragraphs_chunks(text)
+            log.debug(f"回退用段落甚至字符拆分后：{[len(chunk) for chunk in final_chunks]}")
+
+        # ========== 构建块字典和元数据 ==========
+        chunk_dicts = []
+        # 复用第一步的统一正则进行日期提取，确保一致性
+        for idx, chunk_content in enumerate(final_chunks):
+            estimated_date = ""
+            # 优先从块的开头匹配日期（因为分割逻辑已保证日期行在头部）
+            # 再次使用相同的 unified_date_pattern，但用 match 从开头搜索
+            date_at_start = unified_date_pattern.match(chunk_content.strip())
+            if date_at_start:
+                estimated_date = date_at_start.group(1)
+            else:
+                # 如果开头没有（例如是前言块），则在块内搜索第一个日期作为估算
+                date_in_chunk = unified_date_pattern.search(chunk_content)
+                if date_in_chunk:
+                    estimated_date = date_in_chunk.group(1)
+
+            # 清理内容格式
+            content = self.clean_text(chunk_content)
+            if len(content) < 10:
+                content = note_title
+            # === 计算此块的内容哈希 ===
+            chunk_hash = hashlib.md5(chunk_content.encode('utf-8')).hexdigest()
+            chunk_metadata = {
+                "chunk_index": idx,
+                "source_note_title": note_title,
+                "source_note_tags": note_tags,
+                "estimated_date": estimated_date,  # 现在能正确提取
+                "word_count": len(chunk_content),
+                # === 将哈希存入元数据 ===
+                "content_hash": chunk_hash,
+            }
+            chunk_dicts.append({"content": content, "metadata": chunk_metadata})
+
+        log.info(f"将文本分割成 {len(chunk_dicts)} 个语义块。")
+        # print(chunk_dicts)
+        return chunk_dicts
+
+# %% [markdown]
+# ### split_into_semantic_chunks_other3(self, text: str, note_title: str = "", note_tags: str = "") -> List[Dict]
+
+    # %%
+    def split_into_semantic_chunks_other3(
         self, text: str, note_title: str = "", note_tags: str = ""
     ) -> List[Dict]:
         """将文本分割成语义块，并返回块字典列表。
@@ -388,6 +552,10 @@ class EmbeddingGenerator:
                 if date_in_chunk:
                     estimated_date = date_in_chunk.group(1)
 
+            # 清理内容格式
+            content = self.clean_text(chunk_content)
+            if len(content) < 10:
+                content = note_title
             # === 计算此块的内容哈希 ===
             chunk_hash = hashlib.md5(chunk_content.encode('utf-8')).hexdigest()
             chunk_metadata = {
@@ -399,10 +567,6 @@ class EmbeddingGenerator:
                 # === 将哈希存入元数据 ===
                 "content_hash": chunk_hash,
             }
-            # 清理内容格式
-            content = self.clean_text(chunk_content)
-            if len(content) < 10:
-                content = note_title
             chunk_dicts.append({"content": content, "metadata": chunk_metadata})
 
         log.info(f"将文本分割成 {len(chunk_dicts)} 个语义块。")
@@ -772,7 +936,7 @@ class EmbeddingGenerator:
             except Exception as e:
                 log.warning(f"嵌入失败({attempt + 1}/3): {str(e)[:100]}")
                 time.sleep(2**attempt)
-    
+
         log.error(f"嵌入生成最终失败: {self.model_name}, 文本长度{len(text)}")
         return []
 
