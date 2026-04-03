@@ -238,6 +238,7 @@ def process_note_chunks(
 
         # 1. 获取此笔记在向量库中所有现有块的 块ID->哈希 映射
         existing_chunks_map = vector_db.get_existing_chunk_hashes(note.id)
+        # print(existing_chunks_map)
         log.info(
             f"笔记《{note.title}》在向量库中存在 {len(existing_chunks_map)} 个旧块。"
         )
