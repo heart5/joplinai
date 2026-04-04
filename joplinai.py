@@ -331,6 +331,8 @@ def process_note_chunks(
                     exc_info=True,
                 )
 
+            if len(chunk_content) > embedding_generator.chunk_size * 0.7:
+                enhanced_metadata["potential_long_chunk"] = True
             # 构建完整元数据
             metadata = {
                 **base_metadata,  # 包含 content_hash, estimated_date 等
