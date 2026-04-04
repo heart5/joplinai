@@ -222,6 +222,30 @@ class EmbeddingGenerator:
         return '\n'.join(converted_lines)
 
 # %% [markdown]
+# ### _condense_dense_lists(self, text: str) -> str
+
+    # %%
+    def _condense_dense_lists(self, text: str) -> str:
+        """
+        尝试浓缩密集的列表文本，减少token数量但保留关键信息。
+        例如：将“A、B、C、D、E”浓缩为“A等5人”。
+        """
+        import re
+        # 匹配中文顿号分隔的列表模式，如“张三、李四、王五”
+        pattern = r'([\u4e00-\u9fa5]{2,4}、){3,}[\u4e00-\u9fa5]{2,4}'
+        matches = re.findall(pattern, text)
+
+        for match in matches:
+            original = match
+            # 提取所有人名
+            names = original.split('、')
+            if len(names) > 4:  # 仅对较长的列表进行浓缩
+                condensed = f"{names[0]}、{name[1]}等{len(names)}人"
+                text = text.replace(original, condensed)
+                log.debug(f"浓缩密集列表: {original[:20]}... -> {condensed}")
+        return text
+
+# %% [markdown]
 # ### _estimate_token_count(self, text: str) -> int
 
     # %%
@@ -290,6 +314,61 @@ class EmbeddingGenerator:
         import re
         text = re.sub(r'(.)\1{2,}', r'\1', text)  # 3个以上相同字符保留1个
 
+        return text
+
+# %% [markdown]
+# ### _reduce_text_length(self, text: str, max_chars: int = 400) -> str
+
+    # %%
+    def _reduce_text_length(self, text: str, max_chars: int = 400) -> str:
+        """智能缩减文本长度，优先保留信息密度高的部分。"""
+        if len(text) <= max_chars:
+            return text
+
+        original_len = len(text)
+        log.warning(f"文本过长({original_len}字符)，启动智能缩减。")
+
+        # 策略1: 移除纯格式性、低信息量的行（如空行、纯分隔符）
+        lines = text.splitlines()
+        filtered_lines = []
+        for line in lines:
+            stripped = line.strip()
+            # 保留非空行，且不是纯符号或数字编号的行
+            if stripped and not re.match(r'^[\s\-*=•·●○◆◇■□▣▢▤▥▦▧▨▩▱▰]*$', stripped):
+                filtered_lines.append(line)
+        text = '\n'.join(filtered_lines)
+
+        # 策略2: 如果仍是长列表，尝试浓缩（调用上述新方法）
+        text = self._condense_dense_lists(text)
+
+        # 策略3: 若仍超长，进行关键句提取（简易版）
+        if len(text) > max_chars:
+            # 优先保留包含日期、数字、关键动词（如“总结”、“认为”、“记录”）的句子
+            sentences = re.split(r'(?<=[。！？；\n])', text)
+            important_sentences = []
+            for sent in sentences:
+                # 简单的关键词启发式规则
+                if (re.search(r'\d{4}年\d{1,2}月\d{1,2}日', sent) or
+                    re.search(r'\b(总计|合计|主要|关键|总结|认为|记录|建议)\b', sent) or
+                    re.search(r'[A-Za-z\u4e00-\u9fa5]{2,}：[^。]+', sent)):  # 包含冒号定义的项
+                    important_sentences.append(sent)
+            if important_sentences:
+                text = ''.join(important_sentences)
+                log.debug(f"通过关键句提取缩减文本。")
+
+        # 策略4: 最后防线，按段落截断但添加标记
+        if len(text) > max_chars:
+            # 不是粗暴截断，而是找到最近的段落结束处
+            truncated = text[:max_chars]
+            # 尝试在段落边界处截断
+            last_para_break = truncated.rfind('\n\n')
+            if last_para_break > max_chars * 0.5:  # 如果能找到合理的段落边界
+                text = truncated[:last_para_break] + f"\n\n【注：因长度限制，后续内容已省略。原始文本共{original_len}字符。】"
+            else:
+                text = truncated + f"...【文本截断，原始长度{original_len}字符】"
+            log.warning(f"文本经智能缩减后仍超长，已进行截断并添加标记。")
+
+        log.info(f"智能缩减完成: {original_len} -> {len(text)} 字符")
         return text
 
 # %% [markdown]
@@ -402,6 +481,7 @@ class EmbeddingGenerator:
         for raw_chunk in chunks:
             # 在分割逻辑中，对每个 raw_chunk 进行转换，当下仅针对《健康运动笔记》
             converted_chunk = self._convert_health_data_to_text(raw_chunk)
+            converted_chunk = self._condense_dense_lists(converted_chunk)
             if len(converted_chunk) <= self.chunk_size * 1.1:
                 # 如果块大小合理，直接使用
                 final_chunks.append(converted_chunk)
@@ -775,46 +855,55 @@ class EmbeddingGenerator:
 
     # %%
     def _split_into_paragraphs_chunks(self, text: str) -> List[str]:
-        """优化分块：优先按自然段落、日期分隔符划分，其次按句子，最后才按字符。"""
-        if len(text) <= self.chunk_size:
-            return [text]
-    
+        """按段落和句子分割文本，确保块大小更均匀、安全。"""
+        if not text:
+            return []
+
+        # 1. 按双换行符分割段落
+        paragraphs = [p.strip() for p in text.split('\n\n') if p.strip()]
         chunks = []
-        paragraphs = text.split('\n\n')  # 首先尝试按空行（段落）分割
-    
         current_chunk = ""
+
+        SAFETY_FACTOR = 0.7  # 更保守的阈值，避免块接近上限
+        target_size = int(self.chunk_size * SAFETY_FACTOR)
+
         for para in paragraphs:
-            # 如果当前段落本身就很长，尝试按句子分割
-            if len(para) > self.chunk_size * 0.8:
-                sentences = re.split(r'[。！？；\n]', para)
+            # 如果单个段落就超过安全阈值，需要按句子进一步分割
+            if len(para) > target_size:
+                # 先保存已积累的块
+                if current_chunk:
+                    chunks.append(current_chunk.strip())
+                    current_chunk = ""
+                # 对长段落进行句子级分割
+                sentences = re.split(r'(?<=[。！？；\n])', para)
                 for sent in sentences:
-                    if len(current_chunk) + len(sent) <= self.chunk_size:
-                        current_chunk += sent
+                    sent = sent.strip()
+                    if not sent:
+                        continue
+                    if len(current_chunk) + len(sent) <= target_size:
+                        current_chunk += (sent if not current_chunk else " " + sent)
                     else:
                         if current_chunk:
                             chunks.append(current_chunk.strip())
                         current_chunk = sent
-            # 如果加上这个段落仍小于块大小，则合并
-            elif len(current_chunk) + len(para) <= self.chunk_size:
-                if current_chunk:
-                    current_chunk += "\n\n" + para
-                else:
-                    current_chunk = para
+            # 如果段落可以安全加入当前块
+            elif len(current_chunk) + len(para) <= target_size:
+                current_chunk += (para if not current_chunk else "\n\n" + para)
             else:
-                # 保存当前块，开始新块
+                # 当前块已满，保存并开始新块
                 if current_chunk:
                     chunks.append(current_chunk.strip())
                 current_chunk = para
-    
+
         # 添加最后一个块
         if current_chunk:
             chunks.append(current_chunk.strip())
-    
-        # 如果按段落分割后块还是太大，则回退到原有的基于字符的智能分块
-        if any(len(ch) > self.chunk_size * 1.2 for ch in chunks):
-            log.info("部分块过长，启用字符级分块回退")
+
+        # 最终检查：如果仍有块过大，启用最终回退（但应尽量避免走到这一步）
+        if any(len(ch) > self.chunk_size for ch in chunks):
+            log.warning("段落分割后仍存在过大块，启用字符级回退。")
             return self._split_text_into_chunks_fallback(text)
-    
+
         return chunks
 
 # %% [markdown]
@@ -965,48 +1054,53 @@ class EmbeddingGenerator:
         return self.embedding_cache.get(text_hash)
 
 # %% [markdown]
-# ### get_merged_embedding(self, text: str, enable_deepseek_embed: bool = False) -> List[float]
+# ### get_merged_embedding(self, text: str,) -> List[float]
     # %%
-    def get_merged_embedding(
-        self, text: str, enable_deepseek_embed: bool = False
-    ) -> List[float]:
+    def get_merged_embedding(self, text: str,) -> List[float]:
         # 计算文本哈希
         text_hash = hashlib.md5(text.encode()).hexdigest()
 
         # 检查缓存
         cached = self.get_cached_embedding(text_hash)
         if cached:
-            log.info(f"使用缓存嵌入: {text_hash[:8]}")
+            log.info(f"使用缓存嵌入: {text_hash[:12]}")
             return cached
 
-        """合并嵌入生成（本地嵌入为主，DeepSeek嵌入为增强选项）"""
-        if enable_deepseek_embed:
-            # 优先用DeepSeek增强嵌入
-            log.info("使用DeepSeek增强嵌入")
-            from deepseek_enhancer import get_deepseek_embedding
+        # 在尝试本地Ollama嵌入前，进行更精细的长度管理和降级策略
+        embedding = []
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                if attempt == 0:
+                    # 第一次尝试：使用原始或轻微预处理的文本
+                    processed_text = self._preprocess_text_for_embedding(text)
+                elif attempt == 1:
+                    # 第二次尝试：启用“智能缩减”，而非激进缩减
+                    log.warning(f"首次嵌入失败，尝试智能缩减文本(第{attempt+1}次重试)。")
+                    processed_text = self._preprocess_text_for_embedding(text)
+                    processed_text = self._reduce_text_length(processed_text, max_chars=int(self.chunk_size * 0.8))
+                else:
+                    log.warning(f"使用激进缩减进行最后尝试(第{attempt+1}次重试)。")
+                    processed_text = self._preprocess_text_for_embedding(text)
+                    processed_text = self._aggressive_text_reduction(processed_text)
 
-            embedding = get_deepseek_embedding(
-                text, model=config.get("deepseek_embed_model", "deepseek-embedding")
-            )
-            # 存储到缓存
-            if embedding:
-                self.embedding_cache[text_hash] = embedding
-                log.info(f"生成缓存嵌入: {text_hash[:8]}，{len(embedding)}")
-            return embedding
-        else:
-            # 默认用本地Ollama嵌入（保留您已优化的分块逻辑）
-            log.info(f"使用本地Ollama嵌入，模型为：{self.model_name}")
-            embedding = self.get_ollama_embedding(text)
-            # 如果文本块中有嵌入量化操作失败，返回空列表，方便后面捕捉，避免写入残值导致误判
-            if not embedding:
-                log.debug(f"问题文本块如下：\n{text}\n再次用更保守又是更安全的方式处理…………")
-                embedding = self.get_ollama_embedding_safe(text)
-                if not embedding:
-                    log.error(f"多次尝试处理问题文本块仍然失败，返回空向量列表。问题文本块如下：\n{text}")
-                    return []
+                # 估算Token并检查（保留原有逻辑）
+                estimated_tokens = self._estimate_token_count(processed_text)
+                safe_token_limit = int(self.chunk_size * 0.8)
+                if estimated_tokens > safe_token_limit:
+                    log.warning(f"估算Token({estimated_tokens})超限，进行额外缩减。")
+                    processed_text = self._reduce_text_length(processed_text, max_chars=int(self.chunk_size * 0.7))
 
-            # 存储到缓存
-            if embedding:
-                self.embedding_cache[text_hash] = embedding
-                log.info(f"生成缓存嵌入: {text_hash[:8]}，{len(embedding)}")
-            return embedding
+                # 调用安全的嵌入生成
+                embedding = self.get_ollama_embedding_safe(processed_text)
+                if embedding:
+                    self.embedding_cache[text_hash] = embedding
+                    break
+            except Exception as e:
+                log.warning(f"获取嵌入失败(第{attempt+1}次): {e}")
+                continue
+
+        if not embedding:
+            log.error(f"为文本生成嵌入最终失败，将返回空列表。")
+            return []
+        return embedding
