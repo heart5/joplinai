@@ -440,7 +440,7 @@ def process_notes_incremental(notebook_title: str, config: Dict):
     with ThreadPoolExecutor(max_workers=config["max_workers"]) as executor:
         # 提交所有笔记处理任务
         future_to_note = {}
-        for i, note in enumerate(notes):
+        for i, note in enumerate(notes, 1):
             # 检查是否需要处理（增量更新判断）
             note_id = note.id
             note_detail = getnote(note_id)
@@ -474,7 +474,7 @@ def process_notes_incremental(notebook_title: str, config: Dict):
                 )
                 future_to_note[future] = (note_id, current_update_time, current_hash)
                 log.info(
-                    f"开始处理笔记本【{notebook_title}】下的第（{i + 1}/{len(notes)}）条笔记: 《{note.title}》…………"
+                    f"开始处理笔记本【{notebook_title}】下的第（{i}/{len(notes)}）条笔记: 《{note.title}》…………"
                 )
                 new_time_notes.append(note.title)
 
