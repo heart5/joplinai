@@ -176,7 +176,7 @@ def save_process_state(state: Dict, state_path: Path):
         with open(state_path, "w", encoding="utf-8") as f:
             json.dump(serialized_state, f, ensure_ascii=False, indent=2)
     except Exception as e:
-        log.error(f"保存状态文件失败: {e}")
+        log.error(f"保存状态文件{state_path}失败: {e}")
 
 
 # %% [markdown]
@@ -472,7 +472,12 @@ def process_notes_incremental(notebook_title: str, config: Dict):
                     embedding_gen,
                     config,
                 )
-                future_to_note[future] = (note_id, current_update_time, current_hash)
+                future_to_note[future] = (
+                    note_id,
+                    note.title,
+                    current_update_time,
+                    current_hash,
+                )
                 log.info(
                     f"开始处理笔记本【{notebook_title}】下的第（{i}/{len(notes)}）条笔记: 《{note.title}》…………"
                 )
@@ -480,23 +485,24 @@ def process_notes_incremental(notebook_title: str, config: Dict):
 
         # 收集处理结果
         for future in as_completed(future_to_note):
-            note_id, update_time, content_hash = future_to_note[future]
+            note_id, note_title, update_time, content_hash = future_to_note[future]
             try:
                 success = future.result()
                 if success:
                     # 更新处理状态
                     process_state[note_id] = {
+                        "note_title": note_title,
                         "update_time": float(update_time),
                         "hash": content_hash,
                         "processed_time": datetime.now().timestamp(),
                     }
                     updated_count += 1
                 else:
-                    failed_notes.append(note.title)
-                    log.error(f"向量化处理笔记 《{note.title}》 时可能异常")
+                    failed_notes.append(note_title)
+                    log.error(f"向量化处理笔记 《{note_title}》 时可能异常")
             except Exception as e:
-                log.error(f"并发处理笔记 《{note.title}》 异常: {e}")
-                failed_notes.append(note.title)
+                log.error(f"并发处理笔记 《{note_title}》 异常: {e}")
+                failed_notes.append(note_title)
 
     # 保存状态
     save_process_state(process_state, config["state_path"])
