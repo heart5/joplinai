@@ -268,6 +268,7 @@ def process_note_chunks(
             chunk_content = chunk_info["content"]
             base_metadata = chunk_info["metadata"]
             chunk_hash = base_metadata.get("content_hash", "")  # 从元数据中取出哈希
+            metadata_chunk_idx_from_one = int(base_metadata["chunk_index"]) + 1
 
             # 构建此块预期的最终块ID (与原有逻辑保持一致)
             expected_chunk_id = f"{note.id}_chunk_{base_metadata['chunk_index']}"
@@ -279,13 +280,13 @@ def process_note_chunks(
                 # 如果块ID已存在，且哈希值相同，则跳过
                 if existing_chunks_map[expected_chunk_id] == chunk_hash:
                     log.debug(
-                        f"笔记《{note.title}》中的块 {base_metadata['chunk_index']} 内容未变，跳过嵌入生成。"
+                        f"笔记《{note.title}》中的块 {metadata_chunk_idx_from_one} 内容未变，跳过嵌入生成。"
                     )
                     need_process = False
                     skipped_chunks += 1
                 else:
                     log.info(
-                        f"笔记《{note.title}》中的块 {base_metadata['chunk_index']} 内容哈希已变化，需要重新嵌入。"
+                        f"笔记《{note.title}》中的块 {metadata_chunk_idx_from_one} 内容哈希已变化，需要重新嵌入。"
                     )
             # 如果块ID不存在，则是全新块，需要处理
 
@@ -316,7 +317,7 @@ def process_note_chunks(
             )
             if not embedding:
                 log.warning(
-                    f"笔记《{note.title}》块 {base_metadata['chunk_index']} 嵌入生成失败，跳过此块。"
+                    f"笔记《{note.title}》块 {metadata_chunk_idx_from_one} 嵌入生成失败，跳过此块。"
                 )
                 continue
 
@@ -328,7 +329,7 @@ def process_note_chunks(
                 )
             except Exception as e:
                 log.error(
-                    f"对笔记《{note.title}》的块进行DeepSeek增强时失败: {e}",
+                    f"对笔记《{note.title}》的块 {metadata_chunk_idx_from_one} 进行DeepSeek增强时失败: {e}",
                     exc_info=True,
                 )
 
@@ -350,10 +351,13 @@ def process_note_chunks(
                 )
                 successful_upserts += 1
                 log.info(
-                    f"笔记《{note.title}》的块 【{base_metadata['chunk_index']}/{len(chunk_dicts)}】 向量化入库更新成功，文本块元数据为：{metadata}"
+                    f"笔记《{note.title}》的块 【{metadata_chunk_idx_from_one}/{len(chunk_dicts)}】 向量化入库更新成功，文本块元数据为：{metadata}"
                 )
             except Exception as e:
-                log.error(f"笔记《{note.title}》存储块失败: {e}", exc_info=True)
+                log.error(
+                    f"笔记《{note.title}》存储块 {metadata_chunk_idx_from_one} 失败: {e}",
+                    exc_info=True,
+                )
 
         # 5. 智能清理“孤儿块”
         # 找出那些存在于 existing_chunks_map，但不在本次新块列表 new_chunk_hashes 中的块ID
@@ -365,7 +369,7 @@ def process_note_chunks(
         if orphan_chunk_ids:
             deleted_count = vector_db.delete_chunks_by_id_list(orphan_chunk_ids)
             log.info(
-                f"清理了笔记《{note.title}》相关的 {deleted_count} 个孤儿块（ID不在新分块中）。"
+                f"清理了笔记《{note.title}》相关的 {deleted_count} 个孤儿块（ID不在新分块中），块列表：{orphan_chunk_ids}。"
             )
         else:
             log.info(f"未发现笔记《{note.title}》相关需要清理的孤儿块。")
@@ -739,9 +743,9 @@ def main():
             # 从断点处恢复处理
             notebook_titles = notebook_titles[checkpoint["last_processed_index"] :]
 
-        for i, notebook_title in enumerate(notebook_titles):
+        for i, notebook_title in enumerate(notebook_titles, 1):
             log.info(
-                f"开始处理笔记本（{i + 1}/{len(notebook_titles)}）: 【{notebook_title}】…………"
+                f"开始处理笔记本（{i}/{len(notebook_titles)}）: 【{notebook_title}】…………"
             )
             # 调用原有的处理函数，但需要其返回统计信息
             # 建议修改 process_notes_incremental 使其返回统计字典
