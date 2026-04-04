@@ -120,14 +120,16 @@ def _get_content_hash(text: str) -> str:
 # # 增强功能1：DeepSeek嵌入（提升向量质量）
 
 # %% [markdown]
-# ## get_deepseek_embedding(text: str, model: str = DEFAULT_EMBED_MODEL, max_retries: int = 3) -> Optional[List[float]]
+# ## get_deepseek_embedding(text: str, max_retries: int = 3) -> Optional[List[float]]
 
 # %%
 @timethis
-def get_deepseek_embedding(
-    text: str, model: str = DEFAULT_EMBED_MODEL, max_retries: int = 3
-) -> Optional[List[float]]:
-    """DeepSeek嵌入API调用"""
+def get_deepseek_embedding(text: str, max_retries: int = 3) -> Optional[List[float]]:
+    """
+    DeepSeek嵌入API调用
+    此函数用于手动生成DeepSeek嵌入，适用于实验或处理本地模型无法胜任的超长文本。
+    请注意，其生成的嵌入维度与本地模型不同，不能直接混合存入主向量库
+    """
     if not DEEPSEEK_API_KEY:
         log.warning("未配置DeepSeek API Key")
         return None
