@@ -602,7 +602,7 @@ class VectorDBManager:
         # ========== 通用功能 ==========
         if not self.collection:
             return {"error": "集合未加载"}
-        
+
         try:
             count = self.collection.count()
             return {
