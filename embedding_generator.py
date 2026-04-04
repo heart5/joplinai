@@ -265,16 +265,31 @@ class EmbeddingGenerator:
     def _aggressive_text_reduction(self, text: str) -> str:
         """当模型明确报告超长时，采取更激进的文本缩减策略"""
         # 1. 直接截取前400个字符（保证极短）
-        safe_length = 450
+        safe_length = 400
         len_text = len(text)
         if len_text > safe_length:
             text = text[:safe_length]
             log.debug(f"激进缩减，从{len_text}缩减至{safe_length}个字符")
-        
-        # 2. 进一步移除所有重复字符模式
+
+        # 2. 【新增】针对“人名列表”的特殊处理
+        # 检测模式：包含大量顿号、冒号，且无明显段落
+        if '：' in text and '、' in text and len(text.splitlines()) < 5:
+            log.debug(f"检测到密集人名列表，进行针对性清理。该文本块头为：{text[:200]} ……")
+            # 移除所有空格和换行，简化格式
+            text = text.replace('\n', '').replace(' ', '')
+            # 将顿号替换为逗号（可能token更少）
+            text = text.replace('、', ',')
+            # 如果仍然过长，只保留前N个人名
+            if len(text) > safe_length:
+                # 尝试按逗号分割，保留前一部分
+                parts = text.split(',')
+                if len(parts) > 10:
+                    text = ','.join(parts[:10]) + '...（名单截断）'
+
+        # 3. 进一步移除所有重复字符模式
         import re
         text = re.sub(r'(.)\1{2,}', r'\1', text)  # 3个以上相同字符保留1个
-        
+
         return text
 
 # %% [markdown]
