@@ -281,7 +281,6 @@ class VectorDBManager:
             # 关键：保留从 joplinai.py 传入的完整元数据
             "source_note_title": metadata.get("source_note_title", ""),
             "source_note_id": metadata.get("source_note_id", ""),
-            # "note_title": metadata.get("note_title", ""), # 也可能叫 note_title
             # 可以根据需要添加其他字段，如 chunk_index
             "chunk_index": metadata.get("chunk_index", 0),
             "content_hash": metadata.get("content_hash", ""),
