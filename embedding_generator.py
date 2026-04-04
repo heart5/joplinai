@@ -48,14 +48,15 @@ class EmbeddingGenerator:
 
 
 # %% [markdown]
-# ### __init__(self, model_name: str, chunk_size: int = 2048)
+# ### \_\_init__(self, model_name: str, chunk_size: int = 1024)
 
     # %%
-    def __init__(self, model_name: str, chunk_size: int = 2048):
+    def __init__(self, model_name: str, chunk_size: int = 1024):
         self.model_name = model_name
         self.chunk_size = chunk_size
         self.embedding_dim = self._get_model_dimension()
         self.embedding_cache = {}  # 简单缓存
+        self.set_chunk_size()
 
 # %% [markdown]
 # ### _get_model_dimension(self)
@@ -75,9 +76,9 @@ class EmbeddingGenerator:
             return 1024
 
 # %% [markdown]
-# ### get_model_max_context(self) -> int
+# ### _set_chunk_size(self) -> None
     # %%
-    def get_model_max_context(self) -> int:
+    def _set_chunk_size(self) -> None:
         """精确获取模型上下文限制（token→字符转换）"""
         # 特殊处理已知模型
         if self.model_name == "nomic-embed-text":
@@ -90,15 +91,15 @@ class EmbeddingGenerator:
         elif self.model_name == "qwen:1.8b":
             self.chunk_size = 4000  # 2048 token × 3 × 0.8 = 4916，取4000
             return
-    
+
         # 通用模型处理
         try:
             model_info = ollama.show(model=self.model_name)
-            
+
             # 方法1：尝试从 parameters 字符串解析
             params_str = model_info.get("parameters", "")
             num_ctx = 2048  # 默认值
-            
+
             if isinstance(params_str, str) and params_str:
                 # 解析字符串，例如 "num_ctx 512"
                 import re
@@ -120,10 +121,10 @@ class EmbeddingGenerator:
             else:
                 # 如果 parameters 是字典（其他模型）
                 num_ctx = model_info.get("parameters", {}).get("num_ctx", 1024)
-                
+
             self.chunk_size = int(num_ctx * 3 * 0.8)
             log.info(f"模型 {self.model_name} 上下文长度: {num_ctx} tokens, 分块大小: {self.chunk_size} 字符")
-            
+
         except Exception as e:
             log.warning(f"获取模型上下文失败({self.model_name})，使用默认值1024字符: {e}")
             self.chunk_size = 1024
@@ -132,28 +133,31 @@ class EmbeddingGenerator:
 # ### clean_text(text: str) -> str
     # %%
     def clean_text(self, text: str) -> str:
-        """清理笔记文本：移除图片、格式符号、多余换行"""
+        """
+        清理笔记文本：移除图片、格式符号、多余换行
+        一般用于分块之后净化文本
+        """
         if not text:
             return ""
-    
+
         # 1. 移除图片链接：![alt](url)
         text = re.sub(r"!\[.*?\]\(.*?\)", "", text)
-    
+
         # 2. 特别处理：移除图片链接后的多余空行
         # 将3个以上连续换行减少为2个
         text = re.sub(r"\n{3,}", "\n\n", text)
-    
+
         # 3. 移除Markdown格式符号（保留必要的标点）
         # 注意：不要移除中文标点符号
         text = re.sub(r"[#*`>~\-]", "", text)
-    
+
         # 4. 移除开头和结尾的空白行
         text = text.strip()
-    
+
         # 5. 如果清理后文本过短，记录警告
         if len(text) < 10:  # 少于10个字符
             log.warning(f"清理后文本过短，不到10个字符。清理前为: {text[:50]}...")
-    
+
         return text
 
 # %% [markdown]
@@ -191,9 +195,9 @@ class EmbeddingGenerator:
         示例输入: "110，4：14" -> "今日步数110步，睡眠时长4小时14分钟。"
         示例输入: "799，7：44，1" -> "今日步数799步，睡眠时长7小时44分钟，喝啤酒1瓶。"
         """
-        lines = raw_content.strip().split('\n')
+        lines = [line for line in raw_content.strip().split('\n') if line]
         converted_lines = []
-        
+
         for line in lines:
             line = line.strip()
             # 匹配数字模式：如 "110，4：14" 或 "11033，4：7，4"
@@ -201,24 +205,24 @@ class EmbeddingGenerator:
                 parts = re.split(r'[，,]\s*', line)
                 if len(parts) >= 2:
                     # 解析步数
-                    steps = parts
+                    steps = parts[0]
                     desc = f"今日步数{steps}步，"
-                    
+
                     # 解析睡眠时间（格式如 4:14 或 4：14）
                     sleep_time = parts[1].replace('：', ':')
                     if ':' in sleep_time:
                         sleep_parts = sleep_time.split(':')
                         if len(sleep_parts) == 2:
                             desc += f"睡眠时长{sleep_parts[0]}小时{sleep_parts[1]}分钟"
-                    
+
                     # 解析啤酒数量（如果有）
                     if len(parts) >= 3 and parts[2].isdigit():
-                        beer_count = parts
+                        beer_count = parts[2]
                         desc += f"，喝啤酒{beer_count}瓶"
-                    
+
                     line = desc + "。"
             converted_lines.append(line)
-        
+
         return '\n'.join(converted_lines)
 
 # %% [markdown]
@@ -265,10 +269,10 @@ class EmbeddingGenerator:
         """智能截断文本，尽量在句子或意群边界处截断"""
         # 根据字符数估算进行截断（因为token估算不精确）
         max_char_limit = int(max_token_estimate / 1.2)  # 反向估算字符数
-        
+
         if len(text) <= max_char_limit:
             return text
-        
+
         # 尝试在最后一个句号、问号、感叹号或换行处截断
         truncate_point = text.rfind('。', 0, max_char_limit)
         if truncate_point == -1:
@@ -279,7 +283,7 @@ class EmbeddingGenerator:
             truncate_point = text.rfind('\n', 0, max_char_limit)
         if truncate_point == -1 or truncate_point < max_char_limit * 0.5:  # 如果找不到合适的点或点太靠前
             truncate_point = max_char_limit  # 硬截断
-        
+
         return text[:truncate_point]
 
 # %% [markdown]
@@ -482,7 +486,7 @@ class EmbeddingGenerator:
             # 在分割逻辑中，对每个 raw_chunk 进行转换，当下仅针对《健康运动笔记》
             converted_chunk = self._convert_health_data_to_text(raw_chunk)
             converted_chunk = self._condense_dense_lists(converted_chunk)
-            if len(converted_chunk) <= self.chunk_size * 1.1:
+            if len(converted_chunk) <= int(self.chunk_size * 1.1):
                 # 如果块大小合理，直接使用
                 final_chunks.append(converted_chunk)
             else:
@@ -534,320 +538,6 @@ class EmbeddingGenerator:
 
         log.info(f"将文本分割成 {len(chunk_dicts)} 个语义块。")
         # print(chunk_dicts)
-        return chunk_dicts
-
-# %% [markdown]
-# ### split_into_semantic_chunks_other3(self, text: str, note_title: str = "", note_tags: str = "") -> List[Dict]
-
-    # %%
-    def split_into_semantic_chunks_other3(
-        self, text: str, note_title: str = "", note_tags: str = ""
-    ) -> List[Dict]:
-        """将文本分割成语义块，并返回块字典列表。
-        【增强】使用统一的正则表达式处理带`###`或不带的日期行，确保日期保留在块头部并被提取。
-        """
-        if not text:
-            return []
-
-        chunks = []  # 存储初步分割的文本块
-
-        # ========== 第一步：统一按日期行进行一级分割 ==========
-        # 核心优化：使用一个正则，同时匹配“### 日期”和“日期”两种格式，并捕获日期部分
-        # 正则解释：
-        # ^                    : 行的开始（配合 re.MULTILINE）
-        # (?:###\s*)?          : 非捕获组，匹配可选的“###”及可能跟随的空格
-        # (\d{4}[-年/]\d{1,2}[-月/]\d{1,2}日?) : 捕获组1，匹配核心日期格式
-        # \s*$                 : 行尾可能有的空格
-        # 支持格式示例：
-        #   “### 2024年1月1日”
-        #   “2024年1月1日”
-        #   “2024-01-01”
-        #   “2024/01/01”
-        unified_date_pattern = re.compile(
-            r"^(?:###\s*)?(\d{4}[-年/]\d{1,2}[-月/]\d{1,2}[日号])\s*$", re.MULTILINE
-        )
-        date_matches = list(unified_date_pattern.finditer(text))
-
-        if not date_matches:
-            # 如果没有找到任何日期行，回退到原有的按章节分割逻辑
-            log.debug("笔记未检测到任何日期标题行，回退至通用章节分块。")
-            major_sections = re.split(r"\n(?:#{1,3}\s+.*?|\-{3,})\n", text)
-            major_sections = [s.strip() for s in major_sections if s.strip()]
-            chunks = major_sections
-        else:
-            # 找到日期行，统一按日期行分割，并确保日期行保留在块内
-            log.debug(
-                f"检测到 {len(date_matches)} 个日期标题行（含###或不含），将按此分割。"
-            )
-            start_pos = 0
-            for i, match in enumerate(date_matches):
-                date_line_start = match.start()
-                date_line_end = match.end()
-                # match.group(1) 是捕获的纯日期字符串，如“2024年1月1日”
-                current_date = match.group(1)
-
-                # 确定这个日期单元的内容结束位置（下一个日期行开始，或文本末尾）
-                next_start = (
-                    date_matches[i + 1].start() if i + 1 < len(date_matches) else len(text)
-                )
-
-                # 提取从当前日期行开始，到下一个日期行之前的所有内容作为一个“天单元”
-                # 这保证了日期行（无论有无###）是此单元的第一行。
-                day_unit = text[
-                    date_line_start:next_start
-                ]  # 注意：这里不strip()，保留原始格式和换行
-
-                # 将这个“天单元”添加到待处理块列表
-                chunks.append(day_unit)
-                start_pos = next_start
-
-            # 处理第一个日期行之前可能存在的文本（如笔记开头的说明）
-            if date_matches[0].start() > 0:
-                preface = text[: date_matches[0].start()].strip()
-                if preface:
-                    chunks.insert(0, preface)  # 将前言作为第一个块
-        # ========== 第一步结束 ==========
-
-        # 后续逻辑保持不变：对每个初步分割出的块，检查大小，如果过大则进行二次分割。
-        final_chunks = []
-        for raw_chunk in chunks:
-            # 在分割逻辑中，对每个 raw_chunk 进行转换，当下仅针对《健康运动笔记》
-            converted_chunk = self._convert_health_data_to_text(raw_chunk)
-            if len(converted_chunk) <= self.chunk_size * 1.1:
-                # 如果块大小合理，直接使用
-                final_chunks.append(converted_chunk)
-            else:
-                # 如果块过大，则调用原有的段落/句子级分割函数进行细化
-                log.debug(f"初步块过长({len(converted_chunk)}字符)，进行二次语义分割。")
-                sub_chunks = self._split_into_paragraphs_chunks(converted_chunk)
-                final_chunks.extend(sub_chunks)
-
-        # 如果经过上述步骤，分块结果仍然不理想，启用最终回退
-        if not final_chunks or (
-            len(final_chunks) == 1 and len(final_chunks[0]) >= self.chunk_size * 1.1
-        ):
-            log.debug(f"按照语义拆分不太合格：{[len(chunk) for chunk in final_chunks]}")
-            final_chunks = self._split_into_paragraphs_chunks(text)
-            log.debug(f"回退用段落甚至字符拆分后：{[len(chunk) for chunk in final_chunks]}")
-
-        # ========== 构建块字典和元数据 ==========
-        final_chunks.reverse()  # 核心操作：反转列表，确保最早日期的idx稳定
-        chunk_dicts = []
-        # 复用第一步的统一正则进行日期提取，确保一致性
-        for idx, chunk_content in enumerate(final_chunks):
-            estimated_date = ""
-            # 优先从块的开头匹配日期（因为分割逻辑已保证日期行在头部）
-            # 再次使用相同的 unified_date_pattern，但用 match 从开头搜索
-            date_at_start = unified_date_pattern.match(chunk_content.strip())
-            if date_at_start:
-                estimated_date = date_at_start.group(1)
-            else:
-                # 如果开头没有（例如是前言块），则在块内搜索第一个日期作为估算
-                date_in_chunk = unified_date_pattern.search(chunk_content)
-                if date_in_chunk:
-                    estimated_date = date_in_chunk.group(1)
-
-            # 清理内容格式
-            content = self.clean_text(chunk_content)
-            if len(content) < 10:
-                content = note_title
-            # === 计算此块的内容哈希 ===
-            chunk_hash = hashlib.md5(chunk_content.encode('utf-8')).hexdigest()
-            chunk_metadata = {
-                "chunk_index": idx,
-                "source_note_title": note_title,
-                "source_note_tags": note_tags,
-                "estimated_date": estimated_date,  # 现在能正确提取
-                "word_count": len(chunk_content),
-                # === 将哈希存入元数据 ===
-                "content_hash": chunk_hash,
-            }
-            chunk_dicts.append({"content": content, "metadata": chunk_metadata})
-
-        log.info(f"将文本分割成 {len(chunk_dicts)} 个语义块。")
-        return chunk_dicts
-
-# %% [markdown]
-# ### split_into_semantic_chunks_other2(self, text: str, note_title: str = "", note_tags: str = "") -> List[Dict]
-
-    # %%
-    def split_into_semantic_chunks_other2(self, text: str, note_title: str = "", note_tags: str = "") -> List[Dict]:
-        """
-        将文本分割成语义块，并返回块字典列表。
-        每个字典包含 'content' 和初步的 'metadata'。
-        【增强】专门处理以 “### YYYY年MM月DD日” 格式开头的日记体笔记。
-        """
-        if not text:
-            return []
-
-        chunks = []  # 最终存储所有文本块的列表
-
-        # ========== 第一步：核心修改 - 按日期标题行进行一级分割 ==========
-        # 匹配 “### 2026年3月22日” 或 “### 2026年3月22号” 及其变体（如可能有多余空格）
-        # 正则解释：r‘^###\s*(\d{4}年\d{1,2}月\d{1,2}日(?:号)?)\s*$’
-        # ^### : 以###开头
-        # \s* : 可能有的空格
-        # (\d{4}年\d{1,2}月\d{1,2}日(?:号)?) : 核心日期格式，日或号
-        # \s*$ : 可能有的空格，然后行结束
-        # 使用 re.MULTILINE 模式让 ^ 和 $ 匹配每行的开头结尾
-        import re
-        date_section_pattern = re.compile(r'^###\s*(\d{4}年\d{1,2}月\d{1,2}日(?:号)?)\s*$', re.MULTILINE)
-
-        # 找到所有日期标题行的位置
-        date_matches = list(date_section_pattern.finditer(text))
-
-        if not date_matches:
-            # 如果没有找到这种格式的日期行，则回退到原有的语义分割逻辑
-            log.debug("笔记未检测到‘### 日期’格式，回退至通用语义分块。")
-            major_sections = re.split(r'\n(?:#{1,3}\s+.*?|\-{3,}|\d{4}年\d{1,2}月\d{1,2}日.*?)\n', text)
-            major_sections = [s.strip() for s in major_sections if s.strip()]
-            chunks = major_sections # 后续会对这些块进行大小判断和二次分割
-        else:
-            # 有日期行，按日期行分割成“天单元”
-            log.debug(f"检测到 {len(date_matches)} 个日期标题行，将按此分割。")
-            start_pos = 0
-            for i, match in enumerate(date_matches):
-                date_line_start = match.start()
-                date_line_end = match.end()
-                current_date = match.group(1)  # 提取到的日期字符串，如“2026年3月22日”
-
-                # 确定这个日期单元的内容结束位置（下一个日期行开始，或文本末尾）
-                next_start = date_matches[i + 1].start() if i + 1 < len(date_matches) else len(text)
-
-                # 提取从当前日期行开始，到下一个日期行之前的所有内容作为一个“天单元”
-                # 这保证了日期行（### 2026年3月22日）是此单元的第一行。
-                day_unit = text[date_line_start:next_start].strip()
-
-                # 将这个“天单元”添加到待处理块列表
-                # 注意：此时‘day_unit’可能还很长（包含多个段落），后续会判断是否需要进一步分割。
-                chunks.append(day_unit)
-                start_pos = next_start
-
-            # 处理第一个日期行之前可能存在的文本（如笔记开头的说明）
-            if date_matches[0].start() > 0:
-                preface = text[:date_matches[0].start()].strip()
-                if preface:
-                    chunks.insert(0, preface)  # 将前言作为第一个块
-        # ========== 第一步结束 ==========
-
-        # 后续逻辑：对每个初步分割出的块（可能是“天单元”或前言），检查大小，如果过大则进行二次分割。
-        final_chunks = []
-        for raw_chunk in chunks:
-            if len(raw_chunk) <= self.chunk_size * 1.1:
-                # 如果块大小合理，直接使用
-                final_chunks.append(raw_chunk)
-            else:
-                # 如果块过大（例如某一天的内容特别长），则调用原有的段落/句子级分割函数进行细化
-                # 注意：此时 raw_chunk 可能是一个以日期行开头的“天单元”
-                log.debug(f"初步块过长({len(raw_chunk)}字符)，进行二次语义分割。")
-                sub_chunks = self._split_into_paragraphs_chunks(raw_chunk)
-                final_chunks.extend(sub_chunks)
-
-        # 如果经过上述步骤，分块结果仍然不理想（比如块数太少或太大），启用最终回退
-        if not final_chunks or (len(final_chunks) == 1 and len(final_chunks[0]) >= self.chunk_size * 1.1):
-            log.debug(f"按照语义拆分不太合格：{[len(chunk) for chunk in final_chunks]}")
-            final_chunks = self._split_into_paragraphs_chunks(text)  # 回退到全局段落分割
-            log.debug(f"回退用段落甚至字符拆分后：{[len(chunk) for chunk in final_chunks]}")
-
-        # ========== 构建块字典和元数据 ==========
-        chunk_dicts = []
-        for idx, chunk_content in enumerate(final_chunks):
-            # --- 提取该块的日期 ---
-            # 由于我们确保了日期行在块内，现在可以直接从块内容开头匹配
-            date_in_chunk = date_section_pattern.match(chunk_content) # 使用match从开头匹配
-            if not date_in_chunk:
-                # 如果不是以日期行开头，则在内容中搜索第一个日期（用于前言块或回退分割的块）
-                date_in_chunk = date_section_pattern.search(chunk_content)
-            estimated_date = date_in_chunk.group(1) if date_in_chunk else ""
-            # ---------------------
-
-            chunk_metadata = {
-                "chunk_index": idx,
-                "source_note_title": note_title,
-                "source_note_tags": note_tags,
-                "estimated_date": estimated_date,  # 现在有很大概率能获取到值
-                "word_count": len(chunk_content),
-            }
-            # 清理内容格式
-            content = self.clean_text(chunk_content)
-            if len(content) < 10:
-                content = note_title
-            chunk_dicts.append({
-                "content": content,
-                "metadata": chunk_metadata
-            })
-
-        log.info(f"将文本分割成 {len(chunk_dicts)} 个语义块。")
-        return chunk_dicts
-
-# %% [markdown]
-# ### split_into_semantic_chunks_other(self, text: str, note_title: str = "", note_tags: str = "") -> List[Dict]
-
-    # %%
-    def split_into_semantic_chunks_other(self, text: str, note_title: str = "", note_tags: str = "") -> List[Dict]:
-        """
-        将文本分割成语义块，并返回块字典列表。
-        每个字典包含 'content' 和初步的 'metadata'。
-        """
-        if not text:
-            return []
-
-        chunks = []
-
-        # 1. 首先尝试按明显的章节或日期分割（针对日志）
-        # 例如：按 "## "、"---"、日期行 "2025年11月27日" 分割
-        major_sections = re.split(r'\n(?:#{1,3}\s+.*?|\-{3,}|\d{4}年\d{1,2}月\d{1,2}日.*?)\n', text)
-        major_sections = [s.strip() for s in major_sections if s.strip()]
-
-        for section in major_sections:
-            if len(section) <= self.chunk_size:
-                # 如果整个章节已经很小，直接作为一个块
-                chunks.append(section)
-            else:
-                # 2. 对于长章节，按段落分割
-                paragraphs = section.split('\n\n')
-                current_chunk = ""
-                for para in paragraphs:
-                    if len(current_chunk) + len(para) <= self.chunk_size:
-                        current_chunk += (para + "\n\n")
-                    else:
-                        if current_chunk:
-                            chunks.append(current_chunk.strip())
-                        current_chunk = para + "\n\n"
-                if current_chunk:
-                    chunks.append(current_chunk.strip())
-
-        # 3. 如果上述分割结果块数太少或太大，回退到句子级分块
-        if len(chunks) == 0 or max(len(c) for c in chunks) > self.chunk_size * 1.5:
-            log.debug(f"按照语义拆分不太合格：{[len(chunk) for chunk in chunks]}")
-            chunks = self._split_into_paragraphs_chunks(text)
-            log.debug(f"回退用段落甚至字符拆分后：{[len(chunk) for chunk in chunks]}")
-
-        # 4. 为每个块构建初步元数据
-        chunk_dicts = []
-        for idx, chunk_content in enumerate(chunks):
-            # 提取块内可能的关键词或日期（简单示例）
-            import datetime
-            date_match = re.search(r'(\d{4}年\d{1,2}月\d{1,2}日)', chunk_content)
-            chunk_metadata = {
-                "chunk_index": idx,
-                # "content": chunk_content,
-                "source_note_title": note_title,
-                "source_note_tags": note_tags,
-                "estimated_date": date_match.group(1) if date_match else "",
-                "word_count": len(chunk_content),
-                # 后续可在 joplinai.py 中补充 DeepSeek 生成的摘要或关键词
-            }
-            # 到了这里再开始清理内容格式和无用文本
-            content = self.clean_text(chunk_content)
-            if len(content) < 10:
-                content = note_title
-            chunk_dicts.append({
-                "content": content,
-                "metadata": chunk_metadata
-            })
-
-        log.info(f"将文本分割成 {len(chunk_dicts)} 个语义块。")
         return chunk_dicts
 
 # %% [markdown]
@@ -1054,9 +744,193 @@ class EmbeddingGenerator:
         return self.embedding_cache.get(text_hash)
 
 # %% [markdown]
-# ### get_merged_embedding(self, text: str,) -> List[float]
+# ### get_merged_embedding(self, text: str) -> List[float]
+
     # %%
-    def get_merged_embedding(self, text: str,) -> List[float]:
+    def get_merged_embedding(self, text: str) -> List[float]:
+        """
+        生成文本嵌入的核心函数。优化策略：优先二次分块，而非文本缩减。
+        """
+        # 1. 缓存检查 (保持不变)
+        text_hash = hashlib.md5(text.encode()).hexdigest()
+        cached = self.get_cached_embedding(text_hash)
+        if cached:
+            log.info(f"使用缓存嵌入: {text_hash[:12]}")
+            return cached
+
+        # 2. 预处理文本
+        processed_text = self._preprocess_text_for_embedding(text)
+        if not processed_text or len(processed_text.strip()) < 6:
+            log.warning("输入文本为空或过短，返回空列表")
+            return []
+
+        # 3. 估算长度并判断是否需要直接触发二次分块
+        #    设定一个比模型限制更宽松的阈值，用于提前判断。
+        estimated_tokens = self._estimate_token_count(processed_text)
+        safe_token_limit = int(self.chunk_size * 0.7)  # 例如，使用模型容量的70%作为安全线
+
+        if estimated_tokens > safe_token_limit:
+            # **关键修正**：当预估超长时，直接进入智能二次分块流程，而不是尝试缩减。
+            log.info(f"🚨 文本预估过长({estimated_tokens}tokens > {safe_token_limit})，直接触发智能二次分块。")
+            # 计算一个安全的子块大小（例如，基准chunk_size的50%）
+            safe_subchunk_size = int(self.chunk_size * 0.5)
+            rechunked_embedding = self._get_rechunked_embedding(
+                original_text=text,  # 使用原始文本进行二次分块
+                safe_subchunk_size=safe_subchunk_size
+            )
+            if rechunked_embedding:
+                self.embedding_cache[text_hash] = rechunked_embedding
+                return rechunked_embedding
+            else:
+                # 如果二次分块也失败，则降级为激进缩减（作为最后手段）
+                log.error("智能二次分块失败，降级为激进缩减。")
+                processed_text = self._aggressive_text_reduction(processed_text)
+        # 如果长度安全，则继续原有流程
+
+        # 4. 对于长度安全的文本，使用带重试的普通嵌入生成流程
+        embedding = []
+        max_retries = 2  # 可以减少重试次数，因为长文本已由上面处理
+        for attempt in range(max_retries):
+            try:
+                # 最后一次重试时，可使用轻度缩减
+                if attempt == max_retries - 1:
+                    processed_text = self._reduce_text_length(processed_text, max_chars=int(self.chunk_size * 0.8))
+
+                embedding = self.get_ollama_embedding_safe(processed_text)
+                if embedding:
+                    self.embedding_cache[text_hash] = embedding
+                    log.debug(f"嵌入生成成功 (尝试 {attempt+1})")
+                    break
+            except Exception as e:
+                error_msg = str(e).lower()
+                is_length_error = any(keyword in error_msg for keyword in ["context length", "input length", "too long"])
+
+                if is_length_error:
+                    # **即使在安全线内，如果API仍报错，也触发二次分块**
+                    log.warning(f"API报告长度错误，触发二次分块 (尝试{attempt+1})。")
+                    safe_subchunk_size = int(self.chunk_size * 0.5)
+                    rechunked_embedding = self._get_rechunked_embedding(
+                        original_text=text,
+                        safe_subchunk_size=safe_subchunk_size
+                    )
+                    if rechunked_embedding:
+                        self.embedding_cache[text_hash] = rechunked_embedding
+                        return rechunked_embedding
+                log.warning(f"获取嵌入失败(第{attempt+1}次): {e}")
+                continue
+
+        if not embedding:
+            log.error(f"为文本生成嵌入最终失败，将返回空列表。")
+            return []
+        return embedding
+
+# %% [markdown]
+# ### _get_rechunked_embedding(self, original_text: str, safe_subchunk_size: int) -> List[float]
+
+    # %%
+    def _get_rechunked_embedding(self, original_text: str, safe_subchunk_size: int) -> List[float]:
+        """
+        核心重分块逻辑。
+        原理：将超长文本按安全大小重新分割为多个语义子块，分别嵌入后合并。
+        """
+        import numpy as np
+    
+        # 1. 使用安全大小进行语义重分块
+        sub_chunks = self._split_with_custom_size(
+            text=original_text,
+            target_chunk_size=safe_subchunk_size
+        )
+        if not sub_chunks:
+            log.error("重分块未能产生有效子块")
+            return []
+    
+        log.info(
+            f"📊 重分块详情 | 原块: {len(original_text)}字符 | 子块数: {len(sub_chunks)} | 目标大小: {safe_subchunk_size}字符"
+        )
+    
+        # 2. 为每个子块生成嵌入
+        sub_embeddings = []
+        for i, chunk_content in enumerate(sub_chunks):
+            try:
+                # 递归调用 get_ollama_embedding_safe，由于子块已很小，通常不会再次触发重分块
+                emb = self.get_ollama_embedding_safe(chunk_content)
+                if emb:
+                    sub_embeddings.append(emb)
+                    log.debug(f"子块 {i+1}/{len(sub_chunks)} 嵌入成功")
+                else:
+                    log.warning(f"子块 {i+1} 嵌入返回空，跳过")
+            except Exception as e:
+                log.warning(f"子块 {i+1} 嵌入异常: {str(e)[:50]}，跳过")
+                continue
+    
+        # 3. 合并嵌入向量 (平均池化)
+        if not sub_embeddings:
+            log.error("所有子块嵌入均失败")
+            return []
+        if len(sub_embeddings) == 1:
+            return sub_embeddings
+    
+        merged_embedding = np.mean(sub_embeddings, axis=0)
+        log.info(f"合并 {len(sub_embeddings)} 个子块嵌入成功")
+        return merged_embedding.tolist()
+
+# %% [markdown]
+# ### _split_with_custom_size(self, text: str, target_chunk_size: int) -> List[str]
+
+    # %%
+    def _split_with_custom_size(self, text: str, target_chunk_size: int) -> List[str]:
+        """
+        使用自定义目标大小进行语义分割。
+        优先复用现有分块逻辑，临时调整 chunk_size 参数。
+        """
+        original_chunk_size = self.chunk_size
+        try:
+            self.chunk_size = target_chunk_size
+            # 调用您现有的语义分块方法，它会使用临时的 chunk_size
+            chunk_dicts = self.split_into_semantic_chunks(
+                text=text,
+                note_title="[重分块]",
+                note_tags=""
+            )
+            sub_chunks = [chunk["content"] for chunk in chunk_dicts]
+
+            # 二次检查：如果语义分块后仍有块过大，进行句子级分割
+            final_chunks = []
+            for chunk in sub_chunks:
+                if len(chunk) > target_chunk_size * 1.2:
+                    log.debug(f"子块仍过大({len(chunk)}字符)，进行句子级分割")
+                    sentences = self._split_into_sentences(chunk)
+                    current_chunk = ""
+                    for sent in sentences:
+                        if len(current_chunk) + len(sent) > target_chunk_size:
+                            if current_chunk:
+                                final_chunks.append(current_chunk.strip())
+                            current_chunk = sent
+                        else:
+                            current_chunk += "" + sent if current_chunk else sent
+                    if current_chunk:
+                        final_chunks.append(current_chunk.strip())
+                else:
+                    final_chunks.append(chunk)
+            return final_chunks
+        finally:
+            self.chunk_size = original_chunk_size  # 恢复原状
+
+# %% [markdown]
+# ### _split_into_sentences(self, text: str) -> List[str]
+
+    # %%
+    def _split_into_sentences(self, text: str) -> List[str]:
+        """简单的中文句子分割"""
+        import re
+        sentence_endings = r'[。！？；\n]'
+        sentences = re.split(sentence_endings, text)
+        return [s.strip() for s in sentences if s.strip()]
+
+# %% [markdown]
+# ### get_merged_embedding_other(self, text: str,) -> List[float]
+    # %%
+    def get_merged_embedding_other(self, text: str,) -> List[float]:
         # 计算文本哈希
         text_hash = hashlib.md5(text.encode()).hexdigest()
 
