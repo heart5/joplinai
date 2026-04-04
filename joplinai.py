@@ -96,7 +96,7 @@ CONFIG = {
         8, (os.cpu_count() or 1) * 2
     ),  # 动态设置最大工作者数：CPU核心数 * 2，上限为16
     "db_path": getdirmain() / "data" / "joplin_vector_db",  # ChromaDB存储路径
-    "enable_deepseek_embed": False,  # 是否用DeepSeek嵌入替代本地嵌入（增强向量质量）
+    # "enable_deepseek_embed": False,  # 是否用DeepSeek嵌入替代本地嵌入（增强向量质量）
     "enable_deepseek_summary": False,  # 是否用DeepSeek生成摘要（增强笔记元数据）
     "enable_deepseek_tags": False,  # 是否用DeepSeek提取标签（增强笔记标签）
     "deepseek_api_key": getinivaluefromcloud("joplinai", "deepseek_token"),
@@ -312,9 +312,7 @@ def process_note_chunks(
             base_metadata = chunk_data["base_metadata"]
 
             # 生成嵌入
-            embedding = embedding_generator.get_merged_embedding(
-                chunk_content, config["enable_deepseek_embed"]
-            )
+            embedding = embedding_generator.get_merged_embedding(chunk_content)
             if not embedding:
                 log.warning(
                     f"笔记《{note.title}》块 {metadata_chunk_idx_from_one} 嵌入生成失败，跳过此块。"
@@ -411,6 +409,7 @@ def process_notes_incremental(notebook_title: str, config: Dict):
             f"向量数据库初始化完成，集合: {process_notes_incremental.vector_db.collection_name}"
         )
     vector_db = process_notes_incremental.vector_db
+    log.info(f"向量库《{vector_db}》信息：{vector_db.get_collection_info()}")
 
     # 初始化向量数据库（在整个处理过程中只初始化一次）
     if not hasattr(process_notes_incremental, "embedding_gen"):
@@ -635,12 +634,6 @@ def parse_args():
         help=f"并发数（默认：{CONFIG['max_workers']}）",
     )
     parser.add_argument(
-        "--enable_deepseek_embed",
-        action="store_true",
-        default=CONFIG["enable_deepseek_embed"],
-        help=f"开启deepseek嵌入支持（默认：{CONFIG['enable_deepseek_embed']}）",
-    )
-    parser.add_argument(
         "--enable_deepseek_summary",
         action="store_true",
         default=CONFIG["enable_deepseek_summary"],
@@ -686,7 +679,6 @@ def main():
     )
 
     dynamic_config["max_workers"] = args.workers
-    dynamic_config["enable_deepseek_embed"] = args.enable_deepseek_embed
     dynamic_config["enable_deepseek_summary"] = args.enable_deepseek_summary
     dynamic_config["enable_deepseek_tags"] = args.enable_deepseek_tags
     if args.enable_force_update:
@@ -709,7 +701,6 @@ def main():
         处理状态文件={dynamic_config['state_path']}, \
         笔记本={dynamic_config['notebook_titles']}, \
         并发数={dynamic_config['max_workers']}， \
-        使能deepseek嵌入模型为{dynamic_config['enable_deepseek_embed']}， \
         使能deepseek摘要功能为{dynamic_config['enable_deepseek_summary']}， \
         使能deepseek标签功能为{dynamic_config['enable_deepseek_tags']}， \
         强制更新为{dynamic_config['force_update']} \
