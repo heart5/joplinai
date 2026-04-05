@@ -56,7 +56,7 @@ class EmbeddingGenerator:
         self.chunk_size = chunk_size
         self.embedding_dim = self._get_model_dimension()
         self.embedding_cache = {}  # 简单缓存
-        self.set_chunk_size()
+        self._set_chunk_size()
 
 # %% [markdown]
 # ### _get_model_dimension(self)
