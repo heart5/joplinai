@@ -437,10 +437,10 @@ class OptimizedJoplinQASystem(JoplinQASystem):
         )
 
 # %% [markdown]
-# ### ask(self, question: str) -> Dict
+# ### ask(self, question: str, use_history: bool = True) -> Dict
 
     # %%
-    def ask(self, question: str) -> Dict:
+    def ask(self, question: str, use_history: bool = True) -> Dict:
         """提问入口，现在基于块进行检索和回答。"""
         # 1. 预处理问题
         processed_question = self._preprocess_question(question)
@@ -472,6 +472,19 @@ class OptimizedJoplinQASystem(JoplinQASystem):
         # 构建与原始JoplinQASystem兼容的返回字典
         # 关键：将 `filtered_chunks` 转换为 `relevant_notes` 格式
         relevant_notes_for_return = self._get_relevant_notes_for_return(filtered_chunks)
+        # 4. 更新对话历史
+        if use_history:
+            self.conversation_history.append(
+                {
+                    "question": question,
+                    "answer": answer,
+                    "timestamp": datetime.now().isoformat(),
+                    "relevant_note_ids": [note["note_id"] for note in relevant_notes_for_return],
+                }
+            )
+            # 保持历史记录长度
+            if len(self.conversation_history) > 10:
+                self.conversation_history = self.conversation_history[-10:]
 
         # 构建来源信息（sources）
         sources = self._extract_sources(relevant_notes_for_return)
@@ -617,11 +630,20 @@ class OptimizedJoplinQASystem(JoplinQASystem):
     """
             note_contexts.append(note_context)
 
+        history_parts = []
+        # 添加对话历史（如果存在）
+        if self.conversation_history:
+            for hist in self.conversation_history[-3:]:  # 最近3条历史
+                history_parts.append(f"问: {hist['question']}")
+                history_parts.append(f"答: {hist['answer'][:200]}...")
         # 组合完整上下文
         context = f"""{sys_prompt}
 
     相关笔记内容：
     {chr(10).join(note_contexts)}
+
+    对话历史：
+    {chr(10).join(history_parts)}
 
     我的问题：{question}
 
