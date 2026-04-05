@@ -82,7 +82,7 @@ DEFAULT_CONFIG = CONFIG.copy()
 # # 全局问答系统实例（单例，线程安全）
 
 # %%
-_qa_system_instance = None
+_qa_system_instances = {}
 _qa_system_lock = threading.Lock()
 
 # 会话历史存储 {session_id: [history_list]}
@@ -120,46 +120,18 @@ def sanitize_config(obj):
 
 
 # %% [markdown]
-# ## get_qa_system(config_overrides: Optional[Dict] = None) -> JoplinQASystem
-
-# %%
-def get_qa_system(config_overrides: Optional[Dict] = None) -> OptimizedJoplinQASystem:
-    """获取或创建全局问答系统实例（线程安全）"""
-    global _qa_system_instance
-    if _qa_system_instance is None:
-        with _qa_system_lock:
-            if _qa_system_instance is None:  # 双重检查锁定
-                config = DEFAULT_CONFIG.copy()
-                if config_overrides:
-                    config.update(config_overrides)
-                config_show = {
-                    k: v for k, v in config.items() if k != "deepseek_api_key"
-                }
-                sanitized_config = sanitize_config(config_show)
-                log.info(
-                    f"初始化全局问答系统，配置: {json.dumps(sanitized_config, indent=2, ensure_ascii=False)}"
-                )
-                try:
-                    _qa_system_instance = OptimizedJoplinQASystem(config)
-                    log.info("✅ 全局问答系统初始化成功")
-                except Exception as e:
-                    log.error(f"❌ 问答系统初始化失败: {e}")
-                    raise RuntimeError(f"无法初始化问答系统: {e}")
-    return _qa_system_instance
-
-
-# %% [markdown]
-# ## get_qa_system_for_session(config_overrides: Optional[Dict] = None,) -> OptimizedJoplinQASystem
+# ## get_qa_system_for_session(session_id: str, config_overrides: Optional[Dict] = None,) -> OptimizedJoplinQASystem
 
 # %%
 def get_qa_system_for_session(
-    config_overrides: Optional[Dict] = None,
+    session_id: str, config_overrides: Optional[Dict] = None
 ) -> OptimizedJoplinQASystem:
-    """获取或创建全局问答系统实例（线程安全）"""
-    global _qa_system_instance
-    if _qa_system_instance is None:
+    """获取或创建指定会话的问答系统实例（线程安全）"""
+    global _qa_system_instances
+
+    if session_id not in _qa_system_instances:
         with _qa_system_lock:
-            if _qa_system_instance is None:  # 双重检查锁定
+            if session_id not in _qa_system_instances:  # 双重检查锁定
                 config = DEFAULT_CONFIG.copy()
                 if config_overrides:
                     config.update(config_overrides)
@@ -168,16 +140,16 @@ def get_qa_system_for_session(
                 }
                 sanitized_config = sanitize_config(config_show)
                 log.info(
-                    f"初始化全局问答系统，配置: {json.dumps(sanitized_config, indent=2, ensure_ascii=False)}"
+                    f"为会话 [{session_id}] 初始化问答系统，配置: {json.dumps(sanitized_config, indent=2, ensure_ascii=False)}"
                 )
-                # +++ 修复结束 +++
                 try:
-                    _qa_system_instance = OptimizedJoplinQASystem(config)
-                    log.info("✅ 全局问答系统初始化成功")
+                    # 注意：这里每个会话都会创建一个新的 OptimizedJoplinQASystem 实例
+                    _qa_system_instances[session_id] = OptimizedJoplinQASystem(config)
+                    log.info(f"✅ 会话 [{session_id}] 的问答系统初始化成功")
                 except Exception as e:
-                    log.error(f"❌ 问答系统初始化失败: {e}")
-                    raise RuntimeError(f"无法初始化问答系统: {e}")
-    return _qa_system_instance
+                    log.error(f"❌ 会话 [{session_id}] 的问答系统初始化失败: {e}")
+                    raise RuntimeError(f"无法为会话 {session_id} 初始化问答系统: {e}")
+    return _qa_system_instances[session_id]
 
 
 # %% [markdown]
@@ -240,42 +212,22 @@ def api_ask():
         if not question:
             return jsonify({"error": "问题不能为空"}), 400
 
-        session_id = data.get("session_id", "default")
+        session_id = data.get("session_id", "default_session")
         use_history = data.get("use_history", True)
         config_overrides = data.get("config_overrides", {})
 
         log.info(f"收到提问请求 | 会话: {session_id} | 问题: {question[:50]}...")
 
         # 1. 获取问答系统实例
-        qa_system = get_qa_system(config_overrides)
-
-        # 2. （可选）构建历史上下文
-        if use_history:
-            history = get_or_create_session(session_id)
-            if history:
-                # 这里可以简化：将最近几条历史拼接成文本，作为问题前缀或单独传入
-                # 更复杂的实现可修改 qa_system.ask 以支持历史参数
-                recent_history = history[-3:]  # 最近3条
-                history_context = "\n".join(
-                    [
-                        f"之前问过: {h['question']}\n之前回答: {h['answer'][:100]}..."
-                        for h in recent_history
-                    ]
-                )
-                enhanced_question = f"{history_context}\n\n当前问题: {question}"
-                log.debug(f"为会话 {session_id} 添加上下文")
-            else:
-                enhanced_question = question
-        else:
-            enhanced_question = question
+        qa_system = get_qa_system_for_session(session_id, config_overrides)
 
         # 3. 调用核心问答功能
-        result = qa_system.ask(enhanced_question)
+        result = qa_system.ask(question, use_history=use_history)
 
         # 4. 更新会话历史
         update_session_history(
             session_id=session_id,
-            question=question,  # 存储原始问题
+            question=question,
             answer=result.get("answer", ""),
             metadata={
                 "is_based_on_notes": result.get("is_based_on_notes", False),
@@ -319,7 +271,7 @@ def api_get_history():
         limit: 返回最近多少条记录（可选）
     """
     try:
-        session_id = request.args.get("session_id", "default")
+        session_id = request.args.get("session_id", "default_session")
         limit = request.args.get("limit", type=int)
 
         history = get_or_create_session(session_id)
@@ -357,7 +309,10 @@ def api_clear_history():
         qa_system = get_qa_system_for_session(session_id)
         # 调用清空历史的方法
         qa_system.clear_history()
-
+        # 同时也可清空 API 层存储的该会话历史
+        with _history_lock:
+            if session_id in _session_histories:
+                del _session_histories[session_id]
         log.info(f"已清空会话【{session_id}】的对话历史")
         return jsonify(
             {
@@ -468,7 +423,7 @@ def main():
     # 预初始化问答系统（可选，加快第一个请求的响应）
     try:
         log.info("预初始化问答系统...")
-        get_qa_system()
+        get_qa_system_for_session("default_session")
         log.info("预初始化完成")
     except Exception as e:
         log.warning(f"预初始化失败，将继续懒加载: {e}")
