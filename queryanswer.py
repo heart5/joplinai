@@ -17,7 +17,10 @@
 # # Joplin笔记智能问答系统
 
 # %% [markdown]
-# ## 导入核心库
+# ## 导入库
+
+# %% [markdown]
+# ### 导入核心库
 
 # %%
 import argparse
@@ -69,13 +72,27 @@ CONFIG = {
     "chat_model": "qwen:1.8b",  # 聊天模型（用于问答）
     "db_path": getdirmain() / "data" / "joplin_vector_db",  # ChromaDB存储路径
     "max_retrieved_notes": 10,  # 最大检索笔记数量
-    "similarity_threshold": 0.3,  # 相似度阈值
-    "enable_deepseek": False,  # 是否使用DeepSeek进行问答
+    # 最大检索文本块数，默认20
+    "max_retrieved_chunks": max_retrieved_chunks
+    if (
+        max_retrieved_chunks := getinivaluefromcloud("joplinai", "max_retrieved_chunks")
+    )
+    else 20,
+    "similarity_threshold": 0.5,  # 相似度阈值
+    # 是否使用DeepSeek进行问答，默认为False
+    "enable_deepseek": enable_deepseek
+    if (enable_deepseek := getinivaluefromcloud("joplinai", "enable_deepseek"))
+    else False,
     "deepseek_api_key": getinivaluefromcloud("joplinai", "deepseek_token"),
     "deepseek_chat_model": "deepseek-chat",
-    "context_max_length": 4000,  # 上下文最大长度（字符）
+    # 上下文最大长度（字符），默认为4000
+    "context_max_length": context_max_length
+    if (context_max_length := getinivaluefromcloud("joplinai", "context_max_length"))
+    else 4000,
     "min_answer_length": 50,  # 添加最小答案长度要求
 }
+
+# %%
 
 # %%
 # 根据嵌入模型生成状态文件路径
@@ -261,7 +278,7 @@ class JoplinQASystem:
             response = ollama.chat(
                 model=model_name,
                 messages=messages,
-                options={"temperature": 0.3, "num_predict": 1000},
+                options={"temperature": 0.3, "num_predict": 2000},
             )
 
             answer = response["message"]["content"]
@@ -429,9 +446,7 @@ class OptimizedJoplinQASystem(JoplinQASystem):
         processed_question = self._preprocess_question(question)
 
         # 2. 获取问题嵌入
-        query_embedding = self.embedding_generator.get_merged_embedding(
-            processed_question, self.config.get("enable_deepseek_embed", False)
-        )
+        query_embedding = self.embedding_generator.get_merged_embedding(processed_question)
         if not query_embedding:
             return {"answer": "无法生成问题嵌入，请检查配置。", "relevant_chunks": []}
 
@@ -578,7 +593,8 @@ class OptimizedJoplinQASystem(JoplinQASystem):
             notes_dict[note_id].append(chunk)
 
         # 构建系统提示
-        system_prompt = """你是我个人的笔记助手，基于Joplin笔记回答问题。
+        if not (sys_prompt := getinivaluefromcloud("joplinai", "sys_prompt")):
+            sys_prompt = """你是我个人的笔记助手，基于Joplin笔记回答问题。
     笔记记录了工作（轻行动功能饮料、习龙酱酒等）、学习、生活、想法等各种内容。
     请基于以下相关笔记片段（可能来自同一篇笔记的不同部分）回答问题。
     如果笔记中没有相关信息，请如实告知。"""
@@ -602,19 +618,21 @@ class OptimizedJoplinQASystem(JoplinQASystem):
             note_contexts.append(note_context)
 
         # 组合完整上下文
-        context = f"""{system_prompt}
-    
+        context = f"""{sys_prompt}
+
     相关笔记内容：
     {chr(10).join(note_contexts)}
-    
+
     我的问题：{question}
-    
+
     请基于以上笔记内容回答，如果笔记中没有相关信息，请说明。"""
 
         # 限制长度
         max_len = self.config.get(
             "context_max_length", 2000
         )  # 可适当提高，因为现在信息更密集
+        # print(context)
+        log.info(f"设置的最大上下文长度为：{max_len}，本次提交的上下文长度为：{len(context)}")
         if len(context) > max_len:
             context = context[:max_len] + "..."
 
@@ -828,7 +846,7 @@ class OptimizedJoplinQASystem(JoplinQASystem):
                     {"role": "user", "content": prompt},
                 ],
                 "temperature": 0.3,
-                "max_tokens": 800,
+                "max_tokens": 1800,
                 "top_p": 0.9,
             }
 
