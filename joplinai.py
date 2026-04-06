@@ -62,6 +62,7 @@ try:
     from func.getid import getdeviceid, getdevicename, gethostuser
     from func.jpfuncs import (
         createnote,
+        get_notebook_ids_for_note,
         get_notes_in_notebook_by_title,
         get_tag_titles,
         getinivaluefromcloud,
@@ -117,6 +118,9 @@ CONFIG["state_path"] = (
 # ## 功能函数集
 # %% [markdown]
 # ### 工具小集合
+# %% [markdown]
+# #### clean_text_other(text: str) -> str
+
 # %%
 def clean_text_other(text: str) -> str:
     """清理笔记文本：移除图片、格式符号、多余换行"""
@@ -187,7 +191,6 @@ def save_process_state(state: Dict, state_path: Path):
 # %%
 def enhance_by_deepseek_for_summary_tags(note, chunk: str, config: Dict):
     """DeepSeek 官方模型增强生成小结和标签（和笔记既有标签进行融合）"""
-
     from deepseek_enhancer import deepseek_process_note, get_cache_manager
 
     log.info(get_cache_manager().get_stats())
@@ -256,7 +259,7 @@ def process_note_chunks(
             text=text, note_title=note.title, note_tags=tags_str
         )
         if not chunk_dicts:
-            log.warning(f"笔记《{note.title}》分块后无内容，跳过。")
+            log.warning(f"笔记《{note.title}》拆分不出有效内容块，跳过。")
             return False
 
         # 3. 遍历新分出的每个块，决定是否需要处理
@@ -333,11 +336,20 @@ def process_note_chunks(
 
             if len(chunk_content) > embedding_generator.chunk_size * 0.7:
                 enhanced_metadata["potential_long_chunk"] = True
+
+            notebook_dicts = get_notebook_ids_for_note(note.id)
+            notebook_dict = notebook_dicts[-1]
+            try:
+                notebook_id, notebook_title = next(iter(notebook_dict.items()))
+            except StopIteration:
+                notebook_id, notebook_title = "", ""
             # 构建完整元数据
             metadata = {
                 **base_metadata,  # 包含 content_hash, estimated_date 等
                 **enhanced_metadata,  # 包含 chunk_summary, tags 等
                 "source_note_id": note.id,
+                "source_notebook_id": notebook_id,
+                "source_notebook_title": notebook_title,
             }
 
             # 存入向量数据库
@@ -402,6 +414,11 @@ def process_notes_incremental(notebook_title: str, config: Dict):
     # chunk_size = EmbeddingGenerator(config["embedding_model"]).chunk_size
     log.info(f"使用模型“{model_name}”")
 
+
+# %% [markdown]
+# #### 初始化向量库
+
+    # %%
     # 初始化向量数据库（在整个处理过程中只初始化一次）
     if not hasattr(process_notes_incremental, "vector_db"):
         process_notes_incremental.vector_db = VectorDBManager(
@@ -433,6 +450,10 @@ def process_notes_incremental(notebook_title: str, config: Dict):
         log.info(f"笔记本 【{notebook_title}】 无笔记，跳过处理")
         return {}
 
+# %% [markdown]
+# #### 开始增量处理，多线程
+
+    # %%
     log.info(f"开始增量处理笔记本 【{notebook_title}】，共 {len(notes)} 条笔记")
     updated_count = 0
     new_time_notes = []
@@ -515,6 +536,66 @@ def process_notes_incremental(notebook_title: str, config: Dict):
             f"笔记本【{notebook_title}】中增量处理（向量化）失败的笔记: {set(failed_notes)}"
         )
 
+# %% [markdown]
+# #### 清理已移除当前笔记本的向量数据
+
+    # %%
+    # 在 process_notes_incremental 函数内部，所有笔记处理完成后，返回 stats 之前添加
+    # ========== 新增：清理已移出当前笔记本的笔记的向量数据 ==========
+    log.info(f"开始执行笔记本【{notebook_title}】的‘孤儿笔记’向量数据清理...")
+    try:
+        # 1. 获取当前笔记本对象及其ID
+        notebook_id = searchnotebook(notebook_title) # 直接返回笔记本的id
+        current_notebook_id = notebook_id
+        
+        if not current_notebook_id:
+            log.warning(f"无法获取笔记本【{notebook_title}】的ID，跳过清理步骤。")
+        else:
+            # 2. 获取当前笔记本中所有笔记的ID集合
+            current_note_ids_in_notebook = set(note.id for note in notes)
+            
+            # 3. 从向量库中查询所有 source_notebook_id 等于当前笔记本ID的块，并聚合出笔记ID
+            # 我们需要一个辅助函数来执行这个查询。由于ChromaDB的get不支持直接按元数据值分组，
+            # 我们先获取所有相关块，再在内存中聚合。
+            all_results = vector_db.collection.get(
+                where={"source_notebook_id": current_notebook_id},
+                include=["metadatas"]
+            )
+            # print(f"从向量数据库中取出当前笔记本【{notebook_title}】相关的文本块结果入下：\n{all_results}")
+            
+            note_ids_in_vector_db = set()
+            for metadata in all_results.get("metadatas", []):
+                note_id = metadata.get("source_note_id")
+                if note_id:
+                    note_ids_in_vector_db.add(note_id)
+            note_titles_in_vector_db = [getnote(note_id).title for note_id in note_ids_in_vector_db]
+            log.info(f"从向量数据库既有数据查找到的笔记本【{notebook_title}】中的笔记有这些：{note_titles_in_vector_db}")
+            
+            # 4. 找出在向量库中存在，但已不在当前笔记本中的笔记ID
+            orphan_note_ids = note_ids_in_vector_db - current_note_ids_in_notebook
+            
+            # 5. 清理这些“孤儿笔记”对应的所有块
+            cleaned_total_chunks = 0
+            for note_id in orphan_note_ids:
+                deleted_chunks_count = vector_db.delete_chunks_by_note_id(note_id)
+                cleaned_total_chunks += deleted_chunks_count
+                if deleted_chunks_count > 0:
+                    note_title = getnote(note_id).title
+                    print(note_title)
+                    log.info(f"清理已移除笔记《{note_title}》（note_id={note_id}）的孤儿文本块向量数据, 删除 {deleted_chunks_count} 个块。")
+                    # 可选：从处理状态中移除该笔记的记录
+                    process_state.pop(note_id, None)
+            
+            if cleaned_total_chunks > 0:
+                log.info(f"笔记本【{notebook_title}】清理完成。共移除 {len(orphan_note_ids)} 条笔记的向量数据，涉及 {cleaned_total_chunks} 个块。")
+            else:
+                log.info(f"笔记本【{notebook_title}】未发现需要清理的孤儿笔记向量数据。")
+                
+    except Exception as e:
+        log.error(f"执行笔记本【{notebook_title}】的清理步骤时出错: {e}", exc_info=True)
+    # ========== 清理步骤结束 ==========
+
+
     # 在函数末尾，整理并返回统计信息
     stats = {
         "notebook_title": notebook_title,
@@ -541,8 +622,7 @@ def process_notes_incremental(notebook_title: str, config: Dict):
 def add_file_lock(
     model_name: str, lock_name: str = "joplinai.lock", timeout: int = 3600
 ):
-    """
-    在脚本入口创建文件锁，防止多实例并发运行。
+    """在脚本入口创建文件锁，防止多实例并发运行。
 
     Args:
         lock_name: 锁文件名，建议与模型或配置关联以避免不同配置间的冲突。
@@ -709,6 +789,11 @@ def main():
         "
     )
 
+
+# %% [markdown]
+# #### 程序运行锁
+
+    # %%
     # ==== 1. 文件锁：防止并发运行 ====
     # 生成与模型相关的唯一锁名，避免不同模型配置间的冲突
     model_name = dynamic_config["embedding_model"]
@@ -722,6 +807,21 @@ def main():
         sys.exit(1)  # 获取锁失败，安全退出
     # ==== 文件锁结束 ====
 
+# %% [markdown]
+# #### 给向量库项目的metadata添加两个字段
+
+# %%
+# ！！！一次性运行，给向量库项目的metadata添加notebook_id和notebook_title字段。
+# vector_db = VectorDBManager(
+#     dynamic_config["db_path"], dynamic_config["embedding_model"], True
+# )
+# vector_db.migrate_add_notebook_id(get_notebook_ids_for_note)
+# ！！！运行结束！！！请注释掉上面两行代码
+
+# %% [markdown]
+# #### 初始化任务报告器并启动处理传入的笔记本列表
+
+    # %%
     # 初始化任务报告器
     from aitaskreporter import JoplinAITaskReporter
 
@@ -781,7 +881,6 @@ def main():
     # 处理完成后删除检查点
     if checkpoint_file.exists():
         checkpoint_file.unlink()
-
 
 # %% [markdown]
 # ## 主函数
