@@ -14,15 +14,24 @@
 # ---
 
 # %% [markdown]
-# # 导入库
+# # Joplin笔记知识库AI系统运行分析报告系统
+
 # %%
 # aitaskreport.py
 # 增强版：Joplin笔记知识库AI系统运行分析报告系统
 # 新增功能：监控文本块粒度、追踪笔记进出动态、反映整体变化情况
 
+# %% [markdown]
+# # 导入库
+# %% [markdown]
+# ## 系统库
+
 # %%
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
+
+# %% [markdown]
+# ## 个人库
 
 # %%
 try:
@@ -61,6 +70,11 @@ class JoplinAITaskReporter:
     处理向量化任务的统计与笔记同步，支持文本块粒度监控和笔记动态变化追踪。
     """
 
+
+# %% [markdown]
+# ## \_\_init__(self, config: Dict):
+
+    # %%
     def __init__(self, config: Dict):
         self.config = config
         self.task_records = []  # 存储每次运行的任务记录
@@ -73,6 +87,10 @@ class JoplinAITaskReporter:
             "orphan_chunks_cleaned": 0,
         }
 
+# %% [markdown]
+# ## add_notebook_record(self, notebook_title: str, stats: Dict)
+
+    # %%
     def add_notebook_record(self, notebook_title: str, stats: Dict):
         """添加单个笔记本的处理记录
         期望 stats 字典包含来自 process_notes_incremental 的增强信息：
@@ -106,6 +124,10 @@ class JoplinAITaskReporter:
             "orphans_cleaned", 0
         )
 
+# %% [markdown]
+# ## generate_markdown_report(self) -> str
+
+    # %%
     def generate_markdown_report(self) -> str:
         """生成Markdown格式的增强统计报告"""
         md_lines = ["# 📊 Joplin笔记向量化处理统计报告（增强版）\n"]
@@ -252,24 +274,29 @@ class JoplinAITaskReporter:
 
         return "\n".join(md_lines)
 
+# %% [markdown]
+# ## update_joplin_note(self, report_content: str) -> bool
+
+    # %%
     def update_joplin_note(self, report_content: str) -> bool:
         """将报告更新到Joplin笔记"""
         try:
-            notebook_title = "AI知识库"
-            notebook_id = searchnotebook(notebook_title)
-            if not notebook_id:
-                notebook_id = jpapi.add_notebook(title=notebook_title)
-
-            note_title = "JoplinAI向量化处理报告（增强版）"
-            existing_notes = searchnotes(note_title, parent_id=notebook_id)
-
-            if existing_notes:
-                note = existing_notes
-                updatenote_body(note.id, report_content)
-                log.info(f"更新Joplin统计笔记: {note_title}")
-            else:
-                note_id = createnote(note_title, report_content, parent_id=notebook_id)
-                log.info(f"创建Joplin统计笔记: {note_title} (ID: {note_id})")
+            if not (note_id := getcfpoptionvalue("joplinai", "aitaskreport", "note_id")):
+                notebook_title = "ewmobile"
+                if not (notebook_id := searchnotebook(notebook_title)):
+                    notebook_id = jpapi.add_notebook(title=notebook_title)
+                note_title = "JoplinAI向量化处理报告（增强版）"
+                if (existing_notes := searchnotes(note_title, parent_id=notebook_id)):
+                    note = existing_notes[0]
+                    note_id = note.id
+                    setcfpoptionvalue("joplinai", "aitaskreport", "note_id", note_id)
+                else:
+                    note_id = createnote(note_title, report_content, parent_id=notebook_id)
+                    setcfpoptionvalue("joplinai", "aitaskreport", "note_id", note_id)
+                    log.info(f"创建Joplin统计笔记: {note_title} (ID: {note_id})")
+                    return True
+            updatenote_body(note_id, report_content)
+            log.info(f"更新Joplin统计笔记: {note_title}")
 
             return True
         except Exception as e:
