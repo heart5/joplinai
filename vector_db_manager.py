@@ -33,6 +33,9 @@ import ollama
 
 # %%
 try:
+    from func.jpfuncs import (
+        get_notebook_ids_for_note,
+    )
     from func.logme import log
 except ImportError as e:
     logging.basicConfig(level=logging.INFO)
@@ -284,6 +287,9 @@ class VectorDBManager:
             # 可以根据需要添加其他字段，如 chunk_index
             "chunk_index": metadata.get("chunk_index", 0),
             "content_hash": metadata.get("content_hash", ""),
+            # === 新增字段 ===
+            "source_notebook_title": metadata.get("source_notebook_title", ""),
+            "source_notebook_id": metadata.get("source_notebook_id", ""),
         }
 
         # 确保使用 upsert 方法
@@ -293,7 +299,7 @@ class VectorDBManager:
             embeddings=[embedding],
             metadatas=[db_metadata],
         )
-        log.info(f"成功存储笔记块: {chunk_id}, 来源笔记: 《{db_metadata.get('source_note_title')}》")
+        log.info(f"成功存储笔记块: {chunk_id}, 来源位于【{db_metadata.get('source_notebook_title')}】笔记本中的笔记: 《{db_metadata.get('source_note_title')}》")
 
 # %% [markdown]
 # ### delete_note(self, note_id: str)
@@ -614,3 +620,90 @@ class VectorDBManager:
         except Exception as e:
             log.error(f"获取集合信息失败: {e}")
             return {"error": str(e)}
+
+# %% [markdown]
+# ### migrate_add_notebook_id(self, get_notebook_ids_for_note)
+
+    # %%
+    def migrate_add_notebook_id(self, get_notebook_ids_for_note):
+        """
+        安全迁移：为所有现有块添加 source_notebook_id 字段。
+    
+        参数:
+            get_notebook_ids_for_note: 一个可调用函数，接收 note_id，返回其所属的笔记本列表（包含id和title）。
+                                           例如: lambda notebooks_list: get_notebook_id(note_id)
+        """
+        if not self.collection:
+            log.error("集合未加载，无法迁移。")
+            return
+    
+        log.info("开始迁移：为所有向量数据块添加 source_notebook_id 字段...")
+    
+        # 获取集合中的所有数据
+        try:
+            results = self.collection.get(include=["metadatas", "documents"])
+        except Exception as e:
+            log.error(f"获取集合数据失败: {e}")
+            return
+    
+        ids = results.get("ids", [])
+        metadatas = results.get("metadatas", [])
+    
+        if not ids:
+            log.info("集合为空，无需迁移。")
+            return
+    
+        updated_count = 0
+        error_count = 0
+    
+        for i, (chunk_id, metadata) in enumerate(zip(ids, metadatas)):
+            try:
+                # 检查是否已存在 source_notebook_id和source_notebook_title 字段，避免重复迁移
+                if "source_notebook_id" in metadata and metadata["source_notebook_id"]:
+                    continue
+                if (
+                    "source_notebook_title" in metadata
+                    and metadata["source_notebook_title"]
+                ):
+                    continue
+    
+                note_id = metadata.get("source_note_id")
+                note_title = metadata.get("source_note_title")
+                if not note_id:
+                    log.warning(
+                        f"笔记 《{note_title}》 的块 {chunk_id} 缺少 source_note_id，跳过。"
+                    )
+                    continue
+    
+                # 调用外部函数获取笔记本ID
+                notebook_dicts = get_notebook_ids_for_note(note_id)
+                notebook_dict = notebook_dicts[-1]
+                if not notebook_dict:
+                    log.warning(
+                        f"无法获取笔记 《{note_title}》 的笔记本ID，可能已被删除。跳过。"
+                    )
+                    # 可选：可以标记为待删除，或留空。这里选择留空，后续清理可能处理。
+                try:
+                    notebook_id, notebook_title = next(iter(notebook_dict.items()))
+                except StopIteration:
+                    notebook_id, notebook_title = "", ""
+    
+                # 更新元数据
+                updated_metadata = {
+                    **metadata,
+                    "source_notebook_id": notebook_id,
+                    "source_notebook_title": notebook_title,
+                }
+                self.collection.update(ids=[chunk_id], metadatas=[updated_metadata])
+    
+                updated_count += 1
+                if updated_count % 100 == 0:
+                    log.info(f"迁移进度：已更新 {updated_count} 个块。")
+    
+            except Exception as e:
+                error_count += 1
+                log.error(
+                    f"迁移笔记 《{note_title}》 的块 {chunk_id} 时出错: {e}", exc_info=False
+                )  # 避免堆栈过长
+    
+        log.info(f"迁移完成。成功更新 {updated_count} 个块，遇到 {error_count} 个错误。")
