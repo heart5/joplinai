@@ -598,7 +598,7 @@ def process_notes_incremental(notebook_title: str, config: Dict):
                 if note_id:
                     note_ids_in_vector_db.add(note_id)
             note_titles_in_vector_db = [getnote(note_id).title for note_id in note_ids_in_vector_db]
-            log.info(f"从向量数据库既有数据查找到的笔记本【{notebook_title}】中的笔记有这些：{note_titles_in_vector_db}")
+            log.info(f"从向量数据库既有数据查找到的笔记本【{notebook_title}】中的笔记有这些：{note_titles_in_vector_db[-5:]}……")
             
             # 4. 找出在向量库中存在，但已不在当前笔记本中的笔记ID
             orphan_note_ids = note_ids_in_vector_db - current_note_ids_in_notebook
