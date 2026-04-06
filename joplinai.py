@@ -83,7 +83,7 @@ except ImportError as e:
     log.error(f"导入项目模块失败: {e}")
 
 # %% [markdown]
-# ## 核心配置（根据需求调整）
+# # 核心配置（根据需求调整）
 
 # %%
 CONFIG = {
@@ -115,11 +115,11 @@ CONFIG["state_path"] = (
 
 
 # %% [markdown]
-# ## 功能函数集
+# # 功能函数集
 # %% [markdown]
-# ### 工具小集合
+# ## 工具小集合
 # %% [markdown]
-# #### clean_text_other(text: str) -> str
+# ### clean_text_other(text: str) -> str
 
 # %%
 def clean_text_other(text: str) -> str:
@@ -136,7 +136,7 @@ def clean_text_other(text: str) -> str:
 
 
 # %% [markdown]
-# #### compute_content_hash(title: str, body: str) -> str
+# ### compute_content_hash(title: str, body: str) -> str
 # %%
 def compute_content_hash(title: str, body: str) -> str:
     """计算笔记内容哈希（用于增量更新判断）"""
@@ -145,7 +145,7 @@ def compute_content_hash(title: str, body: str) -> str:
 
 
 # %% [markdown]
-# #### load_process_state(state_path: Path) -> Dict[str, Dict]
+# ### load_process_state(state_path: Path) -> Dict[str, Dict]
 # %%
 def load_process_state(state_path: Path) -> Dict[str, Dict]:
     """加载处理状态（笔记ID→{更新时间, 哈希, 处理时间}）"""
@@ -159,7 +159,7 @@ def load_process_state(state_path: Path) -> Dict[str, Dict]:
 
 
 # %% [markdown]
-# #### save_process_state(state: Dict, state_path: Path)
+# ### save_process_state(state: Dict, state_path: Path)
 # %%
 def save_process_state(state: Dict, state_path: Path):
     """保存处理状态（增强序列化）"""
@@ -184,9 +184,9 @@ def save_process_state(state: Dict, state_path: Path):
 
 
 # %% [markdown]
-# ### 笔记处理核心逻辑（增量更新+入库）
+# ## 笔记处理核心逻辑（增量更新+入库）
 # %% [markdown]
-# #### enhance_by_deepseek_for_summary_tags(note, chunk: str, config: Dict)
+# ### enhance_by_deepseek_for_summary_tags(note, chunk: str, config: Dict)
 
 # %%
 def enhance_by_deepseek_for_summary_tags(note, chunk: str, config: Dict):
@@ -222,7 +222,7 @@ def enhance_by_deepseek_for_summary_tags(note, chunk: str, config: Dict):
 
 
 # %% [markdown]
-# #### process_note_chunks(note, vector_db: VectorDBManager, embedding_generator: EmbeddingGenerator, config: Dict,) -> bool
+# ### process_note_chunks(note, vector_db: VectorDBManager, embedding_generator: EmbeddingGenerator, config: Dict,) -> bool
 # %%
 def process_note_chunks(
     note,
@@ -422,7 +422,7 @@ def process_note_chunks(
 
 
 # %% [markdown]
-# #### process_notes_incremental(notebook_title: str, config: Dict)
+# ### process_notes_incremental(notebook_title: str, config: Dict)
 # %%
 def process_notes_incremental(notebook_title: str, config: Dict):
     """增量处理笔记本笔记（修复时间处理问题）"""
@@ -658,20 +658,18 @@ def process_notes_incremental(notebook_title: str, config: Dict):
         note_detail = getnote(note_id)
         if note_detail:
             notes_added_titles.append(note_detail.title)
-    
-    # 注意：`updated_count` 变量记录的是内容发生变更的笔记数量，这已经存在。
-    
+
     # 3. 构建增强的统计字典
     stats = {
         "notebook_title": notebook_title,
         "total_notes": len(notes),
-        "updated_count": updated_count, # 内容有更新的笔记数
+        "updated_count": updated_count,
         "failed_notes": list(set(failed_notes)),
         "new_time_notes": new_time_notes,
-        # === 新增的字段 ===
-        "notes_added": notes_added_titles,
-        "notes_removed": notes_removed_titles,
-        "chunk_stats": {
+        # === 以下为新增字段，用于深度分析 ===
+        "notes_added": notes_added_titles,      # 列表
+        "notes_removed": notes_removed_titles,  # 列表
+        "chunk_stats": {                        # 字典
             "total_chunks": total_chunks_for_notebook,
             "upserted": total_upserted_for_notebook,
             "skipped": total_skipped_for_notebook,
@@ -679,17 +677,17 @@ def process_notes_incremental(notebook_title: str, config: Dict):
         },
         "process_time": datetime.now().isoformat(),
     }
-    
+
     log.info(f"笔记本【{notebook_title}】处理完成。")
     # 返回这个完整的 stats 字典
     return stats
 
 
 # %% [markdown]
-# ### 主流程入口
+# ## 主流程入口
 
 # %% [markdown]
-# #### add_file_lock(model_name: str, lock_name: str = "joplinai.lock", timeout: int = 3600)
+# ### add_file_lock(model_name: str, lock_name: str = "joplinai.lock", timeout: int = 3600)
 
 # %%
 def add_file_lock(
@@ -764,7 +762,7 @@ def add_file_lock(
         return None, False
 
 # %% [markdown]
-# #### parse_args()
+# ### parse_args()
 
 
 # %%
@@ -810,7 +808,7 @@ def parse_args():
 
 
 # %% [markdown]
-# #### main()
+# ### main()
 
 
 # %%
@@ -941,6 +939,10 @@ def main():
         log.info("===== 所有笔记本处理完成 =====")
 
         # 生成并保存报告到Joplin
+        # 关键步骤：通知报告器本次运行结束，保存全局记录
+        task_reporter.finalize_run(success=True)
+
+        # 生成并保存报告到joplin
         report_content = task_reporter.generate_markdown_report()
         success = task_reporter.update_joplin_note(report_content)
         if success:
@@ -956,7 +958,7 @@ def main():
         checkpoint_file.unlink()
 
 # %% [markdown]
-# ## 主函数
+# # 主函数
 
 # %%
 if __name__ == "__main__":
