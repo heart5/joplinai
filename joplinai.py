@@ -235,7 +235,7 @@ def process_note_chunks(
         note_detail = getnote(note.id)
         if not note_detail:
             log.warning(f"笔记《{note.title}》（{note.id}） 获取失败，跳过")
-            return False
+            return {"success": False, "chunk_stats": {}}
 
         log.info(f"开始块级增量处理笔记: 《{note.title}》 (ID: {note.id})")
 
@@ -260,7 +260,7 @@ def process_note_chunks(
         )
         if not chunk_dicts:
             log.warning(f"笔记《{note.title}》拆分不出有效内容块，跳过。")
-            return False
+            return {"success": False, "chunk_stats": {}}
 
         # 3. 遍历新分出的每个块，决定是否需要处理
         chunks_to_upsert = []  # 存放需要更新/插入的块信息
@@ -392,16 +392,33 @@ def process_note_chunks(
             log.info(
                 f"笔记《{note.title}》块级增量处理完成。成功更新 {successful_upserts} 个块，跳过 {skipped_chunks} 个块。"
             )
-            return True
+            # 返回详细的统计字典，而不仅仅是 True
+            return {
+                "success": True,
+                "chunk_stats": {
+                    "total_chunks": len(chunk_dicts),
+                    "upserted": successful_upserts,
+                    "skipped": skipped_chunks,
+                    "orphans_cleaned": len(orphan_chunk_ids),  # 本次清理的孤儿块数
+                },
+            }
         else:
             log.error(
                 f"笔记《{note.title}》处理不完整。预期{len(chunk_dicts)}块，实际处理{total_processed}块。"
             )
-            return False
+            return {
+                "success": False,
+                "chunk_stats": {
+                    "total_chunks": len(chunk_dicts),
+                    "upserted": successful_upserts,
+                    "skipped": skipped_chunks,
+                    "orphans_cleaned": len(orphan_chunk_ids),
+                },
+            }
 
     except Exception as e:
         log.error(f"块级增量处理笔记《{note.title}》失败: {e}", exc_info=True)
-        return False
+        return {"success": False, "chunk_stats": {}}
 
 
 # %% [markdown]
@@ -455,6 +472,10 @@ def process_notes_incremental(notebook_title: str, config: Dict):
 
     # %%
     log.info(f"开始增量处理笔记本 【{notebook_title}】，共 {len(notes)} 条笔记")
+    total_chunks_for_notebook = 0
+    total_upserted_for_notebook = 0
+    total_skipped_for_notebook = 0
+    total_orphans_cleaned_for_notebook = 0
     updated_count = 0
     new_time_notes = []
     failed_notes = []
@@ -509,7 +530,16 @@ def process_notes_incremental(notebook_title: str, config: Dict):
         for future in as_completed(future_to_note):
             note_id, note_title, update_time, content_hash = future_to_note[future]
             try:
-                success = future.result()
+                result_dict = future.result() # 现在接收的是字典
+                success = result_dict.get("success", False)
+                note_chunk_stats = result_dict.get("chunk_stats", {})
+        
+                # 累加块统计
+                total_chunks_for_notebook += note_chunk_stats.get("total_chunks", 0)
+                total_upserted_for_notebook += note_chunk_stats.get("upserted", 0)
+                total_skipped_for_notebook += note_chunk_stats.get("skipped", 0)
+                total_orphans_cleaned_for_notebook += note_chunk_stats.get("orphans_cleaned", 0)
+        
                 if success:
                     # 更新处理状态
                     process_state[note_id] = {
@@ -525,7 +555,6 @@ def process_notes_incremental(notebook_title: str, config: Dict):
             except Exception as e:
                 log.error(f"并发处理笔记 《{note_title}》 异常: {e}")
                 failed_notes.append(note_title)
-
     # 保存状态
     save_process_state(process_state, config["state_path"])
     log.info(
@@ -590,25 +619,69 @@ def process_notes_incremental(notebook_title: str, config: Dict):
                 log.info(f"笔记本【{notebook_title}】清理完成。共移除 {len(orphan_note_ids)} 条笔记的向量数据，涉及 {cleaned_total_chunks} 个块。")
             else:
                 log.info(f"笔记本【{notebook_title}】未发现需要清理的孤儿笔记向量数据。")
+
+            notes_removed_titles = [getnote(nid).title for nid in orphan_note_ids if getnote(nid)]
+            
+            # 计算新增笔记 (当前笔记本中的笔记ID 减去 向量库中存在的笔记ID)
+            current_note_ids = set(note.id for note in notes)
+            notes_added_ids = current_note_ids - note_ids_in_vector_db
+            notes_added_titles = [getnote(nid).title for nid in notes_added_ids if getnote(nid)]
                 
     except Exception as e:
         log.error(f"执行笔记本【{notebook_title}】的清理步骤时出错: {e}", exc_info=True)
     # ========== 清理步骤结束 ==========
 
+# %% [markdown]
+# #### 统计汇总
 
-    # 在函数末尾，整理并返回统计信息
+    # %%
+    # ========== 在“清理已移除当前笔记本的向量数据”步骤之后，构建最终stats之前 ==========
+    # 此时我们已经有了 orphan_note_ids (被清理的笔记ID集合)
+    # 和 note_ids_in_vector_db (向量库中属于本笔记本的笔记ID集合)
+    # 以及 current_note_ids (当前笔记本中的笔记ID集合)
+    
+    # 1. 计算并获取“移除的笔记”标题列表
+    notes_removed_titles = []
+    for note_id in orphan_note_ids:
+        note_detail = getnote(note_id)
+        if note_detail:
+            notes_removed_titles.append(note_detail.title)
+        else:
+            # 笔记可能已被彻底删除，记录ID
+            notes_removed_titles.append(f"[已删除的笔记: {note_id}]")
+    
+    # 2. 计算并获取“新增的笔记”标题列表
+    # 新增的笔记 = 当前在笔记本中，但不在向量库历史记录中的笔记
+    notes_added_ids = current_note_ids - note_ids_in_vector_db
+    notes_added_titles = []
+    for note_id in notes_added_ids:
+        note_detail = getnote(note_id)
+        if note_detail:
+            notes_added_titles.append(note_detail.title)
+    
+    # 注意：`updated_count` 变量记录的是内容发生变更的笔记数量，这已经存在。
+    
+    # 3. 构建增强的统计字典
     stats = {
         "notebook_title": notebook_title,
         "total_notes": len(notes),
-        "updated_count": updated_count,
-        "failed_notes": list(
-            set(failed_notes)
-        ),  # 这是一个集合，为了去重，因为可能是该笔记的多个块出错
-        "new_time_notes": new_time_notes,  # 需要更新的笔记标题列表
+        "updated_count": updated_count, # 内容有更新的笔记数
+        "failed_notes": list(set(failed_notes)),
+        "new_time_notes": new_time_notes,
+        # === 新增的字段 ===
+        "notes_added": notes_added_titles,
+        "notes_removed": notes_removed_titles,
+        "chunk_stats": {
+            "total_chunks": total_chunks_for_notebook,
+            "upserted": total_upserted_for_notebook,
+            "skipped": total_skipped_for_notebook,
+            "orphans_cleaned": total_orphans_cleaned_for_notebook,
+        },
         "process_time": datetime.now().isoformat(),
     }
-
-    log.info(f"笔记本【{notebook_title}】处理完成。统计：{stats}")
+    
+    log.info(f"笔记本【{notebook_title}】处理完成。")
+    # 返回这个完整的 stats 字典
     return stats
 
 
