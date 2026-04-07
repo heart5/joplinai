@@ -20,7 +20,6 @@
 # # 导入库
 
 # %%
-import hashlib
 import json
 import os
 import time
@@ -37,6 +36,7 @@ try:
         getcfpoptionvalue,
         setcfpoptionvalue,
     )
+    from func.datatools import compute_content_hash
     from func.first import dirmainpath, getdirmain
     from func.getid import getdeviceid, getdevicename, gethostuser
     from func.jpfuncs import (
@@ -105,15 +105,6 @@ def get_cache_manager():
     # _CACHE_MANAGER.import_from_json_directory(CACHE_DIR, clear_existing=True)
     # _CACHE_MANAGER.import_from_json_directory(CACHE_DIR)
     return _CACHE_MANAGER
-
-
-# %% [markdown]
-# ## _get_content_hash(text: str) -> str
-
-# %%
-def _get_content_hash(text: str) -> str:
-    """生成文本内容哈希"""
-    return hashlib.md5(text.encode()).hexdigest()
 
 
 # %% [markdown]
@@ -198,7 +189,7 @@ def deepseek_process_note(
         return _call_deepseek_api_directly(text, task, model, max_retries)
 
     # 使用缓存流程
-    content_hash = _get_content_hash(text[:8000])
+    content_hash = compute_content_hash(text[:8000])
     cache_manager = get_cache_manager()
 
     # 1. 查询缓存（此时cache_manager只返回数据，不调用API）
