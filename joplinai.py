@@ -23,10 +23,7 @@
 # """
 
 # %% [markdown]
-# ## 导入核心库
-
-# %% [markdown]
-# ### 导入系统库
+# # 导入库
 
 # %%
 import argparse
@@ -47,9 +44,6 @@ import chromadb
 import ollama
 from chromadb.config import Settings
 
-# %% [markdown]
-# ### 项目模块导入（根据实际路径调整）
-
 # %%
 try:
     from embedding_generator import EmbeddingGenerator
@@ -58,6 +52,7 @@ try:
         getcfpoptionvalue,
         setcfpoptionvalue,
     )
+    from func.datatools import compute_content_hash
     from func.first import dirmainpath, getdirmain
     from func.getid import getdeviceid, getdevicename, gethostuser
     from func.jpfuncs import (
@@ -118,32 +113,6 @@ CONFIG["state_path"] = (
 # # 功能函数集
 # %% [markdown]
 # ## 工具小集合
-# %% [markdown]
-# ### clean_text_other(text: str) -> str
-
-# %%
-def clean_text_other(text: str) -> str:
-    """清理笔记文本：移除图片、格式符号、多余换行"""
-    if not text:
-        return ""
-    # 移除图片链接：![alt](url)
-    text = re.sub(r"!\[.*?\]\(.*?\)", "", text)
-    # 移除Markdown格式符号：#、`、*、>、~、-等
-    text = re.sub(r"[#*`>~-]", "", text)
-    # 合并多余换行（3个以上换行→2个）
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    return text.strip()
-
-
-# %% [markdown]
-# ### compute_content_hash(title: str, body: str) -> str
-# %%
-def compute_content_hash(title: str, body: str) -> str:
-    """计算笔记内容哈希（用于增量更新判断）"""
-    content = f"{title}{body}"
-    return hashlib.md5(content.encode("utf-8")).hexdigest()
-
-
 # %% [markdown]
 # ### load_process_state(state_path: Path) -> Dict[str, Dict]
 # %%
@@ -500,7 +469,7 @@ def process_notes_incremental(notebook_title: str, config: Dict):
                     current_update_time
                 ).timestamp()
 
-            current_hash = compute_content_hash(note.title, note.body)
+            current_hash = compute_content_hash(f"{note.title}{note.body}")
             last_state = process_state.get(note_id, {})
 
             # 只有需要更新的笔记才提交处理，为了方便调试，增加了云端配置的强制更新选项
