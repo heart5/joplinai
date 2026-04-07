@@ -153,6 +153,83 @@ def save_process_state(state: Dict, state_path: Path):
 
 
 # %% [markdown]
+# ### filter_notes(notes: List[Any]) -> List[Any]
+
+# %%
+def filter_notes(notes: List[Any]) -> List[Any]:
+    """
+    根据云端配置过滤需要排除的笔记
+
+    功能说明：
+    1. 从云端配置获取需要排除的笔记标题列表
+    2. 根据标题过滤笔记，返回需要正常处理的笔记列表
+    3. 支持中英文逗号分隔的标题字符串
+
+    参数：
+    notes: List[Any] - 待处理的笔记对象列表，每个笔记对象应有title属性
+
+    返回：
+    List[Any] - 过滤后的笔记列表，已排除配置中指定的标题
+
+    使用示例：
+    云端配置 joplinai.filter_notes_titles = "测试笔记,临时记录，草稿文件"
+    将排除标题为"测试笔记"、"临时记录"、"草稿文件"的笔记
+    """
+    try:
+        # 1. 从云端配置获取需要排除的笔记标题字符串
+        # 配置键：joplinai.filter_notes_titles
+        filter_notes_titles = getinivaluefromcloud("joplinai", "filter_notes_titles")
+
+        # 如果没有配置排除列表，直接返回原始笔记列表
+        if not filter_notes_titles:
+            log.debug("未配置笔记排除列表，返回所有笔记")
+            return notes
+
+        # 2. 解析标题字符串，支持中英文逗号分隔
+        # 使用正则表达式分割，兼容中文逗号（，）和英文逗号（,）
+        titles_for_remove = [
+            title.strip()
+            for title in re.split(r"[,，]", filter_notes_titles)
+            if title.strip()  # 过滤空字符串
+        ]
+
+        # 记录排除配置信息
+        log.info(
+            f"从配置读取到 {len(titles_for_remove)} 个需要排除的笔记标题: {titles_for_remove}"
+        )
+
+        # 3. 过滤笔记
+        original_count = len(notes)
+
+        # 使用列表推导式过滤，保留标题不在排除列表中的笔记
+        # 可选优化：使用集合提高查找效率，还有个好处就是可以去重
+        titles_for_remove_set = set(titles_for_remove)
+        filtered_notes = [
+            note for note in notes if note.title not in titles_for_remove_set
+        ]
+
+        # 4. 记录过滤结果
+        removed_count = original_count - len(filtered_notes)
+        if removed_count > 0:
+            # 记录被排除的笔记标题
+            removed_titles = [
+                note.title for note in notes if note.title in titles_for_remove
+            ]
+            log.info(f"过滤排除 {removed_count} 条笔记: {removed_titles}")
+            log.info(f"过滤后剩余 {len(filtered_notes)} 条笔记待处理")
+        else:
+            log.debug("没有笔记被排除，所有笔记将正常处理")
+
+        return filtered_notes
+
+    except Exception as e:
+        # 异常处理：如果过滤过程出错，记录错误并返回原始列表
+        log.error(f"笔记过滤函数执行失败: {e}", exc_info=True)
+        log.warning("过滤失败，返回原始笔记列表")
+        return notes
+
+
+# %% [markdown]
 # ## 笔记处理核心逻辑（增量更新+入库）
 # %% [markdown]
 # ### enhance_by_deepseek_for_summary_tags(note, chunk: str, config: Dict)
@@ -433,6 +510,9 @@ def process_notes_incremental(notebook_title: str, config: Dict):
 
     # 获取笔记本所有笔记
     notes = get_notes_in_notebook_by_title(notebook_title=notebook_title)
+    # 过滤需要排除的笔记
+    notes = filter_notes(notes)
+
     if not notes:
         log.info(f"笔记本 【{notebook_title}】 无笔记，跳过处理")
         return {}
