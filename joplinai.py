@@ -313,6 +313,7 @@ def process_note_chunks(
             chunk_id = chunk_data["chunk_id"]
             chunk_content = chunk_data["content"]
             base_metadata = chunk_data["base_metadata"]
+            metadata_chunk_idx_from_one = int(base_metadata["chunk_index"]) + 1
 
             # 生成嵌入
             embedding = embedding_generator.get_merged_embedding(chunk_content)
