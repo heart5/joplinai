@@ -32,6 +32,7 @@ import ollama
 import requests
 
 try:
+    from func.datatools import compute_content_hash
     from func.logme import log
 except ImportError as e:
     logging.basicConfig(level=logging.INFO)
@@ -159,6 +160,19 @@ class EmbeddingGenerator:
             log.warning(f"清理后文本过短，不到10个字符。清理前为: {text[:50]}...")
 
         return text
+
+# %% [markdown]
+# ### _is_valid_chunk(self, text: str, min_length: int = 10) -> bool
+
+    # %%
+    def _is_valid_chunk(self, text: str, min_length: int = 10) -> bool:
+        """检查文本块是否有效（非空、非极短、非纯符号）"""
+        if not text or len(text.strip()) < min_length:
+            return False
+        # 可选：检查是否仅为符号、数字或空格
+        if re.match(r'^[\s\\d\\W]+$', text):
+            return False
+        return True
 
 # %% [markdown]
 # ### _preprocess_text_for_embedding(self, text: str) -> str
@@ -505,6 +519,7 @@ class EmbeddingGenerator:
 
         # ========== 构建块字典和元数据 ==========
         chunk_dicts = []
+        valid_chunk_counter = 0  # 【新增】用于为有效块生成连续索引
         # 复用第一步的统一正则进行日期提取，确保一致性
         for idx, chunk_content in enumerate(final_chunks):
             estimated_date = ""
@@ -521,20 +536,25 @@ class EmbeddingGenerator:
 
             # 清理内容格式
             content = self.clean_text(chunk_content)
-            if len(content) < 10:
-                content = note_title
+            if not self._is_valid_chunk(content):
+                log.info(
+                    f"跳过无效文本块（索引【{idx}/{len(final_chunks)}】，该文本块清理后长度{len(content)}字符）。内容预览: '{content[:50]}'"
+                )
+                continue  # 跳过当前循环，不处理此块
+
             # === 计算此块的内容哈希 ===
-            chunk_hash = hashlib.md5(chunk_content.encode('utf-8')).hexdigest()
+            chunk_hash = compute_content_hash(chunk_content)
             chunk_metadata = {
-                "chunk_index": idx,
+                "chunk_index": valid_chunk_counter,
                 "source_note_title": note_title,
                 "source_note_tags": note_tags,
-                "estimated_date": estimated_date,  # 现在能正确提取
+                "estimated_date": estimated_date,
                 "word_count": len(chunk_content),
                 # === 将哈希存入元数据 ===
                 "content_hash": chunk_hash,
             }
             chunk_dicts.append({"content": content, "metadata": chunk_metadata})
+            valid_chunk_counter += 1  # 只有有效块才递增
 
         log.info(f"将文本分割成 {len(chunk_dicts)} 个语义块。")
         # print(chunk_dicts)
