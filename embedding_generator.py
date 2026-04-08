@@ -41,6 +41,140 @@ except ImportError as e:
 
 
 # %% [markdown]
+# ## AdaptiveChunkOptimizer类
+
+# %%
+class AdaptiveChunkOptimizer:
+    """
+    自适应分块优化器。
+    原理：通过实际调用嵌入接口，探测给定文本在特定模型下的最大安全处理长度。
+    利用本地模型零成本的优势，动态调整分块大小，避免过碎分块。
+    """
+
+    def __init__(self, embedding_generator, enabled=False, cache_size=100):
+        """
+        初始化优化器。
+        :param embedding_generator: EmbeddingGenerator 实例，用于实际调用嵌入接口。
+        :param enabled: 是否启用自适应分块。
+        :param cache_size: 缓存大小，避免重复探测。
+        """
+        self.embedding_generator = embedding_generator
+        self.enabled = enabled
+        # 缓存：键为 (模型名, 文本特征哈希)，值为探测出的最佳块大小（字符数）
+        self.cache = {}
+        self.cache_size = cache_size
+        self.log = logging.getLogger(__name__)
+
+    def _get_text_signature(self, text: str) -> str:
+        """
+        生成文本的简易特征签名，用于缓存键。
+        基于文本长度、开头和结尾部分，平衡识别精度与计算开销。
+        """
+        import hashlib
+
+        # 取文本长度、前200字符和后200字符（如果存在）的组合
+        prefix = text[:200] if len(text) > 200 else text
+        suffix = text[-200:] if len(text) > 200 else text
+        # 生成一个简短的哈希作为签名
+        sig_content = f"{len(text)}|{prefix}|{suffix}"
+        signature = hashlib.md5(sig_content.encode("utf-8")).hexdigest()[
+            :12
+        ]  # 取前12位
+        return signature
+
+    def probe_max_safe_length(self, text: str, model_name: str) -> int:
+        """
+        探测针对此文本，模型能安全处理的最大长度（字符数）。
+        采用“指数增长”法：从保守长度开始，每次翻倍，直到嵌入调用失败（抛出长度相关错误）。
+        返回最后一次成功的长度。
+        """
+        if not self.enabled:
+            # 功能未启用，直接返回默认 chunk_size
+            return self.embedding_generator.chunk_size
+
+        cache_key = (model_name, self._get_text_signature(text))
+        if cache_key in self.cache:
+            self.log.debug(
+                f"自适应分块缓存命中: {cache_key} -> {self.cache[cache_key]}"
+            )
+            return self.cache[cache_key]
+
+        self.log.info(
+            f"开始自适应分块探测: 模型={model_name}, 文本长度={len(text)}字符"
+        )
+
+        # 1. 定义探测参数
+        start_len = 256  # 起始探测长度，一个比较安全的保守值
+        max_len = len(text)  # 理论最大值
+        growth_factor = 2  # 每次增长倍数
+        current_safe_len = start_len
+
+        # 2. 指数增长阶段：快速找到失败边界
+        test_len = start_len
+        while test_len <= max_len:
+            test_text = text[:test_len]  # 取文本前 test_len 个字符进行测试
+            try:
+                # 该方法内部已有重试和容错机制，足以用于探测。
+                _ = self.embedding_generator.get_ollama_embedding(
+                    test_text, max_retries=1, enable_probe=True
+                )
+                # 调用成功，更新安全长度记录
+                current_safe_len = test_len
+                self.log.debug(f"  探测通过: {test_len} 字符")
+                # 指数增长
+                test_len = int(test_len * growth_factor)
+            except Exception as e:
+                error_msg = str(e).lower()
+                # 判断是否为长度相关错误（模型上下文长度限制）
+                if any(
+                    keyword in error_msg
+                    for keyword in [
+                        "context length",
+                        "input length",
+                        "too long",
+                        "exceed",
+                    ]
+                ):
+                    self.log.debug(
+                        f"  探测失败（长度限制）: {test_len} 字符, 错误: {error_msg[:100]}"
+                    )
+                    # 遇到长度错误，停止增长，current_safe_len 即为最后一次成功的长度
+                    break
+                else:
+                    # 其他类型的错误（如网络问题、参数错误），保守处理，停止探测并使用默认 chunk_size
+                    self.log.warning(f"  探测过程中遇到错误，停止探测并使用默认值: {e}")
+                    current_safe_len = (
+                        self.embedding_generator.chunk_size
+                    )  # 修正：失败时直接回退到全局默认值
+                    break
+
+        # 3. 确保结果在合理范围内
+        # 最终安全长度不应小于起始长度，也不应大于默认 chunk_size 的某个倍数（如2倍），避免极端值。
+        final_safe_len = max(
+            start_len, min(current_safe_len, self.embedding_generator.chunk_size * 2)
+        )
+        self.log.info(
+            f"自适应分块探测完成: 建议块大小={final_safe_len} 字符 (原始默认={self.embedding_generator.chunk_size})"
+        )
+
+        # 4. 缓存结果
+        if len(self.cache) >= self.cache_size:
+            # 简单淘汰最早插入的一项
+            self.cache.pop(next(iter(self.cache)))
+        self.cache[cache_key] = final_safe_len
+
+        return final_safe_len
+
+    def get_adaptive_chunk_size(self, text: str) -> int:
+        """
+        主接口：获取针对当前文本的自适应分块大小。
+        :param text: 待分块的完整文本。
+        :return: 建议的分块大小（字符数）。
+        """
+        return self.probe_max_safe_length(text, self.embedding_generator.model_name)
+
+
+# %% [markdown]
 # ## EmbeddingGenerator类
 
 # %%
@@ -52,12 +186,27 @@ class EmbeddingGenerator:
 # ### \_\_init__(self, model_name: str, chunk_size: int = 1024)
 
     # %%
-    def __init__(self, model_name: str, chunk_size: int = 1024):
+    def __init__(self,
+        model_name: str,
+        chunk_size: int = 1024,
+        enable_adaptive_chunking=False,  # 【新增】是否启用自适应分块
+        chunk_overlap=50,
+        adaptive_cache_size=100,         # 【新增】自适应探测缓存大小
+    ):
         self.model_name = model_name
         self.chunk_size = chunk_size
+        self.chunk_overlap = chunk_overlap
         self.embedding_dim = self._get_model_dimension()
         self.embedding_cache = {}  # 简单缓存
         self._set_chunk_size()
+        # 【新增】初始化自适应分块优化器
+        self.adaptive_optimizer = AdaptiveChunkOptimizer(
+            embedding_generator=self,
+            enabled=enable_adaptive_chunking,
+            cache_size=adaptive_cache_size,
+        )
+        # 保存状态，便于其他地方判断
+        self.enable_adaptive_chunking = enable_adaptive_chunking
 
 # %% [markdown]
 # ### _get_model_dimension(self)
@@ -428,6 +577,37 @@ class EmbeddingGenerator:
             return f"{normalized_header}\n\n{normalized_body}"
 
 # %% [markdown]
+# ### get_adaptive_chunk_size(self, text, note_title, idx)
+
+    # %%
+    def get_adaptive_chunk_size(self, converted_chunk, note_title, idx):
+        # === 【新增】自适应分块决策 ===
+        # 决定本次分块使用的目标大小
+        current_target_chunk_size = self.chunk_size  # 默认使用全局配置
+
+        try:
+            adaptive_size = self.adaptive_optimizer.get_adaptive_chunk_size(converted_chunk)
+            # 使用探测到的值，但限制其在一个合理范围：
+            # 下限：不能小于默认值的75%（避免过小）
+            # 上限：不能大于默认值的200%（避免过大导致其他问题）
+            lower_bound = int(self.chunk_size * 0.75)
+            upper_bound = int(self.chunk_size * 2.0)
+            clamped_size = max(lower_bound, min(adaptive_size, upper_bound))
+
+            if clamped_size != self.chunk_size:
+                current_target_chunk_size = clamped_size
+                log.info(
+                    f"笔记《{note_title}》的文本块【{idx}】启用自适应分块: "
+                    f"文本长度={len(converted_chunk)}, 默认大小={self.chunk_size}, 自适应大小={current_target_chunk_size}"
+                )
+        except Exception as e:
+            log.warning(f"笔记《{note_title}》的文本块【{idx}】自适应分块决策失败，将使用默认大小: {e}")
+            # 失败时，回退到默认大小
+
+        log.debug(f"笔记《{note_title}》的文本块【{idx}】最终确定的分块目标大小为: {current_target_chunk_size} 字符")
+        return current_target_chunk_size
+
+# %% [markdown]
 # ### split_into_semantic_chunks(self, text: str, note_title: str = "", note_tags: str = "") -> List[Dict]
 
     # %%
@@ -496,7 +676,7 @@ class EmbeddingGenerator:
 
         # 后续逻辑保持不变：对每个初步分割出的块，检查大小，如果过大则进行二次分割。
         final_chunks = []
-        for raw_chunk in chunks:
+        for idx, raw_chunk in enumerate(chunks, 1):
             # 在分割逻辑中，对每个 raw_chunk 进行转换，当下仅针对《健康运动笔记》
             converted_chunk = self._convert_health_data_to_text(raw_chunk)
             converted_chunk = self._condense_dense_lists(converted_chunk)
@@ -504,9 +684,15 @@ class EmbeddingGenerator:
                 # 如果块大小合理，直接使用
                 final_chunks.append(converted_chunk)
             else:
-                # 如果块过大，则调用原有的段落/句子级分割函数进行细化
-                log.debug(f"初步块过长({len(converted_chunk)}字符)，进行二次语义分割。")
-                sub_chunks = self._split_into_paragraphs_chunks(converted_chunk)
+                if self.enable_adaptive_chunking and len(converted_chunk) > self.chunk_size * 1.2:
+                    # 仅当文本长度显著超过默认大小时，才启动自适应探测，避免对小文本的开销
+                    current_target_chunk_size = self.get_adaptive_chunk_size(converted_chunk, note_title, idx)
+                    sub_chunks = self._split_into_paragraphs_chunks(converted_chunk, current_target_chunk_size)
+                    log.debug(f"笔记《{note_title}》的文本块【{idx}】初步块过长({len(converted_chunk)}字符)，通过自适应获取合适的chunk_size:{current_target_chunk_size}，进行二次语义分割。")
+                else:
+                    # 如果块过大，则调用原有的段落/句子级分割函数进行细化
+                    log.debug(f"笔记《{note_title}》的文本块【{idx}】初步块过长({len(converted_chunk)}字符)，进行二次语义分割。")
+                    sub_chunks = self._split_into_paragraphs_chunks(converted_chunk)
                 final_chunks.extend(sub_chunks)
 
         # 如果经过上述步骤，分块结果仍然不理想，启用最终回退
@@ -561,21 +747,22 @@ class EmbeddingGenerator:
         return chunk_dicts
 
 # %% [markdown]
-# ### _split_into_paragraphs_chunks(self, text: str) -> List[str]
+# ### _split_into_paragraphs_chunks(self, text: str, target_size: int = None) -> List[str]
 
     # %%
-    def _split_into_paragraphs_chunks(self, text: str) -> List[str]:
+    def _split_into_paragraphs_chunks(self, text: str, target_size: int = None) -> List[str]:
         """按段落和句子分割文本，确保块大小更均匀、安全。"""
         if not text:
             return []
-
+        if target_size is None:
+            target_size = self.chunk_size
         # 1. 按双换行符分割段落
         paragraphs = [p.strip() for p in text.split('\n\n') if p.strip()]
         chunks = []
         current_chunk = ""
 
-        SAFETY_FACTOR = 0.7  # 更保守的阈值，避免块接近上限
-        target_size = int(self.chunk_size * SAFETY_FACTOR)
+        SAFETY_FACTOR = 0.9  # 更保守的阈值，避免块接近上限
+        target_size = int(target_size * SAFETY_FACTOR)
 
         for para in paragraphs:
             # 如果单个段落就超过安全阈值，需要按句子进一步分割
@@ -610,20 +797,22 @@ class EmbeddingGenerator:
             chunks.append(current_chunk.strip())
 
         # 最终检查：如果仍有块过大，启用最终回退（但应尽量避免走到这一步）
-        if any(len(ch) > self.chunk_size for ch in chunks):
+        if any(len(ch) > target_size for ch in chunks):
             log.warning("段落分割后仍存在过大块，启用字符级回退。")
-            return self._split_text_into_chunks_fallback(text)
+            return self._split_text_into_chunks_fallback(text, target_size)
 
         return chunks
 
 # %% [markdown]
-# ### _split_text_into_chunks_fallback(self, text: str) -> List[str]
+# ### _split_text_into_chunks_fallback(self, text: str, target_size = None) -> List[str]
 
     # %%
-    def _split_text_into_chunks_fallback(self, text: str) -> List[str]:
+    def _split_text_into_chunks_fallback(self, text: str, target_size = None) -> List[str]:
         """原有的基于字符的智能分块逻辑（作为回退）
         基于字符位置分块，保留完整单词"""
-        if len(text) <= self.chunk_size:
+        if target_size is None:
+            target_size = self.chunk_size
+        if len(text) <= target_size:
             return [text]
         
         chunks = []
@@ -631,7 +820,7 @@ class EmbeddingGenerator:
         
         while start < len(text):
             # 计算本块的结束位置
-            end = start + self.chunk_size
+            end = start + target_size
             
             # 如果已经到文本末尾
             if end >= len(text):
@@ -645,7 +834,7 @@ class EmbeddingGenerator:
             
             # 如果没找到空格，强制在chunk_size处截断
             if end == start:
-                end = start + self.chunk_size
+                end = start + target_size
             
             # 添加块
             chunk = text[start:end].strip()
@@ -696,7 +885,7 @@ class EmbeddingGenerator:
                     },
                     timeout=60
                 )
-    
+
                 # 检查响应
                 if response.status_code == 500:
                     error_msg = response.text.lower()
@@ -741,14 +930,16 @@ class EmbeddingGenerator:
 # %% [markdown]
 # ### get_ollama_embedding(self, text: str) -> List[float]
     # %%
-    def get_ollama_embedding(self, text: str) -> List[float]:
+    def get_ollama_embedding(self, text: str, max_retries: int = 3, enable_probe=False) -> List[float]:
         """调用 Ollama 生成文本嵌入。注意：传入的 text 应是已分块的适当长度文本。"""
-        for attempt in range(3):
+        for attempt in range(max_retries):
             try:
                 response = ollama.embeddings(model=self.model_name, prompt=text)
                 return response["embedding"]
             except Exception as e:
-                log.warning(f"嵌入失败({attempt + 1}/3): {str(e)[:100]}")
+                log.warning(f"嵌入失败({attempt + 1}/{max_retries}): {str(e)[:100]}")
+                if enable_probe:
+                    raise
                 time.sleep(2**attempt)
 
         log.error(f"嵌入生成最终失败: {self.model_name}, 文本长度{len(text)}")
@@ -772,7 +963,7 @@ class EmbeddingGenerator:
         生成文本嵌入的核心函数。优化策略：优先二次分块，而非文本缩减。
         """
         # 1. 缓存检查 (保持不变)
-        text_hash = hashlib.md5(text.encode()).hexdigest()
+        text_hash = compute_content_hash(text)
         cached = self.get_cached_embedding(text_hash)
         if cached:
             log.info(f"使用缓存嵌入: {text_hash[:12]}")
@@ -787,7 +978,7 @@ class EmbeddingGenerator:
         # 3. 估算长度并判断是否需要直接触发二次分块
         #    设定一个比模型限制更宽松的阈值，用于提前判断。
         estimated_tokens = self._estimate_token_count(processed_text)
-        safe_token_limit = int(self.chunk_size * 0.7)  # 例如，使用模型容量的70%作为安全线
+        safe_token_limit = int(self.chunk_size * 0.9)  # 例如，使用模型容量的70%作为安全线
 
         if estimated_tokens > safe_token_limit:
             # **关键修正**：当预估超长时，直接进入智能二次分块流程，而不是尝试缩减。
