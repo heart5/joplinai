@@ -456,9 +456,15 @@ def process_notes_incremental(notebook_title: str, config: Dict):
     force_update = config.get("force_update", False)
 
     # 获取笔记本所有笔记
-    notes = get_notes_in_notebook_by_title(notebook_title=notebook_title)
+    notes_all = get_notes_in_notebook_by_title(notebook_title=notebook_title)
     # 过滤需要排除的笔记
-    notes = filter_notes(notes)
+    notes = filter_notes(notes_all)
+    if len(notes_all) != len(notes):
+        all_set = set([note.id for note in notes_all])
+        filter_set = set([note.id for note in notes])
+        exclude_set = all_set - filter_set
+        exclude_titles = [f"《{getnote(note_id).title}》" for note_id in exclude_set]
+        log.info(f"笔记本 【{notebook_title}】中因为云端排除设定被排除处理的笔记：\t{'，'.join(exclude_titles)} ")
 
     if not notes:
         log.info(f"笔记本 【{notebook_title}】 无笔记，跳过处理")
