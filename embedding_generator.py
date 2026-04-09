@@ -852,11 +852,11 @@ class EmbeddingGenerator:
                     #     current_target_chunk_size = self.chunk_size
                     # sub_chunks = self._split_into_paragraphs_chunks(converted_chunk, current_target_chunk_size)
                     log.debug(f"笔记《{note_title}》的文本块【{idx}】初步块过长({len(converted_chunk)}字符)，通过自适应获取合适的chunk_size({current_target_chunk_size})，通过滑动窗口分块法进行二次语义分割。")
-                    sub_chunks = PunctuationAwareSplitter(max_chunk_size=current_target_chunk_size).split_with_punctuation(converted_chunk)
+                    sub_chunks = PunctuationAwareSplitter(max_chunk_size=current_target_chunk_size).split(converted_chunk)
                 else:
                     # 如果块过大，则调用原有的段落/句子级分割函数进行细化
                     log.debug(f"笔记《{note_title}》的文本块【{idx}】初步块过长({len(converted_chunk)}字符)，进行二次语义分割。")
-                    sub_chunks = PunctuationAwareSplitter(max_chunk_size=self.chunk_size).split_with_punctuation(converted_chunk)
+                    sub_chunks = PunctuationAwareSplitter(max_chunk_size=self.chunk_size).split(converted_chunk)
                     # sub_chunks = self._split_into_paragraphs_chunks(converted_chunk)
                 final_chunks.extend(sub_chunks)
 
