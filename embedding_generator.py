@@ -1256,11 +1256,11 @@ class EmbeddingGenerator:
                 if embedding:
                     self.embedding_cache[text_hash] = embedding
                     break
-            except ContextLengthExceededError:
-                # 即使校验后仍超长，进行二次分块
-                return self._get_rechunked_embedding(text, safe_subchunk_size=int(self.chunk_size*0.5))
             except Exception as e:
                 log.warning(f"获取嵌入失败(第{attempt+1}次): {e}")
+                # 尝试到最后一次，则进行二次分块
+                if attempt == len(max_retries) - 1:
+                    return self._get_rechunked_embedding(text, safe_subchunk_size=int(self.chunk_size*0.5))
                 continue
 
         if not embedding:
