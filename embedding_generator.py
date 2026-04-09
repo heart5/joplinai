@@ -26,7 +26,7 @@ import logging
 import re
 import time
 from functools import lru_cache
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import ollama
 import requests
@@ -63,7 +63,6 @@ class AdaptiveChunkOptimizer:
         # 缓存：键为 (模型名, 文本特征哈希)，值为探测出的最佳块大小（字符数）
         self.cache = {}
         self.cache_size = cache_size
-        self.log = logging.getLogger(__name__)
 
     def _get_text_signature(self, text: str) -> str:
         """
@@ -94,19 +93,16 @@ class AdaptiveChunkOptimizer:
 
         cache_key = (model_name, self._get_text_signature(text))
         if cache_key in self.cache:
-            self.log.debug(
-                f"自适应分块缓存命中: {cache_key} -> {self.cache[cache_key]}"
-            )
+            log.debug(f"自适应分块缓存命中: {cache_key} -> {self.cache[cache_key]}")
             return self.cache[cache_key]
 
-        self.log.info(
-            f"开始自适应分块探测: 模型={model_name}, 文本长度={len(text)}字符"
-        )
+        log.info(f"开始自适应分块探测: 模型={model_name}, 文本长度={len(text)}字符")
 
         # 1. 定义探测参数
-        start_len = 256  # 起始探测长度，一个比较安全的保守值
+        # start_len = 256  # 起始探测长度，一个比较安全的保守值
+        start_len = int(self.embedding_generator.chunk_size * 0.8)
         max_len = len(text)  # 理论最大值
-        growth_factor = 2  # 每次增长倍数
+        growth_factor = 1.1  # 每次增长倍数
         current_safe_len = start_len
 
         # 2. 指数增长阶段：快速找到失败边界
@@ -120,7 +116,7 @@ class AdaptiveChunkOptimizer:
                 )
                 # 调用成功，更新安全长度记录
                 current_safe_len = test_len
-                self.log.debug(f"  探测通过: {test_len} 字符")
+                log.debug(f"  探测通过: {test_len} 字符")
                 # 指数增长
                 test_len = int(test_len * growth_factor)
             except Exception as e:
@@ -135,14 +131,14 @@ class AdaptiveChunkOptimizer:
                         "exceed",
                     ]
                 ):
-                    self.log.debug(
+                    log.debug(
                         f"  探测失败（长度限制）: {test_len} 字符, 错误: {error_msg[:100]}"
                     )
                     # 遇到长度错误，停止增长，current_safe_len 即为最后一次成功的长度
                     break
                 else:
                     # 其他类型的错误（如网络问题、参数错误），保守处理，停止探测并使用默认 chunk_size
-                    self.log.warning(f"  探测过程中遇到错误，停止探测并使用默认值: {e}")
+                    log.warning(f"  探测过程中遇到错误，停止探测并使用默认值: {e}")
                     current_safe_len = (
                         self.embedding_generator.chunk_size
                     )  # 修正：失败时直接回退到全局默认值
@@ -151,9 +147,14 @@ class AdaptiveChunkOptimizer:
         # 3. 确保结果在合理范围内
         # 最终安全长度不应小于起始长度，也不应大于默认 chunk_size 的某个倍数（如2倍），避免极端值。
         final_safe_len = max(
-            start_len, min(current_safe_len, self.embedding_generator.chunk_size * 2)
+            start_len,
+            min(
+                current_safe_len,
+                self.embedding_generator.chunk_size * 2,
+            ),
+            self.embedding_generator.chunk_size,
         )
-        self.log.info(
+        log.info(
             f"自适应分块探测完成: 建议块大小={final_safe_len} 字符 (原始默认={self.embedding_generator.chunk_size})"
         )
 
@@ -172,6 +173,203 @@ class AdaptiveChunkOptimizer:
         :return: 建议的分块大小（字符数）。
         """
         return self.probe_max_safe_length(text, self.embedding_generator.model_name)
+
+
+# %% [markdown]
+# ## PunctuationAwareSplitter类
+
+# %%
+class PunctuationAwareSplitter:
+    """
+    增强型标点与结构感知分块器 (完善版)
+    策略：文档结构切分 (最高优先级) -> 语义标点切分 -> 句子重叠回退 -> 硬切保底
+    """
+
+    def __init__(
+        self,
+        max_chunk_size: int = 768,
+        min_chunk_size: int = 100,
+        target_overlap_sentences: int = 1,
+        fallback_overlap_chars: int = 100,
+    ):
+        """
+        初始化分块器
+
+        参数:
+            max_chunk_size: 单个块的最大字符数（目标值）。
+            min_chunk_size: 单个块的最小字符数，避免产生无意义碎片。
+            target_overlap_sentences: 目标重叠句子数。
+            fallback_overlap_chars: 保底重叠字符数。
+        """
+        self.max_chunk_size = max_chunk_size
+        self.min_chunk_size = min_chunk_size
+        self.target_overlap = target_overlap_sentences
+        self.fallback_overlap = fallback_overlap_chars
+
+        # **关键完善1：扩展权重字典，纳入文档结构标记**[6](@ref)
+        # 为Markdown标题、列表项等赋予最高权重，确保它们被优先识别为切分边界。
+        self.punct_weights = {
+            # 文档结构标记 (最高优先级)
+            "\n### ": 2.0,
+            "\n## ": 1.8,
+            "\n# ": 1.8,  # Markdown标题
+            "\n- ": 1.5,
+            "\n* ": 1.5,
+            "\n+ ": 1.5,  # 无序列表项
+            r"\n\d+\. ": 1.5,  # 有序列表项 (如 `1. `)
+            "\n\n": 1.2,  # 段落分隔
+            # 标准标点符号
+            "。": 1.0,
+            "！": 1.0,
+            "？": 1.0,
+            "；": 0.7,
+            "：": 0.6,
+            "，": 0.3,
+            "、": 0.1,
+            ".": 1.0,
+            "!": 1.0,
+            "?": 1.0,
+            ";": 0.7,
+            ",": 0.3,
+        }
+        # 编译正则时，需对结构标记中的特殊字符进行转义，并确保有序列表模式正确。
+        escaped_keys = []
+        for k in self.punct_weights.keys():
+            if k.startswith(r"\n\d+\. "):  # 有序列表的正则模式单独处理
+                escaped_keys.append(r"\n\d+\.\s+")
+            else:
+                escaped_keys.append(re.escape(k))
+        self.punct_pattern = re.compile(f"({'|'.join(escaped_keys)})")
+
+        # 句子结束符正则（用于重叠回退策略）
+        self.sentence_end_pattern = re.compile(r"([。！？.!?]+|\n{2,})")
+
+    def split(self, text: str) -> List[str]:
+        """
+        主分割函数：实现 **结构优先** 的四层降级分块策略。
+        """
+        # **关键完善2：预处理 - 按最高权重的结构标记进行首次粗分割**
+        # 此步骤旨在先将文档按章节、大列表项等宏观结构拆开。
+        primary_chunks = self._split_by_primary_structure(text)
+
+        final_chunks = []
+        for primary_chunk in primary_chunks:
+            if len(primary_chunk) <= self.max_chunk_size:
+                # 如果宏观结构块本身已满足大小要求，直接保留。
+                final_chunks.append(primary_chunk.strip())
+            else:
+                # **关键完善3：递归应用原有智能策略**
+                # 对仍然过长的宏观块，递归调用内部方法进行细粒度分割。
+                # 这保证了在宏观结构内，依然遵循“语义->句子->硬切”的保底逻辑。
+                sub_chunks = self._split_recursively(primary_chunk)
+                final_chunks.extend(sub_chunks)
+
+        return final_chunks
+
+    def _split_by_primary_structure(self, text: str) -> List[str]:
+        """
+        使用最高权重的文档结构标记进行第一级分割。
+        此方法旨在捕获如 `### 标题`、`1. 主要事项` 这样的天然大边界。
+        """
+        # 查找所有高权重结构标记的位置
+        positions = [0]  # 起始位置
+        for match in self.punct_pattern.finditer(text):
+            punct = match.group()
+            if self.punct_weights.get(punct, 0) >= 1.2:  # 只对高权重标记进行切分
+                positions.append(match.start())
+
+        if len(positions) == 1:
+            return [text]  # 未找到高权重结构，整个文本作为一个初级块
+
+        # 根据找到的位置进行分割
+        chunks = []
+        for i in range(len(positions)):
+            start = positions[i]
+            end = positions[i + 1] if i + 1 < len(positions) else len(text)
+            chunk = text[start:end]
+            if chunk.strip():  # 避免空块
+                chunks.append(chunk)
+        return chunks
+
+    def _split_recursively(self, text: str) -> List[str]:
+        """
+        对单个宏观结构块递归应用原有的智能滑动窗口分块逻辑。
+        这是您原有 `split` 方法逻辑的移植，用于处理块内部。
+        """
+        chunks = []
+        start = 0
+        text_length = len(text)
+
+        while start < text_length:
+            if text_length - start <= self.min_chunk_size:
+                final_chunk = text[start:].strip()
+                if final_chunk:
+                    chunks.append(final_chunk)
+                break
+
+            window_end = min(start + self.max_chunk_size, text_length)
+            window_text = text[start:window_end]
+            best_split_pos = self._find_best_split_position(window_text)
+
+            if best_split_pos > 0:
+                # 找到语义切分点
+                chunk = text[start : start + best_split_pos].strip()
+                if chunk:
+                    chunks.append(chunk)
+                start += best_split_pos
+                continue
+
+            # 未找到语义点，进行保底处理
+            current_chunk = text[start:window_end].strip()
+            if current_chunk:
+                chunks.append(current_chunk)
+
+            next_start = window_end
+            if self.target_overlap > 0:
+                # 尝试句子重叠回退
+                lookback_start = max(start, window_end - self.max_chunk_size)
+                lookback_text = text[lookback_start:window_end]
+                sentence_ends = []
+                for match in self.sentence_end_pattern.finditer(lookback_text):
+                    absolute_pos = lookback_start + match.end()
+                    sentence_ends.append(absolute_pos)
+                sentence_ends.sort(reverse=True)
+
+                if len(sentence_ends) >= self.target_overlap:
+                    next_start = sentence_ends[self.target_overlap - 1]
+                else:
+                    # 字符重叠保底
+                    next_start = max(
+                        window_end - self.fallback_overlap, start + self.min_chunk_size
+                    )
+
+            if next_start <= start:
+                next_start = window_end
+            start = next_start
+
+        log.info(f"文本【{text[:20]}……】被增强型语义切割工具切割为({len(chunks)})块")
+        return chunks
+
+    def _find_best_split_position(self, window_text: str) -> int:
+        """
+        在窗口内寻找最佳切分位置（完善版）。
+        现在会考虑所有已定义的标点和结构标记的权重。
+        """
+        punct_positions = []
+        for match in self.punct_pattern.finditer(window_text):
+            punct = match.group()
+            pos = match.end()
+            weight = self.punct_weights.get(punct, 0)
+            punct_positions.append((pos, weight))
+
+        if not punct_positions:
+            return 0
+
+        punct_positions.sort(key=lambda x: x[1], reverse=True)
+        for pos, weight in punct_positions:
+            if pos >= self.min_chunk_size:
+                return pos
+        return 0
 
 
 # %% [markdown]
@@ -413,43 +611,6 @@ class EmbeddingGenerator:
         return text
 
 # %% [markdown]
-# ### _estimate_token_count(self, text: str) -> int
-
-    # %%
-    def _estimate_token_count(self, text: str) -> int:
-        """简单估算文本的token数量（对于中文，一个粗略的方法是：字符数 * 系数）"""
-        # 这是一个非常粗略的估算！对于中文，token数通常接近或少于字符数。
-        # 系数可以设为0.8到1.2之间，具体取决于模型和文本。
-        # 更准确的做法是使用模型的tokenizer，但这里为简单起见使用估算。
-        estimated_tokens = int(len(text) * 1.2)
-        return estimated_tokens
-
-# %% [markdown]
-# ### _smart_truncate(self, text: str, max_token_estimate: int) -> str
-
-    # %%
-    def _smart_truncate(self, text: str, max_token_estimate: int) -> str:
-        """智能截断文本，尽量在句子或意群边界处截断"""
-        # 根据字符数估算进行截断（因为token估算不精确）
-        max_char_limit = int(max_token_estimate / 1.2)  # 反向估算字符数
-
-        if len(text) <= max_char_limit:
-            return text
-
-        # 尝试在最后一个句号、问号、感叹号或换行处截断
-        truncate_point = text.rfind('。', 0, max_char_limit)
-        if truncate_point == -1:
-            truncate_point = text.rfind('？', 0, max_char_limit)
-        if truncate_point == -1:
-            truncate_point = text.rfind('！', 0, max_char_limit)
-        if truncate_point == -1:
-            truncate_point = text.rfind('\n', 0, max_char_limit)
-        if truncate_point == -1 or truncate_point < max_char_limit * 0.5:  # 如果找不到合适的点或点太靠前
-            truncate_point = max_char_limit  # 硬截断
-
-        return text[:truncate_point]
-
-# %% [markdown]
 # ### _aggressive_text_reduction(self, text: str) -> str
 
     # %%
@@ -684,20 +845,24 @@ class EmbeddingGenerator:
                 # 如果块大小合理，直接使用
                 final_chunks.append(converted_chunk)
             else:
-                if self.enable_adaptive_chunking and len(converted_chunk) > self.chunk_size * 1.2:
+                if self.enable_adaptive_chunking and len(converted_chunk) > self.chunk_size * 1.1:
                     # 仅当文本长度显著超过默认大小时，才启动自适应探测，避免对小文本的开销
                     current_target_chunk_size = self.get_adaptive_chunk_size(converted_chunk, note_title, idx)
-                    sub_chunks = self._split_into_paragraphs_chunks(converted_chunk, current_target_chunk_size)
-                    log.debug(f"笔记《{note_title}》的文本块【{idx}】初步块过长({len(converted_chunk)}字符)，通过自适应获取合适的chunk_size:{current_target_chunk_size}，进行二次语义分割。")
+                    # if current_target_chunk_size > self.chunk_size:
+                    #     current_target_chunk_size = self.chunk_size
+                    # sub_chunks = self._split_into_paragraphs_chunks(converted_chunk, current_target_chunk_size)
+                    log.debug(f"笔记《{note_title}》的文本块【{idx}】初步块过长({len(converted_chunk)}字符)，通过自适应获取合适的chunk_size({current_target_chunk_size})，通过滑动窗口分块法进行二次语义分割。")
+                    sub_chunks = PunctuationAwareSplitter(max_chunk_size=current_target_chunk_size).split_with_punctuation(converted_chunk)
                 else:
                     # 如果块过大，则调用原有的段落/句子级分割函数进行细化
                     log.debug(f"笔记《{note_title}》的文本块【{idx}】初步块过长({len(converted_chunk)}字符)，进行二次语义分割。")
-                    sub_chunks = self._split_into_paragraphs_chunks(converted_chunk)
+                    sub_chunks = PunctuationAwareSplitter(max_chunk_size=self.chunk_size).split_with_punctuation(converted_chunk)
+                    # sub_chunks = self._split_into_paragraphs_chunks(converted_chunk)
                 final_chunks.extend(sub_chunks)
 
         # 如果经过上述步骤，分块结果仍然不理想，启用最终回退
         if not final_chunks or (
-            len(final_chunks) == 1 and len(final_chunks[0]) >= self.chunk_size * 1.1
+            len(final_chunks) == 1 and len(final_chunks[0]) > self.chunk_size * 1.1
         ):
             log.debug(f"按照语义拆分不太合格：{[len(chunk) for chunk in final_chunks]}")
             final_chunks = self._split_into_paragraphs_chunks(text)
@@ -847,88 +1012,7 @@ class EmbeddingGenerator:
         return chunks
 
 # %% [markdown]
-# ### get_ollama_embedding_safe(self, text: str, max_retries: int = 3) -> list
-
-    # %%
-    def get_ollama_embedding_safe(self, text: str, max_retries: int = 3) -> list:
-        """调用本地Ollama服务生成嵌入，增加对长文本/异常文本的容错处理"""
-        # 1. 关键预处理：对文本进行清洗和规范化
-        processed_text = self._preprocess_text_for_embedding(text)
-
-        if not processed_text or len(processed_text.strip()) < 6:
-            # log.warning("输入文本为空或过短，返回零向量")
-            # return [0.0] * self.embedding_dim
-            log.warning("输入文本为空或过短，返回空列表")
-            return []
-
-        # 2. (可选但推荐) 估算token长度并主动截断
-        # 假设模型最大上下文为512 tokens，我们设定一个安全阈值（如450 tokens）
-        estimated_tokens = self._estimate_token_count(processed_text)
-        safe_token_limit = int(self.chunk_size * 0.8)  # 根据模型调整，可设为配置项
-        if estimated_tokens > safe_token_limit:
-            log.warning(
-                f"文本预估token数({estimated_tokens})超过安全阈值({safe_token_limit})，将进行智能截断"
-            )
-            processed_text = self._smart_truncate(processed_text, safe_token_limit)
-            log.debug(f"截断后文本预览: {processed_text[:50]}...")
-
-        # 3. 带重试的请求逻辑，并特别处理“长度超限”错误
-        for attempt in range(max_retries):
-            try:
-                # 这里是您调用Ollama API的代码（示例）
-                # response = ollama.embeddings(model=self.model_name, prompt=text)
-                response = requests.post(
-                    'http://localhost:11434/api/embeddings',
-                    json={
-                        "model": self.model_name,  # 例如 "dengcao/bge-large-zh-v1.5"
-                        "prompt": processed_text  # 注意：某些模型可能用 "input" 而非 "prompt"
-                    },
-                    timeout=60
-                )
-
-                # 检查响应
-                if response.status_code == 500:
-                    error_msg = response.text.lower()
-                    if "context length" in error_msg or "input length" in error_msg:
-                        log.warning(
-                            f"嵌入失败(尝试{attempt + 1}/{max_retries}): 模型报告输入超长。将尝试缩减文本。"
-                        )
-                        # 尝试更激进的文本缩减
-                        processed_text = self._aggressive_text_reduction(processed_text)
-                        continue  # 使用缩减后的文本重试
-                    else:
-                        # 其他500错误
-                        log.warning(
-                            f"嵌入失败(尝试{attempt + 1}/{max_retries}): {response.text}"
-                        )
-                        time.sleep(1)
-                        continue
-
-                response.raise_for_status()
-                result = response.json()
-                embedding = result.get("embedding")
-                if embedding and len(embedding) == self.embedding_dim:
-                    return embedding
-                else:
-                    log.warning(
-                        f"返回的嵌入向量格式异常或维度不符，尝试 {attempt + 1}/{max_retries}"
-                    )
-                    time.sleep(1)
-
-            except Exception as e:
-                log.error(f"请求Ollama API失败(尝试{attempt + 1}/{max_retries}): {e}")
-                if attempt == max_retries - 1:
-                    break
-                time.sleep(2**attempt)  # 指数退避
-
-        # 所有重试均失败后的降级策略
-        # 返回一个零向量或随机向量，确保流程不中断
-        # return [0.0] * self.embedding_dim
-        log.error(f"为文本生成嵌入最终失败，将返回空列表，该文本如下: '{text[:50]}...'")
-        return []
-
-# %% [markdown]
-# ### get_ollama_embedding(self, text: str) -> List[float]
+# ### get_ollama_embedding(self, text: str, max_retries: int = 3, enable_probe=False) -> List[float]
     # %%
     def get_ollama_embedding(self, text: str, max_retries: int = 3, enable_probe=False) -> List[float]:
         """调用 Ollama 生成文本嵌入。注意：传入的 text 应是已分块的适当长度文本。"""
@@ -939,7 +1023,8 @@ class EmbeddingGenerator:
             except Exception as e:
                 log.warning(f"嵌入失败({attempt + 1}/{max_retries}): {str(e)[:100]}")
                 if enable_probe:
-                    raise
+                    log.debug(f"应该嵌入模型{self.model_name}正在探测可接受的最大文本块……")
+                    raise e
                 time.sleep(2**attempt)
 
         log.error(f"嵌入生成最终失败: {self.model_name}, 文本长度{len(text)}")
@@ -955,10 +1040,10 @@ class EmbeddingGenerator:
         return self.embedding_cache.get(text_hash)
 
 # %% [markdown]
-# ### get_merged_embedding(self, text: str) -> List[float]
+# ### get_merged_embedding_other(self, text: str) -> List[float]
 
     # %%
-    def get_merged_embedding(self, text: str) -> List[float]:
+    def get_merged_embedding_other(self, text: str) -> List[float]:
         """
         生成文本嵌入的核心函数。优化策略：优先二次分块，而非文本缩减。
         """
@@ -1063,8 +1148,8 @@ class EmbeddingGenerator:
         sub_embeddings = []
         for i, chunk_content in enumerate(sub_chunks):
             try:
-                # 递归调用 get_ollama_embedding_safe，由于子块已很小，通常不会再次触发重分块
-                emb = self.get_ollama_embedding_safe(chunk_content)
+                # 递归调用 get_ollama_embedding，由于子块已很小，通常不会再次触发重分块
+                emb = self.get_ollama_embedding(chunk_content)
                 if emb:
                     sub_embeddings.append(emb)
                     log.debug(f"子块 {i+1}/{len(sub_chunks)} 嵌入成功")
@@ -1139,11 +1224,14 @@ class EmbeddingGenerator:
         return [s.strip() for s in sentences if s.strip()]
 
 # %% [markdown]
-# ### get_merged_embedding_other(self, text: str,) -> List[float]
+# ### get_merged_embedding(self, text: str,) -> List[float]
     # %%
-    def get_merged_embedding_other(self, text: str,) -> List[float]:
+    def get_merged_embedding(self, chunk_dict: Dict,) -> List[float]:
         # 计算文本哈希
-        text_hash = hashlib.md5(text.encode()).hexdigest()
+        text = chunk_dict["content"]
+        text_hash = chunk_dict["base_metadata"]["content_hash"]
+        # text_hash = compute_content_hash(text)
+        # text_hash = hashlib.md5(text.encode()).hexdigest()
 
         # 检查缓存
         cached = self.get_cached_embedding(text_hash)
@@ -1151,36 +1239,26 @@ class EmbeddingGenerator:
             log.info(f"使用缓存嵌入: {text_hash[:12]}")
             return cached
 
+        # 2. 长度安全校验（防御性编程）
+        # safe_limit = int(self.chunk_size * 1.0) # 安全阈值
+        # if len(text) > safe_limit:
+        #     # 立即触发二次分块，而非缩减
+        #     return self._get_rechunked_embedding(text, safe_subchunk_size=int(self.chunk_size*0.5))
+
         # 在尝试本地Ollama嵌入前，进行更精细的长度管理和降级策略
-        embedding = []
+        processed_text = self._preprocess_text_for_embedding(text)
         max_retries = 3
         for attempt in range(max_retries):
             try:
-                if attempt == 0:
-                    # 第一次尝试：使用原始或轻微预处理的文本
-                    processed_text = self._preprocess_text_for_embedding(text)
-                elif attempt == 1:
-                    # 第二次尝试：启用“智能缩减”，而非激进缩减
-                    log.warning(f"首次嵌入失败，尝试智能缩减文本(第{attempt+1}次重试)。")
-                    processed_text = self._preprocess_text_for_embedding(text)
-                    processed_text = self._reduce_text_length(processed_text, max_chars=int(self.chunk_size * 0.8))
-                else:
-                    log.warning(f"使用激进缩减进行最后尝试(第{attempt+1}次重试)。")
-                    processed_text = self._preprocess_text_for_embedding(text)
-                    processed_text = self._aggressive_text_reduction(processed_text)
-
-                # 估算Token并检查（保留原有逻辑）
-                estimated_tokens = self._estimate_token_count(processed_text)
-                safe_token_limit = int(self.chunk_size * 0.8)
-                if estimated_tokens > safe_token_limit:
-                    log.warning(f"估算Token({estimated_tokens})超限，进行额外缩减。")
-                    processed_text = self._reduce_text_length(processed_text, max_chars=int(self.chunk_size * 0.7))
-
                 # 调用安全的嵌入生成
-                embedding = self.get_ollama_embedding_safe(processed_text)
+                # embedding = self.get_ollama_embedding_safe(processed_text)
+                embedding = self.get_ollama_embedding(processed_text)
                 if embedding:
                     self.embedding_cache[text_hash] = embedding
                     break
+            except ContextLengthExceededError:
+                # 即使校验后仍超长，进行二次分块
+                return self._get_rechunked_embedding(text, safe_subchunk_size=int(self.chunk_size*0.5))
             except Exception as e:
                 log.warning(f"获取嵌入失败(第{attempt+1}次): {e}")
                 continue
