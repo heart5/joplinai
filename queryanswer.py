@@ -446,7 +446,13 @@ class OptimizedJoplinQASystem(JoplinQASystem):
         processed_question = self._preprocess_question(question)
 
         # 2. 获取问题嵌入
-        query_embedding = self.embedding_generator.get_merged_embedding(processed_question)
+        chunk_dict_for_question = {
+            "content": processed_question,
+            "base_metadata": {
+                "content_hash": "question_hash_placeholder" # 可以生成一个简单哈希，或使用固定值
+            }
+        }
+        query_embedding = self.embedding_generator.get_merged_embedding(chunk_dict_for_question)
         if not query_embedding:
             return {"answer": "无法生成问题嵌入，请检查配置。", "relevant_chunks": []}
 
