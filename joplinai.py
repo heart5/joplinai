@@ -99,6 +99,12 @@ CONFIG = {
     "deepseek_chat_model": "deepseek-chat",  # 修正模型名称
     "deepseek_embed_model": "deepseek-embedding",
     "force_update": False,  # 新增：强制更新开关，默认关闭
+    "chunk_overlap": 50,
+    # 【新增】自适应分块配置
+    "enable_adaptive_chunking": getinivaluefromcloud(
+        "joplinai", "enable_adaptive_chunking"
+    ),
+    "adaptive_cache_size": 100,
 }
 
 model_name_str = (
@@ -276,13 +282,13 @@ def process_note_chunks(
                 # 如果块ID已存在，且哈希值相同，则跳过
                 if existing_chunks_map[expected_chunk_id] == chunk_hash:
                     log.debug(
-                        f"笔记《{note.title}》中的块 {metadata_chunk_idx_from_one} 内容未变，跳过嵌入生成。"
+                        f"笔记《{note.title}》中的块 {metadata_chunk_idx_from_one} 内容（长度：{len(chunk_content)}）未变，跳过嵌入生成。"
                     )
                     need_process = False
                     skipped_chunks += 1
                 else:
                     log.info(
-                        f"笔记《{note.title}》中的块 {metadata_chunk_idx_from_one} 内容哈希已变化，需要重新嵌入。"
+                        f"笔记《{note.title}》中的块 {metadata_chunk_idx_from_one} 内容（长度：{len(chunk_content)}）哈希已变化，需要重新嵌入。"
                     )
             # 如果块ID不存在，则是全新块，需要处理
 
@@ -309,10 +315,10 @@ def process_note_chunks(
             metadata_chunk_idx_from_one = int(base_metadata["chunk_index"]) + 1
 
             # 生成嵌入
-            embedding = embedding_generator.get_merged_embedding(chunk_content)
+            embedding = embedding_generator.get_merged_embedding(chunk_data)
             if not embedding:
                 log.warning(
-                    f"笔记《{note.title}》块 {metadata_chunk_idx_from_one} 嵌入生成失败，跳过此块。"
+                    f"笔记《{note.title}》块 {metadata_chunk_idx_from_one} （长度：{len(chunk_content)}）嵌入生成失败，跳过此块。"
                 )
                 continue
 
@@ -324,11 +330,11 @@ def process_note_chunks(
                 )
             except Exception as e:
                 log.error(
-                    f"对笔记《{note.title}》的块 {metadata_chunk_idx_from_one} 进行DeepSeek增强时失败: {e}",
+                    f"对笔记《{note.title}》的块 {metadata_chunk_idx_from_one} （长度：{len(chunk_content)}）进行DeepSeek增强时失败: {e}",
                     exc_info=True,
                 )
 
-            if len(chunk_content) > embedding_generator.chunk_size * 0.7:
+            if len(chunk_content) > embedding_generator.chunk_size * 0.8:
                 enhanced_metadata["potential_long_chunk"] = True
 
             notebook_dicts = get_notebook_ids_for_note(note.id)
@@ -357,11 +363,11 @@ def process_note_chunks(
                 )
                 successful_upserts += 1
                 log.info(
-                    f"笔记《{note.title}》的块 【{metadata_chunk_idx_from_one}/{len(chunk_dicts)}】 向量化入库更新成功，文本块元数据为：{metadata}"
+                    f"笔记《{note.title}》的块 【{metadata_chunk_idx_from_one}/{len(chunk_dicts)}】 （长度：{len(chunk_content)}）向量化入库更新成功，文本块元数据为：{metadata}"
                 )
             except Exception as e:
                 log.error(
-                    f"笔记《{note.title}》存储块 {metadata_chunk_idx_from_one} 失败: {e}",
+                    f"笔记《{note.title}》存储块 {metadata_chunk_idx_from_one} （长度：{len(chunk_content)}）失败: {e}",
                     exc_info=True,
                 )
 
@@ -444,7 +450,12 @@ def process_notes_incremental(notebook_title: str, config: Dict):
     # 初始化向量数据库（在整个处理过程中只初始化一次）
     if not hasattr(process_notes_incremental, "embedding_gen"):
         process_notes_incremental.embedding_gen = EmbeddingGenerator(
-            config["embedding_model"]
+            config["embedding_model"],
+            chunk_size=config.get("chunk_size", 512),
+            chunk_overlap=config.get("chunk_overlap", 50),
+            # 【新增】传递自适应分块配置
+            enable_adaptive_chunking=config.get("enable_adaptive_chunking", False),
+            adaptive_cache_size=config.get("adaptive_cache_size", 100),
         )
         log.info(f"嵌入生成器初始化完成")
 
