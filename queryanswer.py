@@ -47,6 +47,7 @@ try:
         getcfpoptionvalue,
         setcfpoptionvalue,
     )
+    from func.datatools import compute_content_hash
     from func.first import dirmainpath, getdirmain
     from func.getid import getdeviceid, getdevicename, gethostuser
     from func.jpfuncs import (
@@ -449,7 +450,9 @@ class OptimizedJoplinQASystem(JoplinQASystem):
         chunk_dict_for_question = {
             "content": processed_question,
             "base_metadata": {
-                "content_hash": "question_hash_placeholder" # 可以生成一个简单哈希，或使用固定值
+                "content_hash": compute_content_hash(processed_question),
+                "source_note_title": f"{processed_question[:20]}",
+                "chunk_index": 0,
             }
         }
         query_embedding = self.embedding_generator.get_merged_embedding(chunk_dict_for_question)
@@ -859,7 +862,7 @@ class OptimizedJoplinQASystem(JoplinQASystem):
 
 回答要求：
 1. 基于笔记事实，不要编造
-2. 引用具体的笔记内容（如：根据笔记1提到...）
+2. 引用具体的笔记内容（如：根据笔记《1》提到...）
 3. 如果笔记信息不完整，可以合理推断但需说明
 4. 回答要具体、实用
 5. 语言自然，像在对话"""
@@ -1058,15 +1061,20 @@ def interactive_mode(qa_system: JoplinQASystem):
             print(f"\r答: {result['answer']}")
 
             # 显示来源信息
+            num_for_show = 3
             if result["is_based_on_notes"] and result["relevant_notes"]:
-                print(f"\n来源 ({len(result['relevant_notes'])}块相关文本块):")
-                for i, note in enumerate(result["relevant_notes"], 1):
+                print(
+                    f"\n来源 ({len(result['relevant_notes'])}块相关文本块)，仅显示前{num_for_show}:"
+                )
+                for i, note in enumerate(result["relevant_notes"][:num_for_show], 1):
                     similarity = note["similarity"]
                     tags = note["metadata"].get("tags", "无标签")
                     print(f"  {i}. 相似度: {similarity:.2f} | 标签: {tags}")
             if result["sources"]:
-                print(f"\n以上文本块来源 ({len(result['sources'])}条相关笔记):")
-                for i, note in enumerate(result["sources"], 1):
+                print(
+                    f"\n以上文本块来源 ({len(result['sources'])}条相关笔记)，仅显示前{num_for_show}:"
+                )
+                for i, note in enumerate(result["sources"][:num_for_show], 1):
                     print(f"  {i}. 《{note['title']}》")
 
             print(
