@@ -18,7 +18,7 @@
 # embedding_generator.py
 
 # %% [markdown]
-# ## 导入库
+# # 导入库
 
 # %%
 import hashlib
@@ -41,7 +41,8 @@ except ImportError as e:
 
 
 # %% [markdown]
-# ## AdaptiveChunkOptimizer类
+# # AdaptiveChunkOptimizer类
+
 
 # %%
 class AdaptiveChunkOptimizer:
@@ -111,9 +112,7 @@ class AdaptiveChunkOptimizer:
             test_text = text[:test_len]  # 取文本前 test_len 个字符进行测试
             try:
                 # 该方法内部已有重试和容错机制，足以用于探测。
-                _ = self.embedding_generator.get_ollama_embedding(
-                    test_text, max_retries=1, enable_probe=True
-                )
+                _ = self.embedding_generator.get_ollama_embedding(test_text)
                 # 调用成功，更新安全长度记录
                 current_safe_len = test_len
                 log.debug(f"  探测通过: {test_len} 字符")
@@ -176,7 +175,8 @@ class AdaptiveChunkOptimizer:
 
 
 # %% [markdown]
-# ## PunctuationAwareSplitter类
+# # PunctuationAwareSplitter类
+
 
 # %%
 class PunctuationAwareSplitter:
@@ -347,7 +347,9 @@ class PunctuationAwareSplitter:
                 next_start = window_end
             start = next_start
 
-        log.info(f"文本【{text[:20]}……】被增强型语义切割工具切割为({len(chunks)})块")
+        log.info(
+            f"文本【{repr(text[:20])}……】长度为({len(text)})，被增强型语义切割工具切割为({len(chunks)})块"
+        )
         return chunks
 
     def _find_best_split_position(self, window_text: str) -> int:
@@ -373,23 +375,24 @@ class PunctuationAwareSplitter:
 
 
 # %% [markdown]
-# ## EmbeddingGenerator类
+# # EmbeddingGenerator类
+
 
 # %%
 class EmbeddingGenerator:
     """嵌入生成器，支持长文本分块处理"""
 
-
 # %% [markdown]
-# ### \_\_init__(self, model_name: str, chunk_size: int = 1024)
+# ## \_\_init__(self, model_name: str, chunk_size: int = 1024)
 
     # %%
-    def __init__(self,
+    def __init__(
+        self,
         model_name: str,
         chunk_size: int = 1024,
         enable_adaptive_chunking=False,  # 【新增】是否启用自适应分块
         chunk_overlap=50,
-        adaptive_cache_size=100,         # 【新增】自适应探测缓存大小
+        adaptive_cache_size=100,  # 【新增】自适应探测缓存大小
     ):
         self.model_name = model_name
         self.chunk_size = chunk_size
@@ -407,7 +410,7 @@ class EmbeddingGenerator:
         self.enable_adaptive_chunking = enable_adaptive_chunking
 
 # %% [markdown]
-# ### _get_model_dimension(self)
+# ## _get_model_dimension(self)
 
     # %%
     def _get_model_dimension(self):
@@ -424,7 +427,7 @@ class EmbeddingGenerator:
             return 1024
 
 # %% [markdown]
-# ### _set_chunk_size(self) -> None
+# ## _set_chunk_size(self) -> None
     # %%
     def _set_chunk_size(self) -> None:
         """精确获取模型上下文限制（token→字符转换）"""
@@ -433,7 +436,9 @@ class EmbeddingGenerator:
             self.chunk_size = 1850  # 768 token × 3字符/token × 0.8余量 ≈ 1850
             return
         elif self.model_name == "dengcao/bge-large-zh-v1.5":
-            self.chunk_size = 512 # 512 token，中文是一对一，应为是一对三或者四，实际中文为主
+            self.chunk_size = (
+                512  # 512 token，中文是一对一，应为是一对三或者四，实际中文为主
+            )
             return
             return
         elif self.model_name == "qwen:1.8b":
@@ -451,19 +456,24 @@ class EmbeddingGenerator:
             if isinstance(params_str, str) and params_str:
                 # 解析字符串，例如 "num_ctx 512"
                 import re
-                match = re.search(r'num_ctx\s+(\d+)', params_str)
+
+                match = re.search(r"num_ctx\s+(\d+)", params_str)
                 if match:
                     num_ctx = int(match.group(1))
                 else:
                     # 方法2：尝试从 modelfile 解析
                     modelfile = model_info.get("modelfile", "")
-                    match = re.search(r'PARAMETER num_ctx\s+(\d+)', modelfile)
+                    match = re.search(r"PARAMETER num_ctx\s+(\d+)", modelfile)
                     if match:
                         num_ctx = int(match.group(1))
                     else:
                         # 方法3：尝试从 details.modelinfo 获取
                         try:
-                            num_ctx = model_info.get("details", {}).get("modelinfo", {}).get("bert.context_length", 2048)
+                            num_ctx = (
+                                model_info.get("details", {})
+                                .get("modelinfo", {})
+                                .get("bert.context_length", 2048)
+                            )
                         except:
                             pass
             else:
@@ -471,14 +481,18 @@ class EmbeddingGenerator:
                 num_ctx = model_info.get("parameters", {}).get("num_ctx", 1024)
 
             self.chunk_size = int(num_ctx * 3 * 0.8)
-            log.info(f"模型 {self.model_name} 上下文长度: {num_ctx} tokens, 分块大小: {self.chunk_size} 字符")
+            log.info(
+                f"模型 {self.model_name} 上下文长度: {num_ctx} tokens, 分块大小: {self.chunk_size} 字符"
+            )
 
         except Exception as e:
-            log.warning(f"获取模型上下文失败({self.model_name})，使用默认值1024字符: {e}")
+            log.warning(
+                f"获取模型上下文失败({self.model_name})，使用默认值1024字符: {e}"
+            )
             self.chunk_size = 1024
 
 # %% [markdown]
-# ### clean_text(text: str) -> str
+# ## clean_text(text: str) -> str
     # %%
     def clean_text(self, text: str) -> str:
         """
@@ -509,7 +523,7 @@ class EmbeddingGenerator:
         return text
 
 # %% [markdown]
-# ### _is_valid_chunk(self, text: str, min_length: int = 10) -> bool
+# ## _is_valid_chunk(self, text: str, min_length: int = 10) -> bool
 
     # %%
     def _is_valid_chunk(self, text: str, min_length: int = 10) -> bool:
@@ -517,12 +531,12 @@ class EmbeddingGenerator:
         if not text or len(text.strip()) < min_length:
             return False
         # 可选：检查是否仅为符号、数字或空格
-        if re.match(r'^[\s\\d\\W]+$', text):
+        if re.match(r"^[\s\\d\\W]+$", text):
             return False
         return True
 
 # %% [markdown]
-# ### _preprocess_text_for_embedding(self, text: str) -> str
+# ## _preprocess_text_for_embedding(self, text: str) -> str
 
     # %%
     def _preprocess_text_for_embedding(self, text: str) -> str:
@@ -531,15 +545,15 @@ class EmbeddingGenerator:
 
         # 1. 移除或替换可能引起问题的特殊字符和模式
         # 例如：过多的换行符合并
-        text = re.sub(r'\n{3,}', '\n\n', text)
+        text = re.sub(r"\n{3,}", "\n\n", text)
         # 例如：将多个连续相同字符缩减（针对“哈哈哈...”）
-        text = re.sub(r'(.)\1{4,}', r'\1\1\1', text)  # 5个以上相同字符保留3个
+        text = re.sub(r"(.)\1{4,}", r"\1\1\1", text)  # 5个以上相同字符保留3个
 
         # 2. 移除或替换无语义的极端口语词（可选，根据需求调整）
         # 这里示例移除一些可能无实际语义的强感叹词，避免影响核心语义
-        strong_interjections = [r'我操\s*', r'他妈\s*的', r'哈哈哈\s*']
+        strong_interjections = [r"我操\s*", r"他妈\s*的", r"哈哈哈\s*"]
         for pattern in strong_interjections:
-            text = re.sub(pattern, '', text)
+            text = re.sub(pattern, "", text)
 
         # 3. 确保文本两端无多余空格
         text = text.strip()
@@ -547,7 +561,7 @@ class EmbeddingGenerator:
         return text
 
 # %% [markdown]
-# ### _convert_health_data_to_text(self, raw_content: str) -> str
+# ## _convert_health_data_to_text(self, raw_content: str) -> str
 
     # %%
     def _convert_health_data_to_text(self, raw_content: str) -> str:
@@ -556,23 +570,23 @@ class EmbeddingGenerator:
         示例输入: "110，4：14" -> "今日步数110步，睡眠时长4小时14分钟。"
         示例输入: "799，7：44，1" -> "今日步数799步，睡眠时长7小时44分钟，喝啤酒1瓶。"
         """
-        lines = [line for line in raw_content.strip().split('\n') if line]
+        lines = [line for line in raw_content.strip().split("\n") if line]
         converted_lines = []
 
         for line in lines:
             line = line.strip()
             # 匹配数字模式：如 "110，4：14" 或 "11033，4：7，4"
-            if re.match(r'^\d+[，,]\s*\d+[:：]\d+([，,]\s*\d+)?$', line):
-                parts = re.split(r'[，,]\s*', line)
+            if re.match(r"^\d+[，,]\s*\d+[:：]\d+([，,]\s*\d+)?$", line):
+                parts = re.split(r"[，,]\s*", line)
                 if len(parts) >= 2:
                     # 解析步数
                     steps = parts[0]
                     desc = f"今日步数{steps}步，"
 
                     # 解析睡眠时间（格式如 4:14 或 4：14）
-                    sleep_time = parts[1].replace('：', ':')
-                    if ':' in sleep_time:
-                        sleep_parts = sleep_time.split(':')
+                    sleep_time = parts[1].replace("：", ":")
+                    if ":" in sleep_time:
+                        sleep_parts = sleep_time.split(":")
                         if len(sleep_parts) == 2:
                             desc += f"睡眠时长{sleep_parts[0]}小时{sleep_parts[1]}分钟"
 
@@ -584,10 +598,10 @@ class EmbeddingGenerator:
                     line = desc + "。"
             converted_lines.append(line)
 
-        return '\n'.join(converted_lines)
+        return "\n".join(converted_lines)
 
 # %% [markdown]
-# ### _condense_dense_lists(self, text: str) -> str
+# ## _condense_dense_lists(self, text: str) -> str
 
     # %%
     def _condense_dense_lists(self, text: str) -> str:
@@ -596,14 +610,15 @@ class EmbeddingGenerator:
         例如：将“A、B、C、D、E”浓缩为“A等5人”。
         """
         import re
+
         # 匹配中文顿号分隔的列表模式，如“张三、李四、王五”
-        pattern = r'([\u4e00-\u9fa5]{2,4}、){3,}[\u4e00-\u9fa5]{2,4}'
+        pattern = r"([\u4e00-\u9fa5]{2,4}、){3,}[\u4e00-\u9fa5]{2,4}"
         matches = re.findall(pattern, text)
 
         for match in matches:
             original = match
             # 提取所有人名
-            names = original.split('、')
+            names = original.split("、")
             if len(names) > 4:  # 仅对较长的列表进行浓缩
                 condensed = f"{names[0]}、{name[1]}等{len(names)}人"
                 text = text.replace(original, condensed)
@@ -611,7 +626,7 @@ class EmbeddingGenerator:
         return text
 
 # %% [markdown]
-# ### _aggressive_text_reduction(self, text: str) -> str
+# ## _aggressive_text_reduction(self, text: str) -> str
 
     # %%
     def _aggressive_text_reduction(self, text: str) -> str:
@@ -625,27 +640,30 @@ class EmbeddingGenerator:
 
         # 2. 【新增】针对“人名列表”的特殊处理
         # 检测模式：包含大量顿号、冒号，且无明显段落
-        if '：' in text and '、' in text and len(text.splitlines()) < 5:
-            log.debug(f"检测到密集人名列表，进行针对性清理。该文本块头为：{text[:200]} ……")
+        if "：" in text and "、" in text and len(text.splitlines()) < 5:
+            log.debug(
+                f"检测到密集人名列表，进行针对性清理。该文本块头为：{text[:200]} ……"
+            )
             # 移除所有空格和换行，简化格式
-            text = text.replace('\n', '').replace(' ', '')
+            text = text.replace("\n", "").replace(" ", "")
             # 将顿号替换为逗号（可能token更少）
-            text = text.replace('、', ',')
+            text = text.replace("、", ",")
             # 如果仍然过长，只保留前N个人名
             if len(text) > safe_length:
                 # 尝试按逗号分割，保留前一部分
-                parts = text.split(',')
+                parts = text.split(",")
                 if len(parts) > 10:
-                    text = ','.join(parts[:10]) + '...（名单截断）'
+                    text = ",".join(parts[:10]) + "...（名单截断）"
 
         # 3. 进一步移除所有重复字符模式
         import re
-        text = re.sub(r'(.)\1{2,}', r'\1', text)  # 3个以上相同字符保留1个
+
+        text = re.sub(r"(.)\1{2,}", r"\1", text)  # 3个以上相同字符保留1个
 
         return text
 
 # %% [markdown]
-# ### _reduce_text_length(self, text: str, max_chars: int = 400) -> str
+# ## _reduce_text_length(self, text: str, max_chars: int = 400) -> str
 
     # %%
     def _reduce_text_length(self, text: str, max_chars: int = 400) -> str:
@@ -662,9 +680,9 @@ class EmbeddingGenerator:
         for line in lines:
             stripped = line.strip()
             # 保留非空行，且不是纯符号或数字编号的行
-            if stripped and not re.match(r'^[\s\-*=•·●○◆◇■□▣▢▤▥▦▧▨▩▱▰]*$', stripped):
+            if stripped and not re.match(r"^[\s\-*=•·●○◆◇■□▣▢▤▥▦▧▨▩▱▰]*$", stripped):
                 filtered_lines.append(line)
-        text = '\n'.join(filtered_lines)
+        text = "\n".join(filtered_lines)
 
         # 策略2: 如果仍是长列表，尝试浓缩（调用上述新方法）
         text = self._condense_dense_lists(text)
@@ -672,16 +690,18 @@ class EmbeddingGenerator:
         # 策略3: 若仍超长，进行关键句提取（简易版）
         if len(text) > max_chars:
             # 优先保留包含日期、数字、关键动词（如“总结”、“认为”、“记录”）的句子
-            sentences = re.split(r'(?<=[。！？；\n])', text)
+            sentences = re.split(r"(?<=[。！？；\n])", text)
             important_sentences = []
             for sent in sentences:
                 # 简单的关键词启发式规则
-                if (re.search(r'\d{4}年\d{1,2}月\d{1,2}日', sent) or
-                    re.search(r'\b(总计|合计|主要|关键|总结|认为|记录|建议)\b', sent) or
-                    re.search(r'[A-Za-z\u4e00-\u9fa5]{2,}：[^。]+', sent)):  # 包含冒号定义的项
+                if (
+                    re.search(r"\d{4}年\d{1,2}月\d{1,2}日", sent)
+                    or re.search(r"\b(总计|合计|主要|关键|总结|认为|记录|建议)\b", sent)
+                    or re.search(r"[A-Za-z\u4e00-\u9fa5]{2,}：[^。]+", sent)
+                ):  # 包含冒号定义的项
                     important_sentences.append(sent)
             if important_sentences:
-                text = ''.join(important_sentences)
+                text = "".join(important_sentences)
                 log.debug(f"通过关键句提取缩减文本。")
 
         # 策略4: 最后防线，按段落截断但添加标记
@@ -689,9 +709,12 @@ class EmbeddingGenerator:
             # 不是粗暴截断，而是找到最近的段落结束处
             truncated = text[:max_chars]
             # 尝试在段落边界处截断
-            last_para_break = truncated.rfind('\n\n')
+            last_para_break = truncated.rfind("\n\n")
             if last_para_break > max_chars * 0.5:  # 如果能找到合理的段落边界
-                text = truncated[:last_para_break] + f"\n\n【注：因长度限制，后续内容已省略。原始文本共{original_len}字符。】"
+                text = (
+                    truncated[:last_para_break]
+                    + f"\n\n【注：因长度限制，后续内容已省略。原始文本共{original_len}字符。】"
+                )
             else:
                 text = truncated + f"...【文本截断，原始长度{original_len}字符】"
             log.warning(f"文本经智能缩减后仍超长，已进行截断并添加标记。")
@@ -700,7 +723,7 @@ class EmbeddingGenerator:
         return text
 
 # %% [markdown]
-# ### _normalize_single_date_unit(self, raw_text: str, captured_date: str) -> str
+# ## _normalize_single_date_unit(self, raw_text: str, captured_date: str) -> str
 
     # %%
     def _normalize_single_date_unit(self, raw_text: str, captured_date: str) -> str:
@@ -712,33 +735,33 @@ class EmbeddingGenerator:
         lines = raw_text.splitlines()
         if not lines:
             return ""
-        
+
         # 1. 规范化标题行：统一为 “### YYYY年MM月DD日” 格式
         # 使用正则捕获的纯日期，避免原文本中“号”或空格的差异
         normalized_header = f"### {captured_date}"
-        
+
         # 2. 处理主体内容：去除标题行之后的连续空行，以及单元末尾的连续空行
         body_lines = []
         for line in lines[1:]:  # 从标题行之后开始
             # 跳过开头的连续空行，直到遇到第一个非空行
             if body_lines or line.strip():
                 body_lines.append(line.rstrip())  # 同时去除每行右侧空格
-        
+
         # 去除末尾的连续空行
         while body_lines and not body_lines[-1].strip():
             body_lines.pop()
-        
+
         # 3. 重新组装
         # 如果主体为空，只返回标题行；否则用两个换行符连接标题和主体（常见格式）
         if not body_lines:
             return normalized_header
         else:
             # 注意：这里保持主体内部原有的换行结构，只规范边界
-            normalized_body = '\n'.join(body_lines)
+            normalized_body = "\n".join(body_lines)
             return f"{normalized_header}\n\n{normalized_body}"
 
 # %% [markdown]
-# ### get_adaptive_chunk_size(self, text, note_title, idx)
+# ## get_adaptive_chunk_size(self, text, note_title, idx)
 
     # %%
     def get_adaptive_chunk_size(self, converted_chunk, note_title, idx):
@@ -747,7 +770,9 @@ class EmbeddingGenerator:
         current_target_chunk_size = self.chunk_size  # 默认使用全局配置
 
         try:
-            adaptive_size = self.adaptive_optimizer.get_adaptive_chunk_size(converted_chunk)
+            adaptive_size = self.adaptive_optimizer.get_adaptive_chunk_size(
+                converted_chunk
+            )
             # 使用探测到的值，但限制其在一个合理范围：
             # 下限：不能小于默认值的75%（避免过小）
             # 上限：不能大于默认值的200%（避免过大导致其他问题）
@@ -759,17 +784,23 @@ class EmbeddingGenerator:
                 current_target_chunk_size = clamped_size
                 log.info(
                     f"笔记《{note_title}》的文本块【{idx}】启用自适应分块: "
-                    f"文本长度={len(converted_chunk)}, 默认大小={self.chunk_size}, 自适应大小={current_target_chunk_size}"
+                    f"文本长度={len(converted_chunk)}, "
+                    f"默认大小={self.chunk_size}, 自适应大小={current_target_chunk_size}"
                 )
         except Exception as e:
-            log.warning(f"笔记《{note_title}》的文本块【{idx}】自适应分块决策失败，将使用默认大小: {e}")
+            log.warning(
+                f"笔记《{note_title}》的文本块【{idx}】自适应分块决策失败，将使用默认大小: {e}"
+            )
             # 失败时，回退到默认大小
 
-        log.debug(f"笔记《{note_title}》的文本块【{idx}】最终确定的分块目标大小为: {current_target_chunk_size} 字符")
+        log.debug(
+            f"笔记《{note_title}》的文本块【{idx}】"
+            f"最终确定的分块目标大小为: {current_target_chunk_size} 字符"
+        )
         return current_target_chunk_size
 
 # %% [markdown]
-# ### split_into_semantic_chunks(self, text: str, note_title: str = "", note_tags: str = "") -> List[Dict]
+# ## split_into_semantic_chunks(self, text: str, note_title: str = "", note_tags: str = "") -> List[Dict]
 
     # %%
     def split_into_semantic_chunks(
@@ -814,14 +845,20 @@ class EmbeddingGenerator:
             for i, match in enumerate(date_matches):
                 date_line_start = match.start()
                 captured_date = match.group(1)  # 正则捕获的纯日期，如“2026年4月3日”
-                next_start = date_matches[i + 1].start() if i + 1 < len(date_matches) else len(text)
+                next_start = (
+                    date_matches[i + 1].start()
+                    if i + 1 < len(date_matches)
+                    else len(text)
+                )
 
                 # 1. 提取原始日期单元字符串
                 raw_day_unit = text[date_line_start:next_start]
 
                 # 2. 【核心】规范化此日期单元
                 # 目标：统一格式，消除因文本全局位置变化带来的边界差异
-                normalized_unit = self._normalize_single_date_unit(raw_day_unit, captured_date)
+                normalized_unit = self._normalize_single_date_unit(
+                    raw_day_unit, captured_date
+                )
 
                 # 3. 将规范化后的单元加入列表
                 chunks.append(normalized_unit)
@@ -832,7 +869,9 @@ class EmbeddingGenerator:
                     chunks.insert(0, preface)  # 将前言作为第一个块
         # 利用“日期倒序更新”特征，反转后，最早的日期块索引永远为0
         chunks.reverse()
-        log.debug(f"笔记《{note_title}》完成日期单元规范化与列表反转，共得到 {len(chunks)} 个块。")
+        log.debug(
+            f"笔记《{note_title}》完成日期单元规范化与列表反转，共得到 {len(chunks)} 个块。"
+        )
         # ========== 第一步结束 ==========
 
         # 后续逻辑保持不变：对每个初步分割出的块，检查大小，如果过大则进行二次分割。
@@ -845,18 +884,35 @@ class EmbeddingGenerator:
                 # 如果块大小合理，直接使用
                 final_chunks.append(converted_chunk)
             else:
-                if self.enable_adaptive_chunking and len(converted_chunk) > self.chunk_size * 1.1:
+                if (
+                    self.enable_adaptive_chunking
+                    and len(converted_chunk) > self.chunk_size * 1.1
+                ):
                     # 仅当文本长度显著超过默认大小时，才启动自适应探测，避免对小文本的开销
-                    current_target_chunk_size = self.get_adaptive_chunk_size(converted_chunk, note_title, idx)
+                    current_target_chunk_size = self.get_adaptive_chunk_size(
+                        converted_chunk, note_title, idx
+                    )
                     # if current_target_chunk_size > self.chunk_size:
                     #     current_target_chunk_size = self.chunk_size
                     # sub_chunks = self._split_into_paragraphs_chunks(converted_chunk, current_target_chunk_size)
-                    log.debug(f"笔记《{note_title}》的文本块【{idx}】初步块过长({len(converted_chunk)}字符)，通过自适应获取合适的chunk_size({current_target_chunk_size})，通过滑动窗口分块法进行二次语义分割。")
-                    sub_chunks = PunctuationAwareSplitter(max_chunk_size=current_target_chunk_size).split(converted_chunk)
+                    log.info(
+                        f"笔记《{note_title}》的文本块【{idx}】"
+                        f"初步块过长({len(converted_chunk)}字符)，"
+                        f"通过自适应获取合适的chunk_size为({current_target_chunk_size})，"
+                        f"通过滑动窗口分块法进行二次语义分割。"
+                    )
+                    sub_chunks = PunctuationAwareSplitter(
+                        max_chunk_size=current_target_chunk_size
+                    ).split(converted_chunk)
                 else:
                     # 如果块过大，则调用原有的段落/句子级分割函数进行细化
-                    log.debug(f"笔记《{note_title}》的文本块【{idx}】初步块过长({len(converted_chunk)}字符)，进行二次语义分割。")
-                    sub_chunks = PunctuationAwareSplitter(max_chunk_size=self.chunk_size).split(converted_chunk)
+                    log.debug(
+                        f"笔记《{note_title}》的文本块【{idx}】"
+                        f"初步块过长({len(converted_chunk)}字符)，进行二次语义分割。"
+                    )
+                    sub_chunks = PunctuationAwareSplitter(
+                        max_chunk_size=self.chunk_size
+                    ).split(converted_chunk)
                     # sub_chunks = self._split_into_paragraphs_chunks(converted_chunk)
                 final_chunks.extend(sub_chunks)
 
@@ -866,7 +922,9 @@ class EmbeddingGenerator:
         ):
             log.debug(f"按照语义拆分不太合格：{[len(chunk) for chunk in final_chunks]}")
             final_chunks = self._split_into_paragraphs_chunks(text)
-            log.debug(f"回退用段落甚至字符拆分后：{[len(chunk) for chunk in final_chunks]}")
+            log.debug(
+                f"回退用段落甚至字符拆分后：{[len(chunk) for chunk in final_chunks]}"
+            )
 
         # ========== 构建块字典和元数据 ==========
         chunk_dicts = []
@@ -912,17 +970,19 @@ class EmbeddingGenerator:
         return chunk_dicts
 
 # %% [markdown]
-# ### _split_into_paragraphs_chunks(self, text: str, target_size: int = None) -> List[str]
+# ## _split_into_paragraphs_chunks(self, text: str, target_size: int = None) -> List[str]
 
     # %%
-    def _split_into_paragraphs_chunks(self, text: str, target_size: int = None) -> List[str]:
+    def _split_into_paragraphs_chunks(
+        self, text: str, target_size: int = None
+    ) -> List[str]:
         """按段落和句子分割文本，确保块大小更均匀、安全。"""
         if not text:
             return []
         if target_size is None:
             target_size = self.chunk_size
         # 1. 按双换行符分割段落
-        paragraphs = [p.strip() for p in text.split('\n\n') if p.strip()]
+        paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
         chunks = []
         current_chunk = ""
 
@@ -937,20 +997,20 @@ class EmbeddingGenerator:
                     chunks.append(current_chunk.strip())
                     current_chunk = ""
                 # 对长段落进行句子级分割
-                sentences = re.split(r'(?<=[。！？；\n])', para)
+                sentences = re.split(r"(?<=[。！？；\n])", para)
                 for sent in sentences:
                     sent = sent.strip()
                     if not sent:
                         continue
                     if len(current_chunk) + len(sent) <= target_size:
-                        current_chunk += (sent if not current_chunk else " " + sent)
+                        current_chunk += sent if not current_chunk else " " + sent
                     else:
                         if current_chunk:
                             chunks.append(current_chunk.strip())
                         current_chunk = sent
             # 如果段落可以安全加入当前块
             elif len(current_chunk) + len(para) <= target_size:
-                current_chunk += (para if not current_chunk else "\n\n" + para)
+                current_chunk += para if not current_chunk else "\n\n" + para
             else:
                 # 当前块已满，保存并开始新块
                 if current_chunk:
@@ -969,69 +1029,64 @@ class EmbeddingGenerator:
         return chunks
 
 # %% [markdown]
-# ### _split_text_into_chunks_fallback(self, text: str, target_size = None) -> List[str]
+# ## _split_text_into_chunks_fallback(self, text: str, target_size = None) -> List[str]
 
     # %%
-    def _split_text_into_chunks_fallback(self, text: str, target_size = None) -> List[str]:
+    def _split_text_into_chunks_fallback(
+        self, text: str, target_size=None
+    ) -> List[str]:
         """原有的基于字符的智能分块逻辑（作为回退）
         基于字符位置分块，保留完整单词"""
         if target_size is None:
             target_size = self.chunk_size
         if len(text) <= target_size:
             return [text]
-        
+
         chunks = []
         start = 0
-        
+
         while start < len(text):
             # 计算本块的结束位置
             end = start + target_size
-            
+
             # 如果已经到文本末尾
             if end >= len(text):
                 chunks.append(text[start:])
                 break
-            
+
             # 寻找合适的断点（空格或标点）
             # 向前找最近的空格
-            while end > start and text[end] not in ' \t\n.,;!?':
+            while end > start and text[end] not in " \t\n.,;!?":
                 end -= 1
-            
+
             # 如果没找到空格，强制在chunk_size处截断
             if end == start:
                 end = start + target_size
-            
+
             # 添加块
             chunk = text[start:end].strip()
             if chunk:  # 避免添加空块
                 chunks.append(chunk)
-            
+
             # 更新起始位置
             start = end
-        
+
         return chunks
 
 # %% [markdown]
-# ### get_ollama_embedding(self, text: str, max_retries: int = 3, enable_probe=False) -> List[float]
+# ## get_ollama_embedding(self, text: str) -> List[float]
     # %%
-    def get_ollama_embedding(self, text: str, max_retries: int = 3, enable_probe=False) -> List[float]:
-        """调用 Ollama 生成文本嵌入。注意：传入的 text 应是已分块的适当长度文本。"""
-        for attempt in range(max_retries):
-            try:
-                response = ollama.embeddings(model=self.model_name, prompt=text)
-                return response["embedding"]
-            except Exception as e:
-                log.warning(f"嵌入失败({attempt + 1}/{max_retries}): {str(e)[:100]}")
-                if enable_probe:
-                    log.debug(f"应该嵌入模型{self.model_name}正在探测可接受的最大文本块……")
-                    raise e
-                time.sleep(2**attempt)
-
-        log.error(f"嵌入生成最终失败: {self.model_name}, 文本长度{len(text)}")
-        return []
+    def get_ollama_embedding(self, text: str) -> List[float]:
+        """
+        调用 Ollama 生成文本嵌入。
+        注意：传入的 text 应是已分块的适当长度文本。
+        直接调用模型，不加try包裹，方便探测，错误处理由调用方负责
+        """
+        response = ollama.embeddings(model=self.model_name, prompt=text)
+        return response["embedding"]
 
 # %% [markdown]
-# ### get_cached_embedding(self, text_hash: str) -> Optional[List[float]]
+# ## get_cached_embedding(self, text_hash: str) -> Optional[List[float]]
 
     # %%
     @lru_cache(maxsize=200)
@@ -1040,110 +1095,30 @@ class EmbeddingGenerator:
         return self.embedding_cache.get(text_hash)
 
 # %% [markdown]
-# ### get_merged_embedding_other(self, text: str) -> List[float]
+# ## _get_rechunked_embedding(self, original_text: str, safe_subchunk_size: int) -> List[float]
 
     # %%
-    def get_merged_embedding_other(self, text: str) -> List[float]:
-        """
-        生成文本嵌入的核心函数。优化策略：优先二次分块，而非文本缩减。
-        """
-        # 1. 缓存检查 (保持不变)
-        text_hash = compute_content_hash(text)
-        cached = self.get_cached_embedding(text_hash)
-        if cached:
-            log.info(f"使用缓存嵌入: {text_hash[:12]}")
-            return cached
-
-        # 2. 预处理文本
-        processed_text = self._preprocess_text_for_embedding(text)
-        if not processed_text or len(processed_text.strip()) < 6:
-            log.warning("输入文本为空或过短，返回空列表")
-            return []
-
-        # 3. 估算长度并判断是否需要直接触发二次分块
-        #    设定一个比模型限制更宽松的阈值，用于提前判断。
-        estimated_tokens = self._estimate_token_count(processed_text)
-        safe_token_limit = int(self.chunk_size * 0.9)  # 例如，使用模型容量的70%作为安全线
-
-        if estimated_tokens > safe_token_limit:
-            # **关键修正**：当预估超长时，直接进入智能二次分块流程，而不是尝试缩减。
-            log.info(f"🚨 文本预估过长({estimated_tokens}tokens > {safe_token_limit})，直接触发智能二次分块。")
-            # 计算一个安全的子块大小（例如，基准chunk_size的50%）
-            safe_subchunk_size = int(self.chunk_size * 0.5)
-            rechunked_embedding = self._get_rechunked_embedding(
-                original_text=text,  # 使用原始文本进行二次分块
-                safe_subchunk_size=safe_subchunk_size
-            )
-            if rechunked_embedding:
-                self.embedding_cache[text_hash] = rechunked_embedding
-                return rechunked_embedding
-            else:
-                # 如果二次分块也失败，则降级为激进缩减（作为最后手段）
-                log.error("智能二次分块失败，降级为激进缩减。")
-                processed_text = self._aggressive_text_reduction(processed_text)
-        # 如果长度安全，则继续原有流程
-
-        # 4. 对于长度安全的文本，使用带重试的普通嵌入生成流程
-        embedding = []
-        max_retries = 2  # 可以减少重试次数，因为长文本已由上面处理
-        for attempt in range(max_retries):
-            try:
-                # 最后一次重试时，可使用轻度缩减
-                if attempt == max_retries - 1:
-                    processed_text = self._reduce_text_length(processed_text, max_chars=int(self.chunk_size * 0.8))
-
-                embedding = self.get_ollama_embedding_safe(processed_text)
-                if embedding:
-                    self.embedding_cache[text_hash] = embedding
-                    log.debug(f"嵌入生成成功 (尝试 {attempt+1})")
-                    break
-            except Exception as e:
-                error_msg = str(e).lower()
-                is_length_error = any(keyword in error_msg for keyword in ["context length", "input length", "too long"])
-
-                if is_length_error:
-                    # **即使在安全线内，如果API仍报错，也触发二次分块**
-                    log.warning(f"API报告长度错误，触发二次分块 (尝试{attempt+1})。")
-                    safe_subchunk_size = int(self.chunk_size * 0.5)
-                    rechunked_embedding = self._get_rechunked_embedding(
-                        original_text=text,
-                        safe_subchunk_size=safe_subchunk_size
-                    )
-                    if rechunked_embedding:
-                        self.embedding_cache[text_hash] = rechunked_embedding
-                        return rechunked_embedding
-                log.warning(f"获取嵌入失败(第{attempt+1}次): {e}")
-                continue
-
-        if not embedding:
-            log.error(f"为文本生成嵌入最终失败，将返回空列表。")
-            return []
-        return embedding
-
-# %% [markdown]
-# ### _get_rechunked_embedding(self, original_text: str, safe_subchunk_size: int) -> List[float]
-
-    # %%
-    def _get_rechunked_embedding(self, original_text: str, safe_subchunk_size: int) -> List[float]:
+    def _get_rechunked_embedding(
+        self, original_text: str, safe_subchunk_size: int
+    ) -> List[float]:
         """
         核心重分块逻辑。
         原理：将超长文本按安全大小重新分割为多个语义子块，分别嵌入后合并。
         """
         import numpy as np
-    
+
         # 1. 使用安全大小进行语义重分块
         sub_chunks = self._split_with_custom_size(
-            text=original_text,
-            target_chunk_size=safe_subchunk_size
+            text=original_text, target_chunk_size=safe_subchunk_size
         )
         if not sub_chunks:
             log.error("重分块未能产生有效子块")
             return []
-    
+
         log.info(
             f"📊 重分块详情 | 原块: {len(original_text)}字符 | 子块数: {len(sub_chunks)} | 目标大小: {safe_subchunk_size}字符"
         )
-    
+
         # 2. 为每个子块生成嵌入
         sub_embeddings = []
         for i, chunk_content in enumerate(sub_chunks):
@@ -1152,26 +1127,26 @@ class EmbeddingGenerator:
                 emb = self.get_ollama_embedding(chunk_content)
                 if emb:
                     sub_embeddings.append(emb)
-                    log.debug(f"子块 {i+1}/{len(sub_chunks)} 嵌入成功")
+                    log.debug(f"子块 {i + 1}/{len(sub_chunks)} 嵌入成功")
                 else:
-                    log.warning(f"子块 {i+1} 嵌入返回空，跳过")
+                    log.warning(f"子块 {i + 1} 嵌入返回空，跳过")
             except Exception as e:
-                log.warning(f"子块 {i+1} 嵌入异常: {str(e)[:50]}，跳过")
+                log.warning(f"子块 {i + 1} 嵌入异常: {str(e)[:50]}，跳过")
                 continue
-    
+
         # 3. 合并嵌入向量 (平均池化)
         if not sub_embeddings:
             log.error("所有子块嵌入均失败")
             return []
         if len(sub_embeddings) == 1:
             return sub_embeddings
-    
+
         merged_embedding = np.mean(sub_embeddings, axis=0)
         log.info(f"合并 {len(sub_embeddings)} 个子块嵌入成功")
         return merged_embedding.tolist()
 
 # %% [markdown]
-# ### _split_with_custom_size(self, text: str, target_chunk_size: int) -> List[str]
+# ## _split_with_custom_size(self, text: str, target_chunk_size: int) -> List[str]
 
     # %%
     def _split_with_custom_size(self, text: str, target_chunk_size: int) -> List[str]:
@@ -1184,9 +1159,7 @@ class EmbeddingGenerator:
             self.chunk_size = target_chunk_size
             # 调用您现有的语义分块方法，它会使用临时的 chunk_size
             chunk_dicts = self.split_into_semantic_chunks(
-                text=text,
-                note_title="[重分块]",
-                note_tags=""
+                text=text, note_title="[重分块]", note_tags=""
             )
             sub_chunks = [chunk["content"] for chunk in chunk_dicts]
 
@@ -1213,57 +1186,77 @@ class EmbeddingGenerator:
             self.chunk_size = original_chunk_size  # 恢复原状
 
 # %% [markdown]
-# ### _split_into_sentences(self, text: str) -> List[str]
+# ## _split_into_sentences(self, text: str) -> List[str]
 
     # %%
     def _split_into_sentences(self, text: str) -> List[str]:
         """简单的中文句子分割"""
         import re
-        sentence_endings = r'[。！？；\n]'
+
+        sentence_endings = r"[。！？；\n]"
         sentences = re.split(sentence_endings, text)
         return [s.strip() for s in sentences if s.strip()]
 
 # %% [markdown]
-# ### get_merged_embedding(self, text: str,) -> List[float]
+# ## get_merged_embedding(self, text: str,) -> List[float]
     # %%
-    def get_merged_embedding(self, chunk_dict: Dict,) -> List[float]:
-        # 计算文本哈希
+    def get_merged_embedding(
+        self,
+        chunk_dict: Dict,
+    ) -> List[float]:
         text = chunk_dict["content"]
         text_hash = chunk_dict["base_metadata"]["content_hash"]
-        # text_hash = compute_content_hash(text)
-        # text_hash = hashlib.md5(text.encode()).hexdigest()
+        source_note_title = chunk_dict["base_metadata"]["source_note_title"]
+        chunk_index = chunk_dict["base_metadata"]["chunk_index"]
 
         # 检查缓存
         cached = self.get_cached_embedding(text_hash)
         if cached:
-            log.info(f"使用缓存嵌入: {text_hash[:12]}")
+            log.info(
+                f"笔记《{source_note_title}》的文本块【{chunk_index}】缓存击中: {text_hash[:12]}"
+            )
             return cached
 
         # 2. 长度安全校验（防御性编程）
-        # safe_limit = int(self.chunk_size * 1.0) # 安全阈值
+        # safe_limit = int(self.chunk_size * 0.9) # 安全阈值
         # if len(text) > safe_limit:
         #     # 立即触发二次分块，而非缩减
+        #     log.info(
+        #         f"笔记《{chunk_dict["base_metadata"]["source_note_title"]}》的"
+        #         f"文本块【{chunk_dict["base_metadata"]["chunk_index"]}】"
+        #         f"长度为({len(text)}，超过安全长度({safe_limit}))，开始执行二次分块嵌入……"
+        #     )
         #     return self._get_rechunked_embedding(text, safe_subchunk_size=int(self.chunk_size*0.5))
 
-        # 在尝试本地Ollama嵌入前，进行更精细的长度管理和降级策略
+        # 在尝试本地Ollama嵌入前，对文本进行一次嵌入预处理
         processed_text = self._preprocess_text_for_embedding(text)
         max_retries = 3
-        for attempt in range(max_retries):
+        for attempt in range(1, max_retries + 1):
             try:
                 # 调用安全的嵌入生成
                 # embedding = self.get_ollama_embedding_safe(processed_text)
                 embedding = self.get_ollama_embedding(processed_text)
                 if embedding:
-                    self.embedding_cache[text_hash] = embedding
                     break
             except Exception as e:
-                log.warning(f"获取嵌入失败(第{attempt+1}次): {e}")
-                # 尝试到最后一次，则进行二次分块
-                if attempt == len(max_retries) - 1:
-                    return self._get_rechunked_embedding(text, safe_subchunk_size=int(self.chunk_size*0.5))
+                if attempt == max_retries:
+                    # 尝试到最后一次，则进行二次分块，兜底
+                    log.info(
+                        f"笔记《{source_note_title}》的文本块【{chunk_index}】"
+                        f"长度为({len(text)})，尝试嵌入操作到了第({attempt})次，仍然失败"
+                        "，开始执行二次分块嵌入……"
+                    )
+                    embedding = self._get_rechunked_embedding(
+                        processed_text, safe_subchunk_size=int(self.chunk_size * 0.5)
+                    )
+                    break
+                else:
+                    log.warning(f"获取嵌入失败(第{attempt}次): {e}")
                 continue
 
         if not embedding:
             log.error(f"为文本生成嵌入最终失败，将返回空列表。")
             return []
+        self.embedding_cache[text_hash] = embedding
+
         return embedding
