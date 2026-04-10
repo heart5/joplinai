@@ -70,7 +70,9 @@ except ImportError as e:
 CONFIG = {
     "embedding_model": "dengcao/bge-large-zh-v1.5",  # 嵌入模型（与joplinai.py保持一致）
     # "embedding_model": "qwen:1.8b",  # 嵌入模型（与joplinai.py保持一致）
-    "chat_model": "qwen:1.8b",  # 聊天模型（用于问答）
+    "chat_model": chat_model
+    if (chat_model := getinivaluefromcloud("joplinai", "chat_model"))
+    else "qwen:1.8b",  # 聊天模型（用于问答）
     "db_path": getdirmain() / "data" / "joplin_vector_db",  # ChromaDB存储路径
     "max_retrieved_notes": 10,  # 最大检索笔记数量
     # 最大检索文本块数，默认20
@@ -837,8 +839,10 @@ class OptimizedJoplinQASystem(JoplinQASystem):
         """生成优化答案"""
         # 使用DeepSeek
         if self.config["enable_deepseek"] and self.config["deepseek_api_key"]:
+            log.info(f"启用deepseek聊天模式")
             return self._generate_answer_with_deepseek_optimized(question, context)
         else:
+            log.info(f"启用本地ollama调用的聊天大模型{self.config['chat_model']}")
             return self._generate_answer_with_ollama(question, context)
 
 # %% [markdown]
@@ -984,7 +988,8 @@ def parse_args():
     parser.add_argument(
         "--use-deepseek",
         action="store_true",
-        default=CONFIG["enable_deepseek"],
+        # default=CONFIG["enable_deepseek"],
+        default=False,
         help=f"使用DeepSeek API（默认：{CONFIG['enable_deepseek']}）",
     )
 
