@@ -263,6 +263,11 @@ class PunctuationAwareSplitter:
                 sub_chunks = self._split_recursively(primary_chunk)
                 final_chunks.extend(sub_chunks)
 
+        log.info(
+            f"文本【{repr(text[:30])}……】长度为({len(text)})，"
+            f"被增强型语义切割工具切割为({len(final_chunks)})块，"
+            f"切块长度列表为：{[len(chunk) for chunk in final_chunks]}"
+        )
         return final_chunks
 
     def _split_by_primary_structure(self, text: str) -> List[str]:
@@ -346,9 +351,6 @@ class PunctuationAwareSplitter:
                 next_start = window_end
             start = next_start
 
-        log.info(
-            f"文本【{repr(text[:20])}……】长度为({len(text)})，被增强型语义切割工具切割为({len(chunks)})块"
-        )
         return chunks
 
     def _find_best_split_position(self, window_text: str) -> int:
