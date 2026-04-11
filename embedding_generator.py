@@ -1115,7 +1115,9 @@ class EmbeddingGenerator:
             content = self.clean_text(chunk_content)
             if not self._is_valid_chunk(content):
                 log.info(
-                    f"跳过无效文本块（索引【{idx}/{len(final_chunks)}】，该文本块清理后长度{len(content)}字符）。内容预览: '{content[:50]}'"
+                    f"跳过无效文本块（索引【{idx}/{len(final_chunks)}】，"
+                    f"该文本块清理后长度{len(content)}字符）。"
+                    f"内容预览: '{content[:50]}'"
                 )
                 continue  # 跳过当前循环，不处理此块
 
