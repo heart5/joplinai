@@ -270,7 +270,7 @@ def process_note_chunks(
             chunk_content = chunk_info["content"]
             base_metadata = chunk_info["metadata"]
             chunk_hash = base_metadata.get("content_hash", "")  # 从元数据中取出哈希
-            metadata_chunk_idx_from_one = int(base_metadata["chunk_index"]) + 1
+            metadata_chunk_idx_from_one = base_metadata["chunk_index"]
 
             # 构建此块预期的最终块ID (与原有逻辑保持一致)
             expected_chunk_id = f"{note.id}_chunk_{base_metadata['chunk_index']}"
