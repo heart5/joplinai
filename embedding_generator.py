@@ -103,7 +103,7 @@ class AdaptiveChunkOptimizer:
         # start_len = 256  # 起始探测长度，一个比较安全的保守值
         start_len = int(self.embedding_generator.chunk_size * 0.8)
         max_len = len(text)  # 理论最大值
-        growth_factor = 1.1  # 每次增长倍数
+        growth_factor = 1.05  # 每次增长倍数
         current_safe_len = start_len
 
         # 2. 指数增长阶段：快速找到失败边界
@@ -151,7 +151,6 @@ class AdaptiveChunkOptimizer:
                 current_safe_len,
                 self.embedding_generator.chunk_size * 2,
             ),
-            self.embedding_generator.chunk_size,
         )
         log.info(
             f"自适应分块探测完成: 建议块大小={final_safe_len} 字符 (原始默认={self.embedding_generator.chunk_size})"
@@ -373,6 +372,159 @@ class PunctuationAwareSplitter:
                 return pos
         return 0
 
+
+# %% [markdown]
+# # ContextAwareSplitter(PunctuationAwareSplitter)
+
+# %%
+class ContextAwareSplitter(PunctuationAwareSplitter):
+    """
+    上下文感知分块器：集成防过碎逻辑与即时上下文注入。
+    在分割时直接为每个块添加【笔记标题 - 日期】头部。
+    """
+
+    def split_with_context(
+        self,
+        text: str,
+        note_title: str,
+        source_date: str = "",
+        index: int = 0,
+        target_chunk_size: int = None,
+        min_chunk_ratio: float = 0.2,  # 防过碎阈值
+        sentence_overlap: int = 1,
+    ) -> List[str]:
+        """
+        主分割方法：输入原始文本和上下文，输出已注入上下文的块列表。
+
+        参数:
+            text: 要分割的文本（通常是一个日期单元）。
+            note_title: 笔记标题。
+            source_date: 该文本单元的日期（如从‘### 2025-09-18’提取）。
+            target_chunk_size: 本次分割的目标块大小。若为None，使用self.max_chunk_size。
+            index: 文本块的索引值（从1开始）
+            min_chunk_ratio: 触发防过碎重切的最大块长度占比阈值。
+            sentence_overlap: 重切时的句子重叠数。
+        """
+        if target_chunk_size is None:
+            target_chunk_size = self.max_chunk_size
+
+        # 1. 使用父类的语义分割逻辑获取初始块
+        # 临时修改目标大小以进行分割
+        original_max_size = self.max_chunk_size
+        self.max_chunk_size = target_chunk_size
+        try:
+            raw_chunks = super().split(text)  # 调用原有的智能split方法
+        finally:
+            self.max_chunk_size = original_max_size
+
+        # 2. 防过碎检查
+        if raw_chunks:
+            max_chunk_len = max(len(c) for c in raw_chunks)
+            if max_chunk_len < len(text) * min_chunk_ratio:
+                # 触发防过碎重切
+                log.info(
+                    f"笔记《{note_title}》的文本块【{index}】"
+                    f"防过碎重切触发 | 原长{len(text)} | 语义分割{len(raw_chunks)}块 | "
+                    f"最大块{max_chunk_len}({max_chunk_len / len(text):.1%})！"
+                    f"启动按目标块大小({target_chunk_size})"
+                    f"（句子切块，{sentence_overlap}句重叠）切块操作……"
+                )
+                raw_chunks = self._split_by_sentences_with_overlap(
+                    text, target_chunk_size, sentence_overlap
+                )
+                log.info(
+                    f"笔记《{note_title}》的文本块【{index}】"
+                    f"按目标块大小({target_chunk_size})"
+                    f"（句子切块，{sentence_overlap}句重叠）切块，"
+                    f"切为({len(raw_chunks)})块，"
+                    f"分块长度列表：{[len(chunk) for chunk in raw_chunks]}！"
+                )
+
+        # 3. 为每一个块即时注入上下文信息
+        final_chunks = []
+        for chunk in raw_chunks:
+            final_chunks.append(self._inject_context(chunk, note_title, source_date))
+        return final_chunks
+
+    def _inject_context(
+        self, chunk_text: str, note_title: str, source_date: str
+    ) -> str:
+        """为单个文本块注入格式化的上下文头部。"""
+        # 构建头部
+        if source_date:
+            header = f"【{note_title}】\n日期：{source_date}\n\n"
+        else:
+            header = f"【{note_title}】\n\n"
+
+        # 判断是否需要添加日期标题行
+        # 如果块本身没有以日期标题开头，且我们有日期信息，则添加
+        needs_date_line = source_date and not (
+            chunk_text.startswith(f"### {source_date}")
+            or chunk_text.startswith(source_date)
+        )
+
+        if needs_date_line:
+            final_text = header + f"### {source_date}\n" + chunk_text
+        else:
+            final_text = header + chunk_text
+
+        return final_text.strip()
+
+    def _split_by_sentences_with_overlap(
+        self, text: str, target_size: int, overlap: int
+    ) -> List[str]:
+        """防过碎重切逻辑：按句子分割并按目标大小合并，允许重叠。"""
+        import re
+
+        # 1. 使用普通匹配进行分割，并捕获分隔符
+        # 匹配句子结束符（中文标点、换行）或列表项标记（如“\n1. ”）
+        sentence_endings = r"([。！？；\n]+|\n\d+\.\s+)"
+
+        # 分割文本，同时保留分隔符
+        parts = re.split(sentence_endings, text)
+
+        # 2. 重组句子：将分隔符附加到前一个句子的末尾
+        sentences = []
+        buffer = ""
+        for i, part in enumerate(parts):
+            if i % 2 == 0:  # 偶数索引是句子内容
+                buffer = part
+            else:  # 奇数索引是捕获的分隔符
+                if buffer:
+                    sentences.append(buffer + part)  # 将分隔符加回去
+                    buffer = ""
+        # 处理可能剩余的最后一个句子片段
+        if buffer:
+            sentences.append(buffer)
+
+        if not sentences:
+            return [text]
+
+        chunks = []
+        current_chunk = []
+        current_len = 0
+        overlap_buffer = []
+
+        for sentence in sentences:
+            sent_len = len(sentence)
+            if current_len + sent_len > target_size and current_chunk:
+                # 保存当前块
+                chunks.append("".join(current_chunk))
+                # 设置重叠
+                overlap_buffer = (
+                    current_chunk[-overlap:]
+                    if len(current_chunk) > overlap
+                    else current_chunk.copy()
+                )
+                current_chunk = overlap_buffer.copy()
+                current_len = sum(len(s) for s in current_chunk)
+            current_chunk.append(sentence)
+            current_len += sent_len
+
+        if current_chunk:
+            chunks.append("".join(current_chunk))
+
+        return chunks
 
 # %% [markdown]
 # # EmbeddingGenerator类
@@ -819,7 +971,7 @@ class EmbeddingGenerator:
         # 正则解释：
         # ^                    : 行的开始（配合 re.MULTILINE）
         # (?:###\s*)?          : 非捕获组，匹配可选的“###”及可能跟随的空格
-        # (\d{4}[-年/]\d{1,2}[-月/]\d{1,2}日?) : 捕获组1，匹配核心日期格式
+        # (\d{4}[-年/]\d{1,2}[-月/]\d{1,2}[日号]) : 捕获组1，匹配核心日期格式
         # \s*$                 : 行尾可能有的空格
         # 支持格式示例：
         #   “### 2024年1月1日”
@@ -874,51 +1026,64 @@ class EmbeddingGenerator:
         )
         # ========== 第一步结束 ==========
 
-        # 后续逻辑保持不变：对每个初步分割出的块，检查大小，如果过大则进行二次分割。
-        final_chunks = []
+        final_chunks = []  # 存储所有最终文本块
         for idx, raw_chunk in enumerate(chunks, 1):
             # 在分割逻辑中，对每个 raw_chunk 进行转换，当下仅针对《健康运动笔记》
             converted_chunk = self._convert_health_data_to_text(raw_chunk)
             converted_chunk = self._condense_dense_lists(converted_chunk)
-            if len(converted_chunk) <= int(self.chunk_size * 1.1):
-                # 如果块大小合理，直接使用
-                final_chunks.append(converted_chunk)
+            # 1. 提取该日期单元的日期
+            date_match = unified_date_pattern.search(converted_chunk)
+            unit_date = date_match.group(1) if date_match else ""
+
+            context_splitter = ContextAwareSplitter(
+                max_chunk_size=self.chunk_size,
+                min_chunk_size=100,  # 保持原有参数
+                target_overlap_sentences=2,
+                fallback_overlap_chars=100,
+            )
+            # 2. 判断是否需要二次分割
+            if len(converted_chunk) <= int(self.chunk_size * 0.95):
+                # 无需二次分割，直接注入上下文
+                chunk_with_context = context_splitter._inject_context(
+                    converted_chunk, note_title, unit_date
+                )
+                final_chunks.append(chunk_with_context)
             else:
-                if (
-                    self.enable_adaptive_chunking
-                    and len(converted_chunk) > self.chunk_size * 1.1
-                ):
-                    # 仅当文本长度显著超过默认大小时，才启动自适应探测，避免对小文本的开销
-                    current_target_chunk_size = self.get_adaptive_chunk_size(
+                # 需要二次分割，调用集成了所有逻辑的新分块器
+                # 确定二次分割的目标大小（来自自适应探测）
+                if self.enable_adaptive_chunking:
+                    target_size= self.get_adaptive_chunk_size(
                         converted_chunk, note_title, idx
                     )
-                    # if current_target_chunk_size > self.chunk_size:
-                    #     current_target_chunk_size = self.chunk_size
-                    # sub_chunks = self._split_into_paragraphs_chunks(converted_chunk, current_target_chunk_size)
                     log.info(
                         f"笔记《{note_title}》的文本块【{idx}】"
                         f"初步块过长({len(converted_chunk)}字符)，"
-                        f"通过自适应获取合适的chunk_size为({current_target_chunk_size})，"
+                        f"通过自适应获取合适的chunk_size为({target_size})，"
                         f"通过滑动窗口分块法进行二次语义分割。"
                     )
-                    sub_chunks = PunctuationAwareSplitter(
-                        max_chunk_size=current_target_chunk_size
-                    ).split(converted_chunk)
                 else:
-                    # 如果块过大，则调用原有的段落/句子级分割函数进行细化
-                    log.debug(
-                        f"笔记《{note_title}》的文本块【{idx}】"
-                        f"初步块过长({len(converted_chunk)}字符)，进行二次语义分割。"
-                    )
-                    sub_chunks = PunctuationAwareSplitter(
-                        max_chunk_size=self.chunk_size
-                    ).split(converted_chunk)
-                    # sub_chunks = self._split_into_paragraphs_chunks(converted_chunk)
+                    target_size = self.chunk_size
+
+                # 【核心调用】一次调用，完成分割、防过碎、上下文注入
+                log.debug(
+                    f"笔记《{note_title}》的文本块【{idx}】"
+                    f"初步块过长({len(converted_chunk)}字符)，"
+                    "通过滑动窗口分块法（带上下文注入）进行二次语义分割。"
+                )
+                sub_chunks = context_splitter.split_with_context(
+                    text=converted_chunk,
+                    note_title=note_title,
+                    source_date=unit_date,
+                    index=idx,
+                    target_chunk_size=target_size,
+                    min_chunk_ratio=0.3,  # 可配置
+                    sentence_overlap=2,
+                )
                 final_chunks.extend(sub_chunks)
 
         # 如果经过上述步骤，分块结果仍然不理想，启用最终回退
         if not final_chunks or (
-            len(final_chunks) == 1 and len(final_chunks[0]) > self.chunk_size * 1.1
+            len(final_chunks) == 1 and len(final_chunks[0]) > self.chunk_size * 1.3
         ):
             log.debug(f"按照语义拆分不太合格：{[len(chunk) for chunk in final_chunks]}")
             final_chunks = self._split_into_paragraphs_chunks(text)
