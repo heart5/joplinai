@@ -186,7 +186,7 @@ class PunctuationAwareSplitter:
 
     def __init__(
         self,
-        max_chunk_size: int = 768,
+        max_chunk_size: int = 512,
         min_chunk_size: int = 100,
         target_overlap_sentences: int = 1,
         fallback_overlap_chars: int = 100,
@@ -451,10 +451,17 @@ class ContextAwareSplitter(PunctuationAwareSplitter):
     ) -> str:
         """为单个文本块注入格式化的上下文头部。"""
         # 构建头部
+        header_title_date = f"【{note_title}】\n日期：{source_date}\n\n"
+        header_title = f"【{note_title}】\n\n"
+        # 检查是否被注入过，是则直接返回传入文本，避免重复注入
+        if chunk_text.startswith(header_title_date) or chunk_text.startswith(
+            header_title
+        ):
+            return chunk_text
         if source_date:
-            header = f"【{note_title}】\n日期：{source_date}\n\n"
+            header = header_title_date
         else:
-            header = f"【{note_title}】\n\n"
+            header = header_title
 
         # 判断是否需要添加日期标题行
         # 如果块本身没有以日期标题开头，且我们有日期信息，则添加
@@ -952,11 +959,11 @@ class EmbeddingGenerator:
         return current_target_chunk_size
 
 # %% [markdown]
-# ## split_into_semantic_chunks(self, text: str, note_title: str = "", note_tags: str = "") -> List[Dict]
+# ## split_into_semantic_chunks(self, text: str, note_title: str = "", note_tags: str = "", twice_probe: bool = True) -> List[Dict]
 
     # %%
     def split_into_semantic_chunks(
-        self, text: str, note_title: str = "", note_tags: str = ""
+        self, text: str, note_title: str = "", note_tags: str = "", twice_probe: bool = True
     ) -> List[Dict]:
         """将文本分割成语义块，并返回块字典列表。
         【增强】使用统一的正则表达式处理带`###`或不带的日期行，确保日期保留在块头部并被提取。
@@ -966,7 +973,7 @@ class EmbeddingGenerator:
 
         chunks = []  # 存储初步分割的文本块
 
-        # ========== 第一步：统一按日期行进行一级分割 ==========
+        # ========== 第一：统一按日期行进行一级分割 ==========
         # 核心优化：使用一个正则，同时匹配“### 日期”和“日期”两种格式，并捕获日期部分
         # 正则解释：
         # ^                    : 行的开始（配合 re.MULTILINE）
@@ -1042,7 +1049,7 @@ class EmbeddingGenerator:
                 fallback_overlap_chars=100,
             )
             # 2. 判断是否需要二次分割
-            if len(converted_chunk) <= int(self.chunk_size * 0.95):
+            if len(converted_chunk) <= int(self.chunk_size * 0.9):
                 # 无需二次分割，直接注入上下文
                 chunk_with_context = context_splitter._inject_context(
                     converted_chunk, note_title, unit_date
@@ -1051,15 +1058,9 @@ class EmbeddingGenerator:
             else:
                 # 需要二次分割，调用集成了所有逻辑的新分块器
                 # 确定二次分割的目标大小（来自自适应探测）
-                if self.enable_adaptive_chunking:
+                if twice_probe and self.enable_adaptive_chunking:
                     target_size= self.get_adaptive_chunk_size(
                         converted_chunk, note_title, idx
-                    )
-                    log.info(
-                        f"笔记《{note_title}》的文本块【{idx}】"
-                        f"初步块过长({len(converted_chunk)}字符)，"
-                        f"通过自适应获取合适的chunk_size为({target_size})，"
-                        f"通过滑动窗口分块法进行二次语义分割。"
                     )
                 else:
                     target_size = self.chunk_size
@@ -1075,15 +1076,15 @@ class EmbeddingGenerator:
                     note_title=note_title,
                     source_date=unit_date,
                     index=idx,
-                    target_chunk_size=target_size,
-                    min_chunk_ratio=0.3,  # 可配置
-                    sentence_overlap=2,
+                    target_chunk_size=int(target_size * 0.9),
+                    min_chunk_ratio=0.2,  # 可配置
+                    sentence_overlap=1,
                 )
                 final_chunks.extend(sub_chunks)
 
         # 如果经过上述步骤，分块结果仍然不理想，启用最终回退
         if not final_chunks or (
-            len(final_chunks) == 1 and len(final_chunks[0]) > self.chunk_size * 1.3
+            len(final_chunks) == 1 and len(final_chunks[0]) > self.chunk_size * 1.1
         ):
             log.debug(f"按照语义拆分不太合格：{[len(chunk) for chunk in final_chunks]}")
             final_chunks = self._split_into_paragraphs_chunks(text)
@@ -1093,9 +1094,9 @@ class EmbeddingGenerator:
 
         # ========== 构建块字典和元数据 ==========
         chunk_dicts = []
-        valid_chunk_counter = 0  # 【新增】用于为有效块生成连续索引
+        valid_chunk_counter = 1  # 【新增】用于为有效块生成连续索引，从1开始
         # 复用第一步的统一正则进行日期提取，确保一致性
-        for idx, chunk_content in enumerate(final_chunks):
+        for idx, chunk_content in enumerate(final_chunks, 1):
             estimated_date = ""
             # 优先从块的开头匹配日期（因为分割逻辑已保证日期行在头部）
             # 再次使用相同的 unified_date_pattern，但用 match 从开头搜索
@@ -1324,7 +1325,7 @@ class EmbeddingGenerator:
             self.chunk_size = target_chunk_size
             # 调用您现有的语义分块方法，它会使用临时的 chunk_size
             chunk_dicts = self.split_into_semantic_chunks(
-                text=text, note_title="[重分块]", note_tags=""
+                text=text, note_title="[重分块]", note_tags="", twice_probe=False
             )
             sub_chunks = [chunk["content"] for chunk in chunk_dicts]
 
