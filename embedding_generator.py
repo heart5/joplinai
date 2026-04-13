@@ -1096,7 +1096,7 @@ class EmbeddingGenerator:
 
         # ========== 构建块字典和元数据 ==========
         chunk_dicts = []
-        valid_chunk_counter = 1  # 【新增】用于为有效块生成连续索引，从1开始
+        block_number = 1  # 【新增】用于为有效块生成连续索引，从1开始
         # 复用第一步的统一正则进行日期提取，确保一致性
         for idx, chunk_content in enumerate(final_chunks, 1):
             estimated_date = ""
@@ -1124,7 +1124,7 @@ class EmbeddingGenerator:
             # === 计算此块的内容哈希 ===
             chunk_hash = compute_content_hash(chunk_content)
             chunk_metadata = {
-                "chunk_index": valid_chunk_counter,
+                "chunk_index": block_number,
                 "source_note_title": note_title,
                 "source_note_tags": note_tags,
                 "estimated_date": estimated_date,
@@ -1133,7 +1133,7 @@ class EmbeddingGenerator:
                 "content_hash": chunk_hash,
             }
             chunk_dicts.append({"content": content, "metadata": chunk_metadata})
-            valid_chunk_counter += 1  # 只有有效块才递增
+            block_number += 1  # 只有有效块才递增
 
         log.info(f"将文本分割成 {len(chunk_dicts)} 个语义块。")
         # print(chunk_dicts)
