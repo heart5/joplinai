@@ -449,6 +449,9 @@ def process_notes_incremental(notebook_title: str, config: Dict):
             f"向量数据库初始化完成，集合: {process_notes_incremental.vector_db.collection_name}"
         )
     vector_db = process_notes_incremental.vector_db
+    # 根据文本块内容更新其预估日期，所有文本块遍历一遍
+    # vector_db.refresh_estimated_date()
+    # 输出向量库信息
     log.info(f"向量库《{vector_db}》信息：{vector_db.get_collection_info()}")
 
     # 初始化向量数据库（在整个处理过程中只初始化一次）
