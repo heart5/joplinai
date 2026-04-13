@@ -455,27 +455,24 @@ class ContextAwareSplitter(PunctuationAwareSplitter):
         # 构建头部
         header_title_date = f"【{note_title}】\n日期：{source_date}\n\n"
         header_title = f"【{note_title}】\n\n"
+
         # 检查是否被注入过，是则直接返回传入文本，避免重复注入
         if chunk_text.startswith(header_title_date) or chunk_text.startswith(
             header_title
         ):
             return chunk_text
+
+        date_pattern = re.compile(r"^#{0,3}\s*\d{4}年\d{1,2}月\d{1,2}[日号]\s*")
+        match = date_pattern.match(chunk_text)
+        if match:
+            # 从文本中移除开头的日期模式
+            chunk_text = date_pattern.sub("", chunk_text, count=1).strip()
         if source_date:
             header = header_title_date
         else:
             header = header_title
 
-        # 判断是否需要添加日期标题行
-        # 如果块本身没有以日期标题开头，且我们有日期信息，则添加
-        needs_date_line = source_date and not (
-            chunk_text.startswith(f"### {source_date}")
-            or chunk_text.startswith(source_date)
-        )
-
-        if needs_date_line:
-            final_text = header + f"### {source_date}\n" + chunk_text
-        else:
-            final_text = header + chunk_text
+        final_text = header + chunk_text
 
         return final_text.strip()
 
@@ -1040,6 +1037,7 @@ class EmbeddingGenerator:
             # 在分割逻辑中，对每个 raw_chunk 进行转换，当下仅针对《健康运动笔记》
             converted_chunk = self._convert_health_data_to_text(raw_chunk)
             converted_chunk = self._condense_dense_lists(converted_chunk)
+            converted_chunk = converted_chunk.strip()
             # 1. 提取该日期单元的日期
             date_match = unified_date_pattern.search(converted_chunk)
             unit_date = date_match.group(1) if date_match else ""
@@ -1097,19 +1095,15 @@ class EmbeddingGenerator:
         # ========== 构建块字典和元数据 ==========
         chunk_dicts = []
         block_number = 1  # 【新增】用于为有效块生成连续索引，从1开始
-        # 复用第一步的统一正则进行日期提取，确保一致性
+        # 使用新的unified_date_pattern_for_chunk，因为上下文分割器可能已经执行了文件头注入操作
+        unified_date_pattern_for_chunk = re.compile(
+            r"(\d{4}[-年/]\d{1,2}[-月/]\d{1,2}[日号])\s*", re.MULTILINE
+        )
         for idx, chunk_content in enumerate(final_chunks, 1):
             estimated_date = ""
-            # 优先从块的开头匹配日期（因为分割逻辑已保证日期行在头部）
-            # 再次使用相同的 unified_date_pattern，但用 match 从开头搜索
-            date_at_start = unified_date_pattern.match(chunk_content.strip())
-            if date_at_start:
-                estimated_date = date_at_start.group(1)
-            else:
-                # 如果开头没有（例如是前言块），则在块内搜索第一个日期作为估算
-                date_in_chunk = unified_date_pattern.search(chunk_content)
-                if date_in_chunk:
-                    estimated_date = date_in_chunk.group(1)
+            date_in_chunk = unified_date_pattern_for_chunk.search(chunk_content.strip())
+            if date_in_chunk:
+                estimated_date = date_in_chunk.group(1).replace("号", "日")
 
             # 清理内容格式
             content = self.clean_text(chunk_content)
