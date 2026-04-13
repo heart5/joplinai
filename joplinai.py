@@ -287,10 +287,14 @@ def process_note_chunks(
                     need_process = False
                     skipped_chunks += 1
                 else:
-                    log.info(
-                        f"笔记《{note.title}》中的块 {metadata_chunk_idx_from_one} 内容（长度：{len(chunk_content)}）哈希已变化，需要重新嵌入。"
+                    log.debug(
+                        f"笔记《{note.title}》中的块 {metadata_chunk_idx_from_one} 内容（长度：{len(chunk_content)}）有变化，执行嵌入重新入库。"
                     )
-            # 如果块ID不存在，则是全新块，需要处理
+            else:
+                # 如果块ID不存在，则是全新块，需要处理
+                log.debug(
+                    f"笔记《{note.title}》中的块 {metadata_chunk_idx_from_one} 内容（长度：{len(chunk_content)}）是新增块，执行嵌入入库。"
+                )
 
             if need_process:
                 # 此块需要处理，加入待处理列表
@@ -312,7 +316,7 @@ def process_note_chunks(
             chunk_id = chunk_data["chunk_id"]
             chunk_content = chunk_data["content"]
             base_metadata = chunk_data["base_metadata"]
-            metadata_chunk_idx_from_one = int(base_metadata["chunk_index"]) + 1
+            metadata_chunk_idx_from_one = base_metadata["chunk_index"]
 
             # 生成嵌入
             embedding = embedding_generator.get_merged_embedding(chunk_data)
