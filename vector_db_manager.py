@@ -23,6 +23,7 @@
 # %%
 import json
 import logging
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -357,6 +358,35 @@ class VectorDBManager:
 
                 if i % 100 == 0:
                     log.info(f"已为 {i} 个文档重新生成 content_hash 字段")
+
+# %% [markdown]
+# ### refresh_estimated_date(self,)
+
+    # %%
+    def refresh_estimated_date(
+        self,
+    ):
+        """为所有文档添加content_hash字段"""
+        # 获取所有文档
+        results = self.collection.get(include=["metadatas", "documents"])
+
+        for i, (chunk_id, metadata, document) in enumerate(
+            zip(results["ids"], results["metadatas"], results["documents"]),
+            1
+        ):
+            if "estimated_date" not in metadata or not metadata["estimated_date"]:
+                unified_date_pattern_for_chunk = re.compile(
+                    r"(\d{4}[-年/]\d{1,2}[-月/]\d{1,2}[日号])\s*", re.MULTILINE
+                )
+                date_in_chunk = unified_date_pattern_for_chunk.search(document.strip())
+                if date_in_chunk:
+                    estimated_date = date_in_chunk.group(1).replace("号", "日")
+                    # 更新元数据
+                    updated_metadata = {**metadata, "estimated_date": estimated_date}
+                    self.collection.update(ids=[chunk_id], metadatas=[updated_metadata])
+
+                    if i % 100 == 0:
+                        log.info(f"已为 {i} 个文本块重新生成 estimated_date 字段或者更新其值")
 
 # %% [markdown]
 # ### get_existing_chunk_hashes(self, note_id: str) -> Dict[str, str]
