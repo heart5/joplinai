@@ -541,6 +541,28 @@ class EmbeddingGenerator:
     """嵌入生成器，支持长文本分块处理"""
 
 # %% [markdown]
+# ## 类常量
+
+    # %%
+    # ========== 类常量：预编译的正则表达式 ==========
+    # 用于一级分割：匹配 "### 2026年4月14日" 或 "2026年4月14日" 等日期标题行
+    UNIFIED_DATE_PATTERN = re.compile(
+        r"^(?:###\s*)?(\d{4}[-年/]\d{1,2}[-月/]\d{1,2}[日号])\s*$", re.MULTILINE
+    )
+    # 用于从注入上下文的块中提取日期：匹配 "2026年4月14日"
+    DATE_IN_CONTEXT_PATTERN = re.compile(
+        r"(\d{4}[-年/]\d{1,2}[-月/]\d{1,2}[日号])", re.MULTILINE
+    )
+    # 用于从注入上下文的块中提取日期：匹配 "日期：2026年4月14日"
+    # DATE_IN_CONTEXT_PATTERN = re.compile(
+    #     r"日期[：:]\s*(\d{4}[-年/]\d{1,2}[-月/]\d{1,2}[日号])", re.MULTILINE
+    # )
+    # 通用章节分割模式：优先匹配分隔符 (***, ---)，其次匹配 # 标题
+    GENERAL_SECTION_PATTERN = re.compile(
+        r"\n(?:\*{3,}|\-{3,}|#{1,3}\s+.*?)\n", re.MULTILINE
+    )
+
+# %% [markdown]
 # ## \_\_init__(self, model_name: str, chunk_size: int = 1024)
 
     # %%
@@ -1009,31 +1031,18 @@ class EmbeddingGenerator:
         if not text:
             return []
 
-        chunks = []  # 存储初步分割的文本块
-
+        chunks = []
         # ========== 第一：统一按日期行进行一级分割 ==========
-        # 核心优化：使用一个正则，同时匹配“### 日期”和“日期”两种格式，并捕获日期部分
-        # 正则解释：
-        # ^                    : 行的开始（配合 re.MULTILINE）
-        # (?:###\s*)?          : 非捕获组，匹配可选的“###”及可能跟随的空格
-        # (\d{4}[-年/]\d{1,2}[-月/]\d{1,2}[日号]) : 捕获组1，匹配核心日期格式
-        # \s*$                 : 行尾可能有的空格
-        # 支持格式示例：
-        #   “### 2024年1月1日”
-        #   “2024年1月1日”
-        #   “2024-01-01”
-        #   “2024/01/01”
-        unified_date_pattern = re.compile(
-            r"^(?:###\s*)?(\d{4}[-年/]\d{1,2}[-月/]\d{1,2}[日号])\s*$", re.MULTILINE
-        )
-        date_matches = list(unified_date_pattern.finditer(text))
+        # 使用类常量 UNIFIED_DATE_PATTERN
+        date_matches = list(self.UNIFIED_DATE_PATTERN.finditer(text))
 
         if not date_matches:
             log.debug(
                 f"笔记《{note_title}》未检测到任何日期标题行，回退至通用章节分块。"
                 "优先章节，其次各级标题。"
             )
-            major_sections = re.split(r"\n(?:\*{3,})|\-{3,})|#{1,3}\s+.*?\n", text)
+            # 使用类常量 GENERAL_SECTION_PATTERN
+            major_sections = self.GENERAL_SECTION_PATTERN.split(text)
             major_sections = [s.strip() for s in major_sections if s.strip()]
             chunks = major_sections
             log.debug(
@@ -1082,8 +1091,8 @@ class EmbeddingGenerator:
             converted_chunk = self._convert_health_data_to_text(raw_chunk)
             converted_chunk = self._condense_dense_lists(converted_chunk)
             converted_chunk = converted_chunk.strip()
-            # 1. 提取该日期单元的日期
-            date_match = unified_date_pattern.search(converted_chunk)
+            # 1. 提取该日期单元的日期 (仍使用 UNIFIED_DATE_PATTERN 搜索当前块)
+            date_match = self.UNIFIED_DATE_PATTERN.search(converted_chunk)
             unit_date = date_match.group(1) if date_match else ""
 
             context_splitter = ContextAwareSplitter(
@@ -1139,13 +1148,10 @@ class EmbeddingGenerator:
         # ========== 构建块字典和元数据 ==========
         chunk_dicts = []
         block_number = 1  # 【新增】用于为有效块生成连续索引，从1开始
-        # 使用新的unified_date_pattern_for_chunk，因为上下文分割器可能已经执行了文件头注入操作
-        unified_date_pattern_for_chunk = re.compile(
-            r"(\d{4}[-年/]\d{1,2}[-月/]\d{1,2}[日号])\s*", re.MULTILINE
-        )
+        # 使用类常量 DATE_IN_CONTEXT_PATTERN 提取最终块的日期
         for idx, chunk_content in enumerate(final_chunks, 1):
             estimated_date = ""
-            date_in_chunk = unified_date_pattern_for_chunk.search(chunk_content.strip())
+            date_in_chunk = self.DATE_IN_CONTEXT_PATTERN.search(chunk_content.strip())
             if date_in_chunk:
                 extracted_date = date_in_chunk.group(1)
                 # 【核心调用】使用相同的通用日期规范化函数
