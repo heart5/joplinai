@@ -1038,7 +1038,7 @@ class EmbeddingGenerator:
 
         if not date_matches:
             log.debug(
-                f"笔记《{note_title}》未检测到任何日期标题行，回退至通用章节分块。"
+                f"笔记《{note_title}》未检测到任何日期标题行，采用通用章节分块策略。"
                 "优先章节，其次各级标题。"
             )
             # 使用类常量 GENERAL_SECTION_PATTERN
