@@ -881,22 +881,61 @@ class EmbeddingGenerator:
         return text
 
 # %% [markdown]
+# ## _normalize_date_string(self, date_str: str) -> str
+
+    # %%
+    def _normalize_date_string(self, date_str: str) -> str:
+        """
+        将各种格式的日期字符串规范化为统一的“YYYY年M月D日”格式。
+        支持格式：
+            - “2026年04月14日” 或 “2026年4月14日”
+            - “2026年04月14号” 或 “2026年4月14号”
+            - “2026-04-14” 或 “2026-4-14”
+            - “2026/04/14” 或 “2026/4/14”
+        输出：统一为“2026年4月14日”（数字不补零）。
+        """
+        if not date_str or not isinstance(date_str, str):
+            return ""
+
+        # 定义多种匹配模式并提取年、月、日数字
+        patterns = [
+            # 匹配“2026年04月14日”或“2026年4月14号”等
+            r'(?P<year>\d{4})年(?P<month>\d{1,2})月(?P<day>\d{1,2})[日号]',
+            # 匹配“2026-04-14”或“2026-4-14”
+            r'(?P<year>\d{4})-(?P<month>\d{1,2})-(?P<day>\d{1,2})',
+            # 匹配“2026/04/14”或“2026/4/14”
+            r'(?P<year>\d{4})/(?P<month>\d{1,2})/(?P<day>\d{1,2})',
+        ]
+
+        for pattern in patterns:
+            match = re.search(pattern, date_str)
+            if match:
+                year = match.group('year')
+                # 去除月份和日期的前导零，例如“04” -> “4”
+                month = str(int(match.group('month')))
+                day = str(int(match.group('day')))
+                # 统一格式化为“YYYY年M月D日”
+                return f"{year}年{month}月{day}日"
+
+        # 如果没有匹配到任何已知格式，返回原字符串或空字符串（根据需求）
+        return date_str
+
+# %% [markdown]
 # ## _normalize_single_date_unit(self, raw_text: str, captured_date: str) -> str
 
     # %%
     def _normalize_single_date_unit(self, raw_text: str, captured_date: str) -> str:
         """
         规范化单个日期单元的文本。
-        输入: 原始切片字符串 (如 "### 2026年4月3日\n16938，5：46，3\n...")
-        输出: 格式统一的字符串，确保相同日期的输出绝对一致。
         """
         lines = raw_text.splitlines()
         if not lines:
             return ""
 
-        # 1. 规范化标题行：统一为 “### YYYY年MM月DD日” 格式
-        # 使用正则捕获的纯日期，避免原文本中“号”或空格的差异
-        normalized_header = f"### {captured_date}"
+        # 1. 规范化标题行：统一为 “### YYYY年M月D日” 格式
+        # 【核心调用】使用新的通用日期规范化函数
+        normalized_captured_date = self._normalize_date_string(captured_date)
+        normalized_header = f"### {normalized_captured_date}"
 
         # 2. 处理主体内容：去除标题行之后的连续空行，以及单元末尾的连续空行
         body_lines = []
@@ -990,11 +1029,14 @@ class EmbeddingGenerator:
         date_matches = list(unified_date_pattern.finditer(text))
 
         if not date_matches:
-            # 如果没有找到任何日期行，回退到原有的按章节分割逻辑
+            # 如果没有找到任何日期行，启用按章节分割逻辑
             log.debug("笔记未检测到任何日期标题行，回退至通用章节分块。")
             major_sections = re.split(r"\n(?:#{1,3}\s+.*?|\-{3,})\n", text)
             major_sections = [s.strip() for s in major_sections if s.strip()]
             chunks = major_sections
+            log.debug(
+                f"笔记《{note_title}》完成章节分块，共得到 {len(chunks)} 个块。"
+            )
         else:
             # 找到日期行，统一按日期行分割，并确保日期行保留在块内
             log.debug(
@@ -1025,11 +1067,11 @@ class EmbeddingGenerator:
                 preface = text[: date_matches[0].start()].strip()
                 if preface:
                     chunks.insert(0, preface)  # 将前言作为第一个块
-        # 利用“日期倒序更新”特征，反转后，最早的日期块索引永远为0
-        chunks.reverse()
-        log.debug(
-            f"笔记《{note_title}》完成日期单元规范化与列表反转，共得到 {len(chunks)} 个块。"
-        )
+            # 利用“日期倒序更新”特征，反转后，最早的日期块索引永远为0
+            chunks.reverse()
+            log.debug(
+                f"笔记《{note_title}》完成日期单元规范化与列表反转，共得到 {len(chunks)} 个块。"
+            )
         # ========== 第一步结束 ==========
 
         final_chunks = []  # 存储所有最终文本块
@@ -1103,7 +1145,9 @@ class EmbeddingGenerator:
             estimated_date = ""
             date_in_chunk = unified_date_pattern_for_chunk.search(chunk_content.strip())
             if date_in_chunk:
-                estimated_date = date_in_chunk.group(1).replace("号", "日")
+                extracted_date = date_in_chunk.group(1)
+                # 【核心调用】使用相同的通用日期规范化函数
+                estimated_date = self._normalize_date_string(extracted_date)
 
             # 清理内容格式
             content = self.clean_text(chunk_content)
@@ -1129,7 +1173,7 @@ class EmbeddingGenerator:
             chunk_dicts.append({"content": content, "metadata": chunk_metadata})
             block_number += 1  # 只有有效块才递增
 
-        log.info(f"将文本分割成 {len(chunk_dicts)} 个语义块。")
+        log.info(f"已将笔记《{note_title}》文本分割成 {len(chunk_dicts)} 个有效的语义块。")
         # print(chunk_dicts)
         return chunk_dicts
 
