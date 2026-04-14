@@ -1029,18 +1029,20 @@ class EmbeddingGenerator:
         date_matches = list(unified_date_pattern.finditer(text))
 
         if not date_matches:
-            # 如果没有找到任何日期行，启用按章节分割逻辑
-            log.debug("笔记未检测到任何日期标题行，回退至通用章节分块。")
-            major_sections = re.split(r"\n(?:#{1,3}\s+.*?|\-{3,})\n", text)
+            log.debug(
+                f"笔记《{note_title}》未检测到任何日期标题行，回退至通用章节分块。"
+                "优先章节，其次各级标题。"
+            )
+            major_sections = re.split(r"\n(?:\*{3,})|\-{3,})|#{1,3}\s+.*?\n", text)
             major_sections = [s.strip() for s in major_sections if s.strip()]
             chunks = major_sections
             log.debug(
                 f"笔记《{note_title}》完成章节分块，共得到 {len(chunks)} 个块。"
             )
         else:
-            # 找到日期行，统一按日期行分割，并确保日期行保留在块内
             log.debug(
-                f"检测到 {len(date_matches)} 个日期标题行（含###或不含），将按此分割。"
+                f"笔记《{note_title}》检测到 {len(date_matches)} 个日期标题行（含###或不含），"
+                "将按此分割。"
             )
             for i, match in enumerate(date_matches):
                 date_line_start = match.start()
