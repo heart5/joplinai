@@ -613,14 +613,21 @@ class OptimizedJoplinQASystem(JoplinQASystem):
 
         notes_dict = defaultdict(list)
         for chunk in chunks:
-            note_id = chunk["note_id"]
+            note_id = chunk["source_note_id"]
             notes_dict[note_id].append(chunk)
 
         # 构建系统提示
         if not (sys_prompt := getinivaluefromcloud("joplinai", "sys_prompt")):
-            sys_prompt = """你是我个人的笔记助手，基于Joplin笔记回答问题。
-    笔记记录了工作（轻行动功能饮料、习龙酱酒等）、学习、生活、想法等各种内容。
-    请基于以下相关笔记片段（可能来自同一篇笔记的不同部分）回答问题。
+            sys_prompt = """你是我（白晔峰）个人的笔记助手，基于Joplin笔记回答问题。笔记库包含：
+    1. **我个人的笔记**：作者为“白晔峰”，是我本人的记录。
+    2. **同事的工作笔记**：作者为“同事_姓名”（如“同事_梅富忠”），是共享笔记本中由同事记录的个人工作内容。
+    3. **团队的共同笔记**：作者为“团队_共同维护”，是共享笔记本中由多人共同维护的记录（如《广州番禺林总》）。
+
+    请严格基于以下笔记片段回答，并**特别注意作者信息**：
+    *   对于“同事_XXX”的笔记，请在回答中说明“根据[XXX]的笔记记载：...”。
+    *   对于“团队_共同维护”的笔记，请在回答中说明“根据团队共享的记录：...”。
+    *   对于我本人的笔记，可直接引用。
+
     如果笔记中没有相关信息，请如实告知。"""
 
         # 为每个原始笔记构建上下文部分
@@ -628,13 +635,23 @@ class OptimizedJoplinQASystem(JoplinQASystem):
         for note_id, chunk_list in notes_dict.items():
             # 取该笔记的第一个块获取标题等信息（假设所有块metadata一致）
             sample_chunk = chunk_list[0]
-            note_title = sample_chunk["metadata"].get("parent_note_title", "未知标题")
-            note_tags = sample_chunk["metadata"].get("parent_note_tags", "")
+            note_title = sample_chunk["metadata"].get("source_note_title", "未知标题")
+            note_author = sample_chunk.get("metadata", {}).get("note_author", "白晔峰") # 获取作者
+
+            # 合并该笔记所有相关块的标签字符串，拆分合并，并用集合去重
+            all_tags = set()
+            for chunk in chunk_list:
+                tags_str = chunk.get("metadata", {}).get("tags", "")
+                if tags_str:
+                    all_tags.update(
+                        tag.strip() for tag in tags_str.split(",") if tag.strip()
+                    )
+            note_tags = ",".join(list(all_tags))
 
             # 合并该笔记的所有相关块内容
             combined_content = "\n---\n".join([c["content"] for c in chunk_list])
 
-            note_context = f"""【笔记：{note_title}】
+            note_context = f"""【笔记：{note_title} | 来源：{note_author}】
     标签：{note_tags}
     相关内容：
     {combined_content}
