@@ -31,11 +31,15 @@ from typing import Dict, List, Optional, Tuple
 
 import chromadb
 import ollama
+from embedding_generator import EmbeddingGenerator  # 用于调用提取函数
 
 # %%
 try:
+    from func.first import getdirmain
     from func.jpfuncs import (
         get_notebook_ids_for_note,
+        get_tag_titles,
+        getnote,
     )
     from func.logme import log
 except ImportError as e:
@@ -98,7 +102,7 @@ class VectorDBManager:
                         "dimension": self._get_model_dimension(self.embedding_model),
                     },
                 )
-                
+
         except Exception as e:
             log.error(f"初始化向量数据库失败: {e}")
             raise
@@ -214,7 +218,7 @@ class VectorDBManager:
         if not self.collection:
             log.error("集合未加载")
             return []
-    
+
         try:
             # ChromaDB 的正确查询方法
             results = self.collection.query(
@@ -222,10 +226,10 @@ class VectorDBManager:
                 n_results=top_k,
                 include=["documents", "metadatas", "distances"] # 确保包含这些字段
             )
-            
+
             # 格式化返回结果
             similar_chunks = []
-            
+
             # 检查结果结构
             if results and "ids" in results and results["ids"]:
                 # ChromaDB返回的ids、metadatas、documents、distances都是列表的列表
@@ -234,32 +238,32 @@ class VectorDBManager:
                 metadatas_list = results["metadatas"][0] if results.get("metadatas") else []
                 documents_list = results["documents"][0] if results.get("documents") else []
                 distances_list = results["distances"][0] if results.get("distances") else []
-                
+
                 for i in range(len(ids_list)):
                     chunk_id = ids_list[i]
                     metadata = metadatas_list[i] if i < len(metadatas_list) else {}
                     document = documents_list[i] if i < len(documents_list) else ""
                     # **关键修正**：distances_list[i] 是单个距离值
                     distance = distances_list[i] if i < len(distances_list) else 0.0
-                    
+
                     # 将距离转换为相似度（余弦距离越小，相似度越高）
                     # 注意：余弦距离范围是[0, 2]，但通常归一化到[0, 1]
                     similarity = 1.0 - distance if distance <= 1.0 else 0.0
-                    
+
                     similar_chunks.append({
                         "chunk_id": chunk_id,
-                        "note_id": metadata.get("note_id", ""),
+                        "source_note_id": metadata.get("source_note_id", ""),
                         "content": document,
                         "similarity": similarity,
                         "metadata": metadata
                     })
-                
+
                 log.info(f"成功检索到 {len(similar_chunks)} 个相关块")
                 return similar_chunks
             else:
                 log.warning("未检索到相关块")
                 return []
-                
+
         except Exception as e:
             log.error(f"向量搜索失败: {e}")
             import traceback
@@ -286,11 +290,13 @@ class VectorDBManager:
             "source_note_title": metadata.get("source_note_title", ""),
             "source_note_id": metadata.get("source_note_id", ""),
             # 可以根据需要添加其他字段，如 chunk_index
-            "chunk_index": metadata.get("chunk_index", 0),
+            "chunk_index": metadata.get("chunk_index", 1),
             "content_hash": metadata.get("content_hash", ""),
             # === 新增字段 ===
             "source_notebook_title": metadata.get("source_notebook_title", ""),
             "source_notebook_id": metadata.get("source_notebook_id", ""),
+            # === 新增字段 ===
+            "note_author": metadata.get("note_author", "白晔峰"), # 确保入库
         }
 
         # 确保使用 upsert 方法
@@ -300,7 +306,10 @@ class VectorDBManager:
             embeddings=[embedding],
             metadatas=[db_metadata],
         )
-        log.info(f"成功存储笔记块: {chunk_id}, 来源位于【{db_metadata.get('source_notebook_title')}】笔记本中的笔记: 《{db_metadata.get('source_note_title')}》")
+        log.info(
+            f"成功存储笔记块: {chunk_id}, 作者：{db_metadata.get('note_author')}，"
+            f"来源位于【{db_metadata.get('source_notebook_title')}】笔记本中的笔记:"
+            f"《{db_metadata.get('source_note_title')}》")
 
 # %% [markdown]
 # ### delete_note(self, note_id: str)
@@ -312,7 +321,7 @@ class VectorDBManager:
         if not self.collection:
             log.error(f"集合《{self.collection_name}》未加载")
             return
-        
+
         self.collection.delete(ids=[note_id])
 
 
@@ -737,3 +746,73 @@ class VectorDBManager:
                 )  # 避免堆栈过长
     
         log.info(f"迁移完成。成功更新 {updated_count} 个块，遇到 {error_count} 个错误。")
+
+
+# %% [markdown]
+# ## migrate_all_chunks_with_author(vector_db: VectorDBManager, embedding_gen: EmbeddingGenerator)
+
+# %%
+def migrate_all_chunks_with_author(
+    vector_db: VectorDBManager, embedding_gen: EmbeddingGenerator
+):
+    """遍历向量库，为每个块重新计算并更新作者元数据。"""
+    if not vector_db.collection:
+        log.error("向量库未加载")
+        return
+
+    # 1. 获取所有块的数据
+    results = vector_db.collection.get(include=["metadatas", "documents"])
+    ids = results["ids"]
+    metadatas = results["metadatas"]
+    documents = results["documents"]
+
+    log.info(f"开始处理 {len(ids)} 个文本块...")
+
+    updated_count = 0
+    for i, (chunk_id, old_meta) in enumerate(zip(ids, metadatas)):
+        source_note_id = old_meta.get("source_note_id")
+        if not source_note_id:
+            log.warning(f"块 {chunk_id} 无 source_note_id，跳过")
+            continue
+
+        # 2. 从 Joplin 获取笔记最新信息
+        try:
+            note = getnote(source_note_id)
+            if not note:
+                log.warning(f"无法获取笔记 {source_note_id}，跳过其块 {chunk_id}")
+                continue
+            note_title = note.title
+            local_tags = get_tag_titles(source_note_id)
+            note_tags_str = ",".join(local_tags) if local_tags else ""
+        except Exception as e:
+            log.error(f"获取笔记 {source_note_id} 信息失败: {e}")
+            continue
+
+        # 3. 重新计算作者（使用 embedding_generator 中的方法）
+        note_author = embedding_gen._extract_author_from_note(note_title, note_tags_str)
+
+        # 4. 更新元数据
+        new_metadata = {**old_meta, "note_author": note_author}
+        vector_db.collection.update(ids=[chunk_id], metadatas=[new_metadata])
+        updated_count += 1
+
+        if i % 100 == 0:
+            log.info(f"已处理 {i} 个块，最近示例：{note_title} -> {note_author}")
+
+    log.info(f"迁移完成！共更新了 {updated_count} 个文本块的作者信息。")
+
+
+# %% [markdown]
+# # 主函数main()
+
+# %%
+if __name__ == "__main__":
+    # 初始化，配置需与主程序一致
+    config = {
+        "embedding_model": "dengcao/bge-large-zh-v1.5",  # 根据实际情况修改
+        "db_path": getdirmain() / "data" / "joplin_vector_db",  # ChromaDB存储路径
+    }
+    vector_db = VectorDBManager(config.get("db_path"), config.get("embedding_model"))
+    embedding_gen = EmbeddingGenerator(config.get("embedding_model"))
+
+    migrate_all_chunks_with_author(vector_db, embedding_gen)
