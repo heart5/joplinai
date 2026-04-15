@@ -246,16 +246,23 @@ def process_note_chunks(
         )
 
         # 2. 准备笔记文本并分块
-        if len(note.body) < 20:
+        if len(note.body) < 10:
             text = note.title
         else:
             text = f"{note.title}\n{note.body}"
         local_tags = get_tag_titles(note.id)
         tags_str = ",".join(local_tags) if local_tags else ""
 
-        # 分块（此时每个块的 metadata 已包含 content_hash）
+        notebook_dicts = get_notebook_ids_for_note(note.id)
+        notebook_dict = notebook_dicts[-1] if notebook_dicts else {}
+        notebook_title = next(iter(notebook_dict.values()), "")  # 获取笔记本标题
+
+        # 开始分块
         chunk_dicts = embedding_generator.split_into_semantic_chunks(
-            text=text, note_title=note.title, note_tags=tags_str
+            text=text,
+            note_title=note.title,
+            note_tags=tags_str,
+            source_notebook_title=notebook_title,  # 新增参数
         )
         if not chunk_dicts:
             log.warning(f"笔记《{note.title}》拆分不出有效内容块，跳过。")
