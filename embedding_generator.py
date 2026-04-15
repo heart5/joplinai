@@ -33,6 +33,19 @@ import requests
 
 try:
     from func.datatools import compute_content_hash
+    from func.jpfuncs import (
+        createnote,
+        get_notebook_ids_for_note,
+        get_notes_in_notebook_by_title,
+        get_tag_titles,
+        getinivaluefromcloud,
+        getnote,
+        jpapi,
+        searchnotebook,
+        searchnotes,
+        updatenote_body,
+        updatenote_title,
+    )
     from func.logme import log
 except ImportError as e:
     logging.basicConfig(level=logging.INFO)
@@ -1019,11 +1032,67 @@ class EmbeddingGenerator:
         return current_target_chunk_size
 
 # %% [markdown]
-# ## split_into_semantic_chunks(self, text: str, note_title: str = "", note_tags: str = "", twice_probe: bool = True) -> List[Dict]
+# ## _extract_author_from_note(self, note_title: str, note_tags: str, source_notebook_title: str = "") -> str
+
+    # %%
+    def _extract_author_from_note(self, note_title: str, note_tags: str, source_notebook_title: str = "") -> str:
+        """
+        从笔记标题、标签和笔记本信息中提取作者信息。
+        返回格式："白晔峰"、"同事_陈志伟"、"团队_共同维护"。
+        """
+        import re
+        split_ptn = re.compile(r"[,，]")
+        default_personal_author = "白晔峰"
+        colleague_prefix = "同事_"
+        team_prefix = "团队_"
+
+        # —— 配置：定义共享笔记本列表（可从配置读取）——
+        if (shared_nb_titles_str := getinivaluefromcloud("joplinai", "shared_notebook_titles")):
+            shared_nb_titles = [title.strip() for title in split_ptn.split(shared_nb_titles_str)]
+        else:
+            shared_nb_titles = ["运营管理", "经销商", "平台商（合作商）"]
+
+        if (colleague_str := getinivaluefromcloud("joplinai", "colleague")):
+            colleague = [title.strip() for title in split_ptn.split(colleague_str)]
+        else:
+            colleague= ["陈志伟", "张永"]
+
+        # 1. 优先从标签中提取 `author_` 前缀
+        if note_tags:
+            tag_list = [tag.strip() for tag in note_tags.split(",")]
+            for tag in tag_list:
+                if tag.startswith("author_"):
+                    author_candidate = tag[7:]  # 移除 "author_"
+                    if author_candidate and author_candidate in colleague:
+                        return f"{colleague_prefix}{author_candidate}"
+
+        # 2. 从标题中解析括号内的姓名，匹配 "（梅富忠）" 或 "[梅富忠]" 格式
+        # 匹配标题中任何位置的括号格式，例如"工作日志（梅富忠）——2026年"
+        bracket_pattern = re.compile(r"[（【\(\[]([\u4e00-\u9fa5]{2,4})[）】\)\]]")
+        match = bracket_pattern.search(note_title)
+        if match:
+            author_candidate = match.group(1)
+            if author_candidate in colleague:
+                return f"{colleague_prefix}{author_candidate}"
+
+        # 3. 判断笔记本上下文：如果笔记在共享笔记本中，但无个人作者标记，则视为团队共同维护
+        if source_notebook_title in shared_nb_titles:
+            return f"{team_prefix}共同维护"
+
+        # 4. 默认：视为您个人的笔记
+        return default_personal_author
+
+# %% [markdown]
+# ## split_into_semantic_chunks(self, text: str, note_title: str = "", note_tags: str = "", source_notebook_title: str = "", twice_probe: bool = True) -> List[Dict]
 
     # %%
     def split_into_semantic_chunks(
-        self, text: str, note_title: str = "", note_tags: str = "", twice_probe: bool = True
+        self,
+        text: str,
+        note_title: str = "",
+        note_tags: str = "",
+        source_notebook_title: str = "",
+        twice_probe: bool = True
     ) -> List[Dict]:
         """将文本分割成语义块，并返回块字典列表。
         【增强】使用统一的正则表达式处理带`###`或不带的日期行，确保日期保留在块头部并被提取。
@@ -1156,6 +1225,12 @@ class EmbeddingGenerator:
                 extracted_date = date_in_chunk.group(1)
                 # 【核心调用】使用相同的通用日期规范化函数
                 estimated_date = self._normalize_date_string(extracted_date)
+            # 提取作者信息
+            note_author = self._extract_author_from_note(
+                note_title,
+                note_tags,
+                source_notebook_title
+            )
 
             # 清理内容格式
             content = self.clean_text(chunk_content)
@@ -1177,6 +1252,7 @@ class EmbeddingGenerator:
                 "word_count": len(chunk_content),
                 # === 将哈希存入元数据 ===
                 "content_hash": chunk_hash,
+                "note_author": note_author,
             }
             chunk_dicts.append({"content": content, "metadata": chunk_metadata})
             block_number += 1  # 只有有效块才递增
