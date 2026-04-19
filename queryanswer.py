@@ -619,15 +619,18 @@ class OptimizedJoplinQASystem(JoplinQASystem):
         # 构建系统提示
         if not (sys_prompt := getinivaluefromcloud("joplinai", "sys_prompt")):
             sys_prompt = """你是我（白晔峰）个人的笔记助手，基于Joplin笔记回答问题。笔记库包含：
+    0. **收藏或摘抄的文章笔记**：作者为“收藏”，是收藏或者摘抄的第三方文章。
     1. **我个人的笔记**：作者为“白晔峰”，是我本人的记录。
     2. **同事的工作笔记**：作者为“同事_姓名”（如“同事_梅富忠”），是共享笔记本中由同事记录的个人工作内容。
     3. **团队的共同笔记**：作者为“团队_共同维护”，是共享笔记本中由多人共同维护的记录（如《广州番禺林总》）。
 
-    请严格基于以下笔记片段回答，并**特别注意作者信息**：
-    *   对于“同事_XXX”的笔记，请在回答中说明“根据[XXX]的笔记记载：...”。
-    *   对于“团队_共同维护”的笔记，请在回答中说明“根据团队共享的记录：...”。
-    *   对于我本人的笔记，可直接引用。
-
+    笔记片段的元数据包含【类型】和【作者】，请根据以下规则回答：
+    *   **类型为“收藏”**：这是外部资料，请以“相关资料显示：...”或“根据收藏的文章：...”开头。
+    *   **类型为“会议记录”**：这是对会议讨论的客观记载。回答时请以“根据[记录者]的会议记录：...”开头，并客观概括会议内容，避免使用“我认为”。
+    *   **类型为“谈话记录”**：这是对双方沟通的客观记载。回答时请以“根据谈话记录：...”开头，并区分记录者与谈话对象。
+    *   **类型为“团队协作”且作者为“团队_共同维护”**：这是多人维护的共享信息，请以“根据团队共享信息：...”开头。
+    *   **类型为“个人笔记”且作者为“同事_XXX”**：这是同事的个人观点，请以“根据[XXX]的笔记：...”开头。
+    *   **类型为“个人笔记”且作者为“白晔峰”**：这是我本人的记录，可直接引用。
     如果笔记中没有相关信息，请如实告知。"""
 
         # 为每个原始笔记构建上下文部分
@@ -636,7 +639,8 @@ class OptimizedJoplinQASystem(JoplinQASystem):
             # 取该笔记的第一个块获取标题等信息（假设所有块metadata一致）
             sample_chunk = chunk_list[0]
             note_title = sample_chunk["metadata"].get("source_note_title", "未知标题")
-            note_author = sample_chunk.get("metadata", {}).get("note_author", "白晔峰") # 获取作者
+            note_author = sample_chunk.get("metadata", {}).get("note_author", "白晔峰")
+            note_type = sample_chunk.get("metadata", {}).get("note_type", "个人笔记")
 
             # 合并该笔记所有相关块的标签字符串，拆分合并，并用集合去重
             all_tags = set()
@@ -651,7 +655,7 @@ class OptimizedJoplinQASystem(JoplinQASystem):
             # 合并该笔记的所有相关块内容
             combined_content = "\n---\n".join([c["content"] for c in chunk_list])
 
-            note_context = f"""【笔记：{note_title} | 来源：{note_author}】
+            note_context = f"""【笔记：{note_title} | 类型：{note_type} | 来源：{note_author}】
     标签：{note_tags}
     相关内容：
     {combined_content}
@@ -879,14 +883,22 @@ class OptimizedJoplinQASystem(JoplinQASystem):
             }
 
             # 优化提示词
+#             prompt = f"""{context}
+
+# 回答要求：
+# 1. 基于笔记事实，不要编造
+# 2. 引用具体的笔记内容（如：根据笔记《1》提到...）
+# 3. 如果笔记信息不完整，可以合理推断但需说明
+# 4. 回答要具体、实用
+# 5. 语言自然，像在对话"""
+
             prompt = f"""{context}
 
 回答要求：
 1. 基于笔记事实，不要编造
-2. 引用具体的笔记内容（如：根据笔记《1》提到...）
-3. 如果笔记信息不完整，可以合理推断但需说明
-4. 回答要具体、实用
-5. 语言自然，像在对话"""
+2. 如果笔记信息不完整，可以合理推断但需说明
+3. 回答要具体、实用
+4. 语言自然，像在对话"""
 
             payload = {
                 "model": self.config["deepseek_chat_model"],
