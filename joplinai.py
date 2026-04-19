@@ -46,6 +46,7 @@ from chromadb.config import Settings
 
 # %%
 try:
+    from cache_manager import SQLiteCacheManager
     from embedding_generator import EmbeddingGenerator
     from func.configpr import (
         findvaluebykeyinsection,
@@ -113,6 +114,18 @@ model_name_str = (
 CONFIG["state_path"] = (
     getdirmain() / "data" / f"joplin_process_state_{model_name_str}.json"
 )  # 处理状态文件路径
+
+# %% [markdown]
+# # 全局变量
+
+# %%
+# 确保缓存目录存在
+cache_dir = getdirmain() / "data" / ".deepseek_cache"
+os.makedirs(cache_dir, exist_ok=True)
+cache_db_path = cache_dir / "deepseek_cache.db"
+
+# 创建全局缓存管理器实例
+global_cache_manager = SQLiteCacheManager(db_path=str(cache_db_path))
 
 
 # %% [markdown]
@@ -185,42 +198,6 @@ def filter_notes(notes):
 # %% [markdown]
 # ## 笔记处理核心逻辑（增量更新+入库）
 # %% [markdown]
-# ### enhance_by_deepseek_for_summary_tags(note, chunk: str, config: Dict)
-
-# %%
-def enhance_by_deepseek_for_summary_tags(note, chunk: str, config: Dict):
-    """DeepSeek 官方模型增强生成小结和标签（和笔记既有标签进行融合）"""
-    from deepseek_enhancer import deepseek_process_note, get_cache_manager
-
-    log.info(get_cache_manager().get_stats())
-
-    enhanced_metadata = {}
-    if config["enable_deepseek_summary"]:
-        summary = deepseek_process_note(
-            chunk,
-            task="summary",
-            model=config.get("deepseek_chat_model", "deepseek-chat"),
-            use_cache=True,  # 启用缓存
-        )
-        enhanced_metadata["chunk_summary"] = summary or ""  # 存入摘要
-
-    if config["enable_deepseek_tags"]:
-        tags_str = deepseek_process_note(
-            chunk,
-            task="tags",
-            model=config.get("deepseek_chat_model", "deepseek-chat"),
-            use_cache=True,  # 启用缓存
-        )
-        deepseek_tags = [t.strip() for t in tags_str.split(",")] if tags_str else []
-        # 合并本地标签与DeepSeek标签（去重）
-        local_tags = get_tag_titles(note.id)  # 项目函数：获取笔记标签列表
-        enhanced_tags = list(set(local_tags + deepseek_tags))
-        enhanced_metadata["tags"] = ",".join(enhanced_tags)
-
-    return enhanced_metadata
-
-
-# %% [markdown]
 # ### process_note_chunks(note, vector_db: VectorDBManager, embedding_generator: EmbeddingGenerator, config: Dict,) -> bool
 # %%
 def process_note_chunks(
@@ -239,7 +216,7 @@ def process_note_chunks(
         log.info(f"开始块级增量处理笔记: 《{note.title}》 (ID: {note.id})")
 
         # 1. 获取此笔记在向量库中所有现有块的 块ID->哈希 映射
-        existing_chunks_map = vector_db.get_existing_chunk_hashes(note.id)
+        existing_chunks_map = vector_db.get_existing_chunk_hashes_for_note(note.id)
         # print(existing_chunks_map)
         log.info(
             f"笔记《{note.title}》在向量库中存在 {len(existing_chunks_map)} 个旧块。"
@@ -278,6 +255,12 @@ def process_note_chunks(
             base_metadata = chunk_info["metadata"]
             chunk_hash = base_metadata.get("content_hash", "")  # 从元数据中取出哈希
             metadata_chunk_idx_from_one = base_metadata["chunk_index"]
+            tags = base_metadata.get("tags", "")
+            tags_str = (
+                ",".join(sorted(tags.split(","))) if tags else ""
+            )  # 排序保证一致性
+            notebook_title = base_metadata.get("source_notebook_title", "")
+            meta_hash = compute_content_hash(f"{tags_str}{notebook_title}")
 
             # 构建此块预期的最终块ID (与原有逻辑保持一致)
             expected_chunk_id = f"{note.id}_chunk_{base_metadata['chunk_index']}"
@@ -287,20 +270,36 @@ def process_note_chunks(
             need_process = True
             if expected_chunk_id in existing_chunks_map:
                 # 如果块ID已存在，且哈希值相同，则跳过
-                if existing_chunks_map[expected_chunk_id] == chunk_hash:
+                old_c_hash = existing_chunks_map[expected_chunk_id].get(
+                    "content_hash", ""
+                )
+                old_m_hash = existing_chunks_map[expected_chunk_id].get("meta_hash", "")
+                if (old_c_hash and old_c_hash == chunk_hash) and (
+                    old_m_hash and old_m_hash == meta_hash
+                ):
                     log.debug(
-                        f"笔记《{note.title}》中的块 {metadata_chunk_idx_from_one} 内容（长度：{len(chunk_content)}）未变，跳过嵌入生成。"
+                        f"笔记《{note.title}》中的块 {metadata_chunk_idx_from_one} 内容"
+                        f"（长度：{len(chunk_content)}）未变，元数据也未变，跳过嵌入生成。"
                     )
                     need_process = False
                     skipped_chunks += 1
                 else:
                     log.debug(
-                        f"笔记《{note.title}》中的块 {metadata_chunk_idx_from_one} 内容（长度：{len(chunk_content)}）有变化，执行嵌入重新入库。"
+                        f"笔记《{note.title}》中的块 {metadata_chunk_idx_from_one} "
+                        f"内容（长度：{len(chunk_content)}）"
+                        f"变化={not old_c_hash or old_c_hash != chunk_hash}"
+                        f"，元数据变化={not old_m_hash or old_m_hash != meta_hash}，"
+                        f"执行嵌入重新入库。"
                     )
+                    if not old_c_hash or old_c_hash != chunk_hash:
+                        base_metadata["content_hash"] = chunk_hash
+                    if not old_m_hash or old_m_hash != chunk_hash:
+                        base_metadata["meta_hash"] = meta_hash
             else:
                 # 如果块ID不存在，则是全新块，需要处理
                 log.debug(
-                    f"笔记《{note.title}》中的块 {metadata_chunk_idx_from_one} 内容（长度：{len(chunk_content)}）是新增块，执行嵌入入库。"
+                    f"笔记《{note.title}》中的块 {metadata_chunk_idx_from_one} "
+                    f"内容（长度：{len(chunk_content)}）是新增块，执行嵌入入库。"
                 )
 
             if need_process:
@@ -333,18 +332,7 @@ def process_note_chunks(
                 )
                 continue
 
-            # DeepSeek 增强生成摘要和标签
             enhanced_metadata = {}
-            try:
-                enhanced_metadata = enhance_by_deepseek_for_summary_tags(
-                    note, chunk_content, config
-                )
-            except Exception as e:
-                log.error(
-                    f"对笔记《{note.title}》的块 {metadata_chunk_idx_from_one} （长度：{len(chunk_content)}）进行DeepSeek增强时失败: {e}",
-                    exc_info=True,
-                )
-
             if len(chunk_content) > embedding_generator.chunk_size * 0.8:
                 enhanced_metadata["potential_long_chunk"] = True
 
@@ -356,8 +344,9 @@ def process_note_chunks(
                 notebook_id, notebook_title = "", ""
             # 构建完整元数据
             metadata = {
-                **base_metadata,  # 包含 content_hash, estimated_date 等
-                **enhanced_metadata,  # 包含 chunk_summary, tags 等
+                # 包含 content_hash, estimated_date, chunk_summary, tags, meta_hash 等
+                **base_metadata,
+                **enhanced_metadata,
                 "source_note_id": note.id,
                 "source_notebook_id": notebook_id,
                 "source_notebook_title": notebook_title,
@@ -464,12 +453,14 @@ def process_notes_incremental(notebook_title: str, config: Dict):
     # 初始化向量数据库（在整个处理过程中只初始化一次）
     if not hasattr(process_notes_incremental, "embedding_gen"):
         process_notes_incremental.embedding_gen = EmbeddingGenerator(
+            config,
             config["embedding_model"],
             chunk_size=config.get("chunk_size", 512),
             chunk_overlap=config.get("chunk_overlap", 50),
             # 【新增】传递自适应分块配置
             enable_adaptive_chunking=config.get("enable_adaptive_chunking", False),
             adaptive_cache_size=config.get("adaptive_cache_size", 100),
+            cache_manager=global_cache_manager,  # 传入统一的缓存管理器
         )
         log.info(f"嵌入生成器初始化完成")
 
@@ -527,14 +518,40 @@ def process_notes_incremental(notebook_title: str, config: Dict):
                     current_update_time
                 ).timestamp()
 
-            current_hash = compute_content_hash(f"{note.title}{note.body}")
+            # === 【核心修改】分别计算内容哈希和元数据哈希 ===
+            # 1. 获取当前笔记的标签和笔记本信息（用于计算 meta_hash）
+            local_tags = get_tag_titles(note_id)  # 返回标签列表
+            tags_str = ",".join(sorted(local_tags)) if local_tags else ""  # 排序保证一致性
+            notebook_dicts = get_notebook_ids_for_note(note.id)
+            notebook_dict = notebook_dicts[-1] if notebook_dicts else {}
+            current_notebook_title = next(iter(notebook_dict.values()), "")
+            # 2. 计算内容哈希 (基于标题和正文)
+            current_content_hash = compute_content_hash(f"{note.title}{note.body}")
+            # 3. 计算元数据哈希 (基于标签和笔记本标题)
+            current_meta_hash = compute_content_hash(f"{tags_str}{current_notebook_title}")
+            # === 修改结束 ===
+            # 获取上一次处理的状态（兼容旧格式）
             last_state = process_state.get(note_id, {})
+            last_update_time = last_state.get("update_time")
+            last_content_hash = last_state.get("content_hash")
+            last_meta_hash = last_state.get("meta_hash")
 
-            # 只有需要更新的笔记才提交处理，为了方便调试，增加了云端配置的强制更新选项
-            if force_update or not (
-                last_state.get("update_time") == current_update_time
-                and last_state.get("hash") == current_hash
+            # 如果状态文件是旧的（没有meta_hash字段），则视为需要更新元数据
+            needs_meta_update = ("meta_hash" not in last_state)
+
+            # 判断是否需要处理：强制更新 或 更新时间变化 或 内容哈希变化 或 元数据哈希变化
+            if force_update or needs_meta_update or not (
+                last_update_time == current_update_time
+                and last_content_hash == current_content_hash
+                and last_meta_hash == current_meta_hash
             ):
+                log.info(
+                    f"笔记《{note.title}》需要更新。"
+                    f"原因: force={force_update}, meta_missing={needs_meta_update}, "
+                    f"时间变化={last_update_time != current_update_time}, "
+                    f"内容变化={last_content_hash != current_content_hash}, "
+                    f"元数据变化={last_meta_hash != current_meta_hash}"
+                )
                 # 提交任务到线程池/进程池
                 future = executor.submit(
                     process_note_chunks,
@@ -547,7 +564,8 @@ def process_notes_incremental(notebook_title: str, config: Dict):
                     note_id,
                     note.title,
                     current_update_time,
-                    current_hash,
+                    current_content_hash,
+                    current_meta_hash,
                 )
                 log.info(
                     f"开始处理笔记本【{notebook_title}】下的第（{i}/{len(notes)}）条笔记: 《{note.title}》…………"
@@ -556,24 +574,25 @@ def process_notes_incremental(notebook_title: str, config: Dict):
 
         # 收集处理结果
         for future in as_completed(future_to_note):
-            note_id, note_title, update_time, content_hash = future_to_note[future]
+            note_id, note_title, update_time, content_hash, meta_hash = future_to_note[future]
             try:
                 result_dict = future.result() # 现在接收的是字典
                 success = result_dict.get("success", False)
                 note_chunk_stats = result_dict.get("chunk_stats", {})
-        
+
                 # 累加块统计
                 total_chunks_for_notebook += note_chunk_stats.get("total_chunks", 0)
                 total_upserted_for_notebook += note_chunk_stats.get("upserted", 0)
                 total_skipped_for_notebook += note_chunk_stats.get("skipped", 0)
                 total_orphans_cleaned_for_notebook += note_chunk_stats.get("orphans_cleaned", 0)
-        
+
                 if success:
                     # 更新处理状态
                     process_state[note_id] = {
                         "note_title": note_title,
                         "update_time": float(update_time),
                         "hash": content_hash,
+                        "meta_hash": meta_hash,
                         "processed_time": datetime.now().timestamp(),
                     }
                     updated_count += 1
@@ -604,13 +623,13 @@ def process_notes_incremental(notebook_title: str, config: Dict):
         # 1. 获取当前笔记本对象及其ID
         notebook_id = searchnotebook(notebook_title) # 直接返回笔记本的id
         current_notebook_id = notebook_id
-        
+
         if not current_notebook_id:
             log.warning(f"无法获取笔记本【{notebook_title}】的ID，跳过清理步骤。")
         else:
             # 2. 获取当前笔记本中所有笔记的ID集合
-            current_note_ids_in_notebook = set(note.id for note in notes)
-            
+            current_note_ids_in_notebook = list(set(note.id for note in notes))
+
             # 3. 从向量库中查询所有 source_notebook_id 等于当前笔记本ID的块，并聚合出笔记ID
             # 我们需要一个辅助函数来执行这个查询。由于ChromaDB的get不支持直接按元数据值分组，
             # 我们先获取所有相关块，再在内存中聚合。
@@ -619,42 +638,41 @@ def process_notes_incremental(notebook_title: str, config: Dict):
                 include=["metadatas"]
             )
             # print(f"从向量数据库中取出当前笔记本【{notebook_title}】相关的文本块结果入下：\n{all_results}")
-            
-            note_ids_in_vector_db = set()
+
+            notes_in_vector_db = {}
             for metadata in all_results.get("metadatas", []):
-                note_id = metadata.get("source_note_id")
-                if note_id:
-                    note_ids_in_vector_db.add(note_id)
-            note_titles_in_vector_db = [getnote(note_id).title for note_id in note_ids_in_vector_db]
-            log.info(f"从向量数据库既有数据查找到的笔记本【{notebook_title}】中的笔记有这些：{note_titles_in_vector_db[-5:]}……")
-            
+                notes_in_vector_db[metadata.get("source_note_id")] = metadata.get('source_note_title')
+            log.info(
+                f"从向量数据库既有数据查找到的笔记本【{notebook_title}】"
+                f"中的笔记有这些：{list(notes_in_vector_db.values())[-5:]}……"
+            )
+
             # 4. 找出在向量库中存在，但已不在当前笔记本中的笔记ID
-            orphan_note_ids = note_ids_in_vector_db - current_note_ids_in_notebook
-            
+            orphan_note_ids = [note_id for id in notes_in_vector_db if note_id not in current_note_ids_in_notebook]
+
             # 5. 清理这些“孤儿笔记”对应的所有块
             cleaned_total_chunks = 0
             for note_id in orphan_note_ids:
                 deleted_chunks_count = vector_db.delete_chunks_by_note_id(note_id)
                 cleaned_total_chunks += deleted_chunks_count
                 if deleted_chunks_count > 0:
-                    note_title = getnote(note_id).title
-                    print(note_title)
+                    note_title = notes_in_vector_db.get(note_id, "")
                     log.info(f"清理已移除笔记《{note_title}》（note_id={note_id}）的孤儿文本块向量数据, 删除 {deleted_chunks_count} 个块。")
                     # 可选：从处理状态中移除该笔记的记录
                     process_state.pop(note_id, None)
-            
+
             if cleaned_total_chunks > 0:
                 log.info(f"笔记本【{notebook_title}】清理完成。共移除 {len(orphan_note_ids)} 条笔记的向量数据，涉及 {cleaned_total_chunks} 个块。")
             else:
                 log.info(f"笔记本【{notebook_title}】未发现需要清理的孤儿笔记向量数据。")
 
-            notes_removed_titles = [getnote(nid).title for nid in orphan_note_ids if getnote(nid)]
-            
+            notes_removed_titles = [notes_in_vector_db.get(nid) for nid in orphan_note_ids]
+
             # 计算新增笔记 (当前笔记本中的笔记ID 减去 向量库中存在的笔记ID)
             current_note_ids = set(note.id for note in notes)
-            notes_added_ids = current_note_ids - note_ids_in_vector_db
+            notes_added_ids = current_note_ids - set(notes_in_vector_db)
             notes_added_titles = [getnote(nid).title for nid in notes_added_ids if getnote(nid)]
-                
+
     except Exception as e:
         log.error(f"执行笔记本【{notebook_title}】的清理步骤时出错: {e}", exc_info=True)
     # ========== 清理步骤结束 ==========
@@ -665,22 +683,22 @@ def process_notes_incremental(notebook_title: str, config: Dict):
     # %%
     # ========== 在“清理已移除当前笔记本的向量数据”步骤之后，构建最终stats之前 ==========
     # 此时我们已经有了 orphan_note_ids (被清理的笔记ID集合)
-    # 和 note_ids_in_vector_db (向量库中属于本笔记本的笔记ID集合)
+    # 和 notes_in_vector_db (向量库中属于本笔记本的笔记字典)
     # 以及 current_note_ids (当前笔记本中的笔记ID集合)
-    
+
     # 1. 计算并获取“移除的笔记”标题列表
     notes_removed_titles = []
     for note_id in orphan_note_ids:
-        note_detail = getnote(note_id)
-        if note_detail:
-            notes_removed_titles.append(note_detail.title)
+        note_title = notes_in_vector_db.get(note_id, "")
+        if note_title:
+            notes_removed_titles.append(note_title)
         else:
             # 笔记可能已被彻底删除，记录ID
             notes_removed_titles.append(f"[已删除的笔记: {note_id}]")
-    
+
     # 2. 计算并获取“新增的笔记”标题列表
     # 新增的笔记 = 当前在笔记本中，但不在向量库历史记录中的笔记
-    notes_added_ids = current_note_ids - note_ids_in_vector_db
+    notes_added_ids = current_note_ids - set(notes_in_vector_db)
     notes_added_titles = []
     for note_id in notes_added_ids:
         note_detail = getnote(note_id)
