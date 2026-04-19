@@ -255,7 +255,7 @@ def process_note_chunks(
             base_metadata = chunk_info["metadata"]
             chunk_hash = base_metadata.get("content_hash", "")  # 从元数据中取出哈希
             metadata_chunk_idx_from_one = base_metadata["chunk_index"]
-            tags = base_metadata.get("tags", "")
+            tags = base_metadata.get("source_note_tags", "")
             tags_str = (
                 ",".join(sorted(tags.split(","))) if tags else ""
             )  # 排序保证一致性
@@ -293,7 +293,7 @@ def process_note_chunks(
                     )
                     if not old_c_hash or old_c_hash != chunk_hash:
                         base_metadata["content_hash"] = chunk_hash
-                    if not old_m_hash or old_m_hash != chunk_hash:
+                    if not old_m_hash or old_m_hash != meta_hash:
                         base_metadata["meta_hash"] = meta_hash
             else:
                 # 如果块ID不存在，则是全新块，需要处理
@@ -591,7 +591,7 @@ def process_notes_incremental(notebook_title: str, config: Dict):
                     process_state[note_id] = {
                         "note_title": note_title,
                         "update_time": float(update_time),
-                        "hash": content_hash,
+                        "content_hash": content_hash,
                         "meta_hash": meta_hash,
                         "processed_time": datetime.now().timestamp(),
                     }
