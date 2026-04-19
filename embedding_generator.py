@@ -65,18 +65,30 @@ class AdaptiveChunkOptimizer:
     利用本地模型零成本的优势，动态调整分块大小，避免过碎分块。
     """
 
-    def __init__(self, embedding_generator, enabled=False, cache_size=100):
+    def __init__(
+        self, embedding_generator, enabled=False, cache_size=100, cache_manager=None
+    ):
         """
         初始化优化器。
         :param embedding_generator: EmbeddingGenerator 实例，用于实际调用嵌入接口。
         :param enabled: 是否启用自适应分块。
         :param cache_size: 缓存大小，避免重复探测。
+        :param cache_manager: SQLiteCacheManager 实例，用于持久化缓存。
         """
         self.embedding_generator = embedding_generator
         self.enabled = enabled
+        self.cache_manager = cache_manager  # 持久化缓存管理器
         # 缓存：键为 (模型名, 文本特征哈希)，值为探测出的最佳块大小（字符数）
-        self.cache = {}
+        self.memory_cache = {}
         self.cache_size = cache_size
+
+    def _get_cache_key(self, text: str, model_name: str) -> str:
+        """
+        生成用于持久化缓存的键。
+        格式: f"{model_name}|{text_signature}"
+        """
+        text_sig = self._get_text_signature(text)  # 复用原有的签名方法
+        return f"{model_name}|{text_sig}"
 
     def _get_text_signature(self, text: str) -> str:
         """
@@ -105,10 +117,31 @@ class AdaptiveChunkOptimizer:
             # 功能未启用，直接返回默认 chunk_size
             return self.embedding_generator.chunk_size
 
+        # 1. 检查内存缓存（一级缓存）
+        memory_key = (model_name, self._get_text_signature(text))
+        if memory_key in self.memory_cache:
+            log.debug(
+                f"自适应分块内存缓存命中: {memory_key} -> {self.memory_cache[memory_key]}"
+            )
+            return self.memory_cache[memory_key]
+
+        # 2. 检查持久化缓存（二级缓存）
+        persistent_key = self._get_cache_key(text, model_name)
+        if self.cache_manager:
+            # 使用一个固定的 task 名称来标识这类缓存
+            cache_result = self.cache_manager.get(
+                persistent_key, task="adaptive_chunk_size"
+            )
+            if cache_result.content is not None:
+                # 缓存命中，解析结果（存储的是字符串，需转换为整数）
+                cached_size = int(cache_result.content)
+                log.debug(
+                    f"自适应分块持久化缓存命中: {persistent_key} -> {cached_size}"
+                )
+                # 同时更新到内存缓存
+                self.memory_cache[memory_key] = cached_size
+                return cached_size
         cache_key = (model_name, self._get_text_signature(text))
-        if cache_key in self.cache:
-            log.debug(f"自适应分块缓存命中: {cache_key} -> {self.cache[cache_key]}")
-            return self.cache[cache_key]
 
         log.info(f"开始自适应分块探测: 模型={model_name}, 文本长度={len(text)}字符")
 
@@ -169,11 +202,24 @@ class AdaptiveChunkOptimizer:
             f"自适应分块探测完成: 建议块大小={final_safe_len} 字符 (原始默认={self.embedding_generator.chunk_size})"
         )
 
-        # 4. 缓存结果
-        if len(self.cache) >= self.cache_size:
-            # 简单淘汰最早插入的一项
-            self.cache.pop(next(iter(self.cache)))
-        self.cache[cache_key] = final_safe_len
+        # 4. 将探测结果保存到持久化缓存
+        if self.cache_manager:
+            try:
+                self.cache_manager.set(
+                    content_hash=persistent_key,  # 这里将整个key作为content_hash传入
+                    task="adaptive_chunk_size",
+                    result=str(final_safe_len),  # 结果存储为字符串
+                )
+                log.debug(
+                    f"自适应分块结果已持久化: {persistent_key} -> {final_safe_len}"
+                )
+            except Exception as e:
+                log.warning(f"持久化自适应分块缓存失败: {e}，但不影响程序运行")
+
+        # 5. 更新内存缓存并返回
+        if len(self.memory_cache) >= self.cache_size:
+            self.memory_cache.pop(next(iter(self.memory_cache)))
+        self.memory_cache[memory_key] = final_safe_len
 
         return final_safe_len
 
@@ -576,28 +622,41 @@ class EmbeddingGenerator:
     )
 
 # %% [markdown]
-# ## \_\_init__(self, model_name: str, chunk_size: int = 1024)
+# ## \_\_init__(self, config: dict, model_name: str, chunk_size: int = 1024)
 
     # %%
     def __init__(
         self,
+        config: dict,
         model_name: str,
         chunk_size: int = 1024,
         enable_adaptive_chunking=False,  # 【新增】是否启用自适应分块
         chunk_overlap=50,
         adaptive_cache_size=100,  # 【新增】自适应探测缓存大小
+        cache_manager=None,  # 【新增】接收外部缓存管理器
     ):
+        self.config = config
         self.model_name = model_name
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
         self.embedding_dim = self._get_model_dimension()
         self.embedding_cache = {}  # 简单缓存
+        # 【新增】如果没有传入，则创建一个（确保 deepseek_cache 目录存在）
+        if cache_manager is None:
+            from cache_manager import SQLiteCacheManager  # 导入
+            from func.dirme import getdirmain
+            import os
+            cache_dir = getdirmain() / "data" / ".deepseek_cache"
+            os.makedirs(cache_dir, exist_ok=True)
+            cache_db_path = cache_dir / "deepseek_cache.db"
+            cache_manager = SQLiteCacheManager(db_path=str(cache_db_path))
         self._set_chunk_size()
         # 【新增】初始化自适应分块优化器
         self.adaptive_optimizer = AdaptiveChunkOptimizer(
             embedding_generator=self,
             enabled=enable_adaptive_chunking,
             cache_size=adaptive_cache_size,
+            cache_manager=cache_manager,  # 传递
         )
         # 保存状态，便于其他地方判断
         self.enable_adaptive_chunking = enable_adaptive_chunking
@@ -714,6 +773,41 @@ class EmbeddingGenerator:
             log.warning(f"清理后文本过短，不到10个字符。清理前为: {text[:50]}...")
 
         return text
+
+# %% [markdown]
+# ## enhance_by_deepseek_for_summary_tags(chunk_content: str, note_tags: str, config: Dict)
+
+    # %%
+    def enhance_by_deepseek_for_summary_tags(self, chunk_content: str, note_tags: str, config: Dict):
+        """DeepSeek 官方模型增强生成小结和标签（和笔记既有标签进行融合）"""
+        from deepseek_enhancer import deepseek_process_note, get_cache_manager
+
+        # log.info(get_cache_manager().get_stats())
+
+        enhanced_metadata = {}
+        if config["enable_deepseek_summary"]:
+            summary = deepseek_process_note(
+                chunk_content,
+                task="summary",
+                model=config.get("deepseek_chat_model", "deepseek-chat"),
+                use_cache=True,  # 启用缓存
+            )
+            enhanced_metadata["chunk_summary"] = summary or ""  # 存入摘要
+
+        if config["enable_deepseek_tags"]:
+            tags_str = deepseek_process_note(
+                chunk_content,
+                task="tags",
+                model=config.get("deepseek_chat_model", "deepseek-chat"),
+                use_cache=True,  # 启用缓存
+            )
+            deepseek_tags = [t.strip() for t in tags_str.split(",")] if tags_str else []
+            # 合并本地标签与DeepSeek标签（去重）
+            original_tags = [t.strip() for t in note_tags.split(",")] if note_tags else []
+            enhanced_tags = list(set(original_tags+ deepseek_tags))
+            enhanced_metadata["tags"] = ",".join(enhanced_tags)
+
+        return enhanced_metadata
 
 # %% [markdown]
 # ## _is_valid_chunk(self, text: str, min_length: int = 10) -> bool
@@ -1264,6 +1358,7 @@ class EmbeddingGenerator:
             chunk_hash = compute_content_hash(chunk_content)
             chunk_metadata = {
                 "chunk_index": block_number,
+                "source_notebook_title": source_notebook_title,
                 "source_note_title": note_title,
                 "source_note_tags": note_tags,
                 "estimated_date": estimated_date,
@@ -1272,7 +1367,25 @@ class EmbeddingGenerator:
                 "note_author": note_meta['note_author'],
                 "note_type": note_meta['note_type'],
             }
-            chunk_dicts.append({"content": content, "metadata": chunk_metadata})
+            # DeepSeek 增强生成摘要和标签
+            enhanced_metadata = {}
+            try:
+                enhanced_metadata = self.enhance_by_deepseek_for_summary_tags(
+                    chunk_content, note_tags, self.config,
+                )
+            except Exception as e:
+                log.error(
+                    f"对笔记《{note.title}》的块 {block_number} "
+                    f"（长度：{len(chunk_content)}）进行DeepSeek增强时失败: {e}",
+                    exc_info=True,
+                )
+            tags = list(set([t.strip() for t in note_tags] + [t.strip() for t in enhanced_metadata.get("tags", "")]))
+            tags_str = ",".join(sorted(tags)) if tags else ""  # 排序保证一致性
+            meta_hash = compute_content_hash(f"{tags_str}{source_notebook_title}")
+            enhanced_metadata["meta_hash"] = meta_hash
+
+            metadata = {**chunk_metadata, **enhanced_metadata}
+            chunk_dicts.append({"content": content, "metadata": metadata})
             block_number += 1  # 只有有效块才递增
 
         log.info(f"已将笔记《{note_title}》文本分割成 {len(chunk_dicts)} 个有效的语义块。")
