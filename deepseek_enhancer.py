@@ -171,7 +171,7 @@ def get_deepseek_embedding(text: str, max_retries: int = 3) -> Optional[List[flo
 # ## deepseek_process_note(text: str, task: str = "summary", model: str = DEFAULT_CHAT_MODEL, max_retries: int = 3, use_cache: bool = True,) -> Optional[str]
 
 # %%
-@timethis
+# @timethis
 def deepseek_process_note(
     text: str,
     task: str = "summary",
@@ -197,7 +197,7 @@ def deepseek_process_note(
 
     if cache_result.content is not None:
         # 缓存命中
-        log.info(f"deepseek增强缓存命中 {task}: {content_hash[:12]}")
+        # log.info(f"deepseek增强缓存命中 {task}: {content_hash[:12]}")
 
         # 2. 检查是否需要验证
         if cache_result.requires_validation:
@@ -226,7 +226,7 @@ def deepseek_process_note(
     if new_result:
         # 将新结果保存到缓存
         cache_manager.set(content_hash, task, new_result)
-        log.info(f"deepseek增强新结果已缓存: {content_hash[:12]}")
+        # log.info(f"deepseek增强新结果已缓存: {content_hash[:12]}")
 
     return new_result
 
