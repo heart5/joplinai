@@ -42,6 +42,7 @@ from chromadb.config import Settings
 
 # %%
 try:
+    from cache_manager import SQLiteCacheManager
     from func.configpr import (
         findvaluebykeyinsection,
         getcfpoptionvalue,
@@ -96,13 +97,23 @@ CONFIG = {
 }
 
 # %%
-
-# %%
 # 根据嵌入模型生成状态文件路径
 model_name = (
     CONFIG.get("embedding_model").replace(":", "_").replace("/", "_").replace("-", "_")
 )
 CONFIG["collection_name"] = f"joplin_{model_name}"
+
+# %% [markdown]
+# ## 全局变量
+
+# %%
+# 确保缓存目录存在
+cache_dir = getdirmain() / "data" / ".deepseek_cache"
+os.makedirs(cache_dir, exist_ok=True)
+cache_db_path = cache_dir / "deepseek_cache.db"
+
+# 创建全局缓存管理器实例
+global_cache_manager = SQLiteCacheManager(db_path=str(cache_db_path))
 
 # %% [markdown]
 # ## 问答系统核心
@@ -433,7 +444,9 @@ class OptimizedJoplinQASystem(JoplinQASystem):
         from embedding_generator import EmbeddingGenerator  # 请根据实际模块名调整
 
         self.embedding_generator = EmbeddingGenerator(
+            self.config,
             model_name=config["embedding_model"],
+            cache_manager=global_cache_manager,  # 传入统一的缓存管理器
         )
         log.info(
             f"OptimizedJoplinQASystem 初始化完成，已加载 embedding_generator，嵌入模型为：{config['embedding_model']}"
