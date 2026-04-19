@@ -85,7 +85,7 @@ class SQLiteCacheManager:
     """基于SQLite的高性能缓存管理器，用于DeepSeek增强结果。"""
 
 # %% [markdown]
-#     # ### 验证阈值
+# ## 验证阈值
 
     # %%
     if not (
@@ -94,7 +94,7 @@ class SQLiteCacheManager:
         VALIDATION_THRESHOLD = 5000  # 验证阈值，可从配置读取
 
 # %% [markdown]
-#     # ### __init__(self, db_path: str = "data/.deepseek_cache/deepseek_cache.db")
+# ## __init__(self, db_path: str = "data/.deepseek_cache/deepseek_cache.db")
 
     # %%
     def __init__(self, db_path: str = "data/.deepseek_cache/deepseek_cache.db"):
@@ -102,7 +102,7 @@ class SQLiteCacheManager:
         self._init_db()
 
 # %% [markdown]
-#     # ### _init_db(self)
+# ## _init_db(self)
 
     # %%
     def _init_db(self):
@@ -135,7 +135,7 @@ class SQLiteCacheManager:
         conn.close()
 
 # %% [markdown]
-#     # ### import_from_json(self, json_file_path: str, clear_existing: bool = False) -> Dict[str, int]
+# ## import_from_json(self, json_file_path: str, clear_existing: bool = False) -> Dict[str, int]
 
     # %%
     def import_from_json(
@@ -263,7 +263,7 @@ class SQLiteCacheManager:
         return import_stats
 
 # %% [markdown]
-#     # ### import_from_json_directory(self, json_dir_path: str, pattern: str = "*.json", clear_existing: bool = False) -> Dict[str, Any]
+# ## import_from_json_directory(self, json_dir_path: str, pattern: str = "*.json", clear_existing: bool = False) -> Dict[str, Any]
 
     # %%
     def import_from_json_directory(
@@ -331,7 +331,7 @@ class SQLiteCacheManager:
         return import_stats
 
 # %% [markdown]
-#     # ### get(self, content_hash: str, task: str) -> Optional[str]
+# ## get(self, content_hash: str, task: str) -> Optional[str]
 
     # %%
     def get(self, content_hash: str, task: str) -> CacheResult:
@@ -395,9 +395,9 @@ class SQLiteCacheManager:
         conn.commit()
         conn.close()
 
-        log.debug(
-            f"缓存查询: {cache_key[:12]}... (周期命中={new_hit_count}, 总计={new_total_hits}, 需验证={should_validate})"
-        )
+        # log.debug(
+        #     f"缓存查询: {cache_key[:12]}... (周期命中={new_hit_count}, 总计={new_total_hits}, 需验证={should_validate})"
+        # )
 
         # 返回封装结果，告诉调用者缓存内容以及“是否需要验证”
         return CacheResult(
@@ -411,7 +411,7 @@ class SQLiteCacheManager:
         )
 
 # %% [markdown]
-#     # ### update_on_validation(self, cache_key: str, new_result: Optional[str], validation_successful: bool)
+# ## update_on_validation(self, cache_key: str, new_result: Optional[str], validation_successful: bool)
 
     # %%
     def update_on_validation(
@@ -465,7 +465,7 @@ class SQLiteCacheManager:
         conn.close()
 
 # %% [markdown]
-#     # ### set(self, content_hash: str, task: str, result: str)
+# ## set(self, content_hash: str, task: str, result: str)
 
     # %%
     def set(self, content_hash: str, task: str, result: str):
@@ -510,7 +510,7 @@ class SQLiteCacheManager:
         log.debug(f"缓存已设置: {cache_key}")
 
 # %% [markdown]
-#     # ### cleanup_old_entries(self, max_age_days: int = 90)
+# ## cleanup_old_entries(self, max_age_days: int = 90)
 
     # %%
     def cleanup_old_entries(self, max_age_days: int = 90):
@@ -531,7 +531,7 @@ class SQLiteCacheManager:
             log.info(f"清理了 {deleted} 条超过 {max_age_days} 天的缓存记录。")
 
 # %% [markdown]
-#     # ### get_stats(self, cache_key: str = None) -> Dict[str, Any]
+# ## get_stats(self, cache_key: str = None) -> Dict[str, Any]
 
     # %%
     def get_stats(self, cache_key: str = None) -> Dict[str, Any]:
@@ -597,7 +597,7 @@ TIME_WINDOWS = {
 }
 
 # %% [markdown]
-# ## 核心统计类
+# # 核心统计类
 
 
 # %%
@@ -605,7 +605,7 @@ class CacheStatsAnalyzer:
     """缓存统计数据分析器"""
 
 # %% [markdown]
-# ### 初始化
+# ## 初始化
 
     # %%
     def __init__(self, db_path: str = None):
@@ -644,7 +644,7 @@ class CacheStatsAnalyzer:
         self.disconnect()
 
 # %% [markdown]
-# ### _fetch_scalar(self, query: str, params: tuple = ()) -> Any:
+# ## _fetch_scalar(self, query: str, params: tuple = ()) -> Any:
 
     # %%
     def _fetch_scalar(self, query: str, params: tuple = ()) -> Any:
@@ -657,7 +657,7 @@ class CacheStatsAnalyzer:
         return row[0]
 
 # %% [markdown]
-# ### 基础统计
+# ## 基础统计
 
     # %%
     def get_basic_stats(self) -> Dict[str, Any]:
@@ -765,7 +765,7 @@ class CacheStatsAnalyzer:
         return analysis
 
 # %% [markdown]
-# ### get_validation_analysis(self) -> Dict[str, Any]
+# ## get_validation_analysis(self) -> Dict[str, Any]
 
     # %%
     def get_validation_analysis(self) -> Dict[str, Any]:
@@ -823,7 +823,7 @@ class CacheStatsAnalyzer:
         return analysis
 
 # %% [markdown]
-# ### get_performance_metrics(self) -> Dict[str, Any]
+# ## get_performance_metrics(self) -> Dict[str, Any]
 
     # %%
     def get_performance_metrics(self) -> Dict[str, Any]:
@@ -955,7 +955,7 @@ class CacheStatsAnalyzer:
 
 
 # %% [markdown]
-# ## 报告生成器
+# # 报告生成器
 
 
 # %%
@@ -1135,7 +1135,7 @@ class CacheReportGenerator:
 
 
 # %% [markdown]
-# ### save_to_joplin(self, notebook_title: str = None, note_title: str = None) -> bool
+# ## save_to_joplin(self, notebook_title: str = None, note_title: str = None) -> bool
 
     # %%
     def save_to_joplin(
@@ -1193,7 +1193,7 @@ class CacheReportGenerator:
 
 
 # %% [markdown]
-# ## 命令行接口
+# # 命令行接口
 
 
 # %%
@@ -1247,7 +1247,7 @@ def parse_args():
 
 
 # %% [markdown]
-# ## 主函数
+# # 主函数
 
 
 # %%
