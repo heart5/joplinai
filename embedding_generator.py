@@ -1379,13 +1379,14 @@ class EmbeddingGenerator:
                     f"（长度：{len(chunk_content)}）进行DeepSeek增强时失败: {e}",
                     exc_info=True,
                 )
-            tags = list(set([t.strip() for t in note_tags] + [t.strip() for t in enhanced_metadata.get("tags", "")]))
+            # tags = list(set([t.strip() for t in note_tags] + [t.strip() for t in enhanced_metadata.get("tags", "")]))
+            tags = [t.strip() for t in note_tags.split(",") if t.strip()]
             tags_str = ",".join(sorted(tags)) if tags else ""  # 排序保证一致性
             meta_hash = compute_content_hash(f"{tags_str}{source_notebook_title}")
             enhanced_metadata["meta_hash"] = meta_hash
 
             metadata = {**chunk_metadata, **enhanced_metadata}
-            chunk_dicts.append({"content": content, "metadata": metadata})
+            chunk_dicts.append({"content": chunk_content, "metadata": metadata})
             block_number += 1  # 只有有效块才递增
 
         log.info(f"已将笔记《{note_title}》文本分割成 {len(chunk_dicts)} 个有效的语义块。")
