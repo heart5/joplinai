@@ -35,6 +35,7 @@ from embedding_generator import EmbeddingGenerator  # 用于调用提取函数
 
 # %%
 try:
+    from func.datatools import compute_content_hash
     from func.first import getdirmain
     from func.jpfuncs import (
         get_notebook_ids_for_note,
@@ -290,9 +291,10 @@ class VectorDBManager:
             "source_note_id": metadata.get("source_note_id", ""),
             "chunk_index": metadata.get("chunk_index", 1),
             "content_hash": metadata.get("content_hash", ""),
+            # === 新增字段 ===
+            "meta_hash": metadata.get("meta_hash", ""),
             "source_notebook_title": metadata.get("source_notebook_title", ""),
             "source_notebook_id": metadata.get("source_notebook_id", ""),
-            # === 新增字段 ===
             "note_author": metadata.get("note_author", "白晔峰"),
             "note_type": metadata.get("note_type", "个人笔记"),
         }
@@ -396,13 +398,63 @@ class VectorDBManager:
                         log.info(f"已为 {i} 个文本块重新生成 estimated_date 字段或者更新其值")
 
 # %% [markdown]
-# ### get_existing_chunk_hashes(self, note_id: str) -> Dict[str, str]
+# ### get_existing_chunk_hashes_for_note(self, note_id: str) -> Dict[str, Dict[str, str]]
 
     # %%
-    def get_existing_chunk_hashes(self, note_id: str) -> Dict[str, str]:
+    def get_existing_chunk_hashes_for_note(self, note_id: str) -> Dict[str, Dict[str, str]]:
         """
         提取指定笔记的块hash_map并返回
-        查询并修复缺失的content_hash，惰性修复，仅针对content_hash字段
+        查询并修复缺失的content_hash和meta_hash，惰性修复，仅针对content_hash和meta_hash字段
+        """
+        if not self.collection:
+            return {}
+
+        results = self.collection.get(where={"source_note_id": note_id})
+        if not results or not results['ids']:
+            return {}
+
+        hash_map = {}
+        # needs_update = []
+
+        for chunk_id, metadata, document in zip(
+            results['ids'], results['metadatas'], results.get('documents', [])
+        ):
+            content_hash = metadata.get("content_hash", "")
+            meta_hash = metadata.get("meta_hash", "")
+
+            # # 如果content_hash缺失或为空，计算并标记需要更新
+            # if (not content_hash or not meta_hash) and document:
+            #     current_content_hash = compute_content_hash(document)
+            #     local_tags = metadata.get("tags", "")
+            #     tags_str = ",".join(sorted(local_tags.split(','))) if local_tags else ""  # 排序保证一致性
+            #     current_notebook_title = metadata.get("source_notebook_title", "")
+            #     current_meta_hash = compute_content_hash(f"{tags_str}{current_notebook_title}")
+            #     needs_update.append((chunk_id, metadata, current_content_hash, current_meta_hash))
+            #     # content_hash = current_content_hash
+            #     # meta_hash = current_meta_hash
+
+            hash_map[chunk_id] = {"content_hash": content_hash, "meta_hash": meta_hash}
+
+        # # 批量更新需要修复的文档
+        # if needs_update:
+        #     for chunk_id, metadata, content_hash, meta_hash in needs_update:
+        #         updated_metadata = {**metadata, "content_hash": content_hash, "meta_hash": meta_hash}
+        #         self.collection.update(
+        #             ids=[chunk_id],
+        #             metadatas=[updated_metadata]
+        #         )
+        #     log.info(f"修复了 {len(needs_update)} 个文档的content_hash或meta_hash字段")
+
+        return hash_map
+
+# %% [markdown]
+# ### get_existing_chunk_hashes_for_note_other(self, note_id: str) -> Dict[str, Dict[str, str]]
+
+    # %%
+    def get_existing_chunk_hashes_for_note_other(self, note_id: str) -> Dict[str, Dict[str, str]]:
+        """
+        提取指定笔记的块hash_map并返回
+        查询并修复缺失的content_hash和meta_hash，惰性修复，仅针对content_hash和meta_hash字段
         """
         if not self.collection:
             return {}
@@ -418,51 +470,32 @@ class VectorDBManager:
             results['ids'], results['metadatas'], results.get('documents', [])
         ):
             content_hash = metadata.get("content_hash", "")
+            meta_hash = metadata.get("meta_hash", "")
 
             # 如果content_hash缺失或为空，计算并标记需要更新
-            if not content_hash and document:
-                content_hash = hashlib.md5(document.encode('utf-8')).hexdigest()
-                needs_update.append((chunk_id, metadata, content_hash))
+            if (not content_hash or not meta_hash) and document:
+                current_content_hash = compute_content_hash(document)
+                local_tags = metadata.get("tags", "")
+                tags_str = ",".join(sorted(local_tags.split(','))) if local_tags else ""  # 排序保证一致性
+                current_notebook_title = metadata.get("source_notebook_title", "")
+                current_meta_hash = compute_content_hash(f"{tags_str}{current_notebook_title}")
+                needs_update.append((chunk_id, metadata, current_content_hash, current_meta_hash))
+                # content_hash = current_content_hash
+                # meta_hash = current_meta_hash
 
-            hash_map[chunk_id] = content_hash
+            hash_map[chunk_id] = {"content_hash": content_hash, "meta_hash": meta_hash}
 
         # 批量更新需要修复的文档
         if needs_update:
-            for chunk_id, metadata, content_hash in needs_update:
-                updated_metadata = {**metadata, "content_hash": content_hash}
+            for chunk_id, metadata, content_hash, meta_hash in needs_update:
+                updated_metadata = {**metadata, "content_hash": content_hash, "meta_hash": meta_hash}
                 self.collection.update(
                     ids=[chunk_id],
                     metadatas=[updated_metadata]
                 )
-            log.info(f"修复了 {len(needs_update)} 个文档的content_hash字段")
+            log.info(f"修复了 {len(needs_update)} 个文档的content_hash或meta_hash字段")
 
         return hash_map
-
-# %% [markdown]
-# ### get_existing_chunk_hashes_other(self, note_id: str) -> Dict[str, str]
-
-    # %%
-    def get_existing_chunk_hashes_other(self, note_id: str) -> Dict[str, str]:
-        """
-        查询某个笔记下所有已存在的块，返回 块ID -> 内容哈希 的映射。
-        用于后续的比对和清理。
-        """
-        if not self.collection:
-            return {}
-        try:
-            # 查询 metadata 中 source_note_id 等于给定 note_id 的所有记录
-            results = self.collection.get(where={"source_note_id": note_id})
-            if not results or not results['ids']:
-                return {}
-
-            hash_map = {}
-            for chunk_id, metadata in zip(results['ids'], results['metadatas']):
-                # 从元数据中取出我们之前存入的 content_hash
-                hash_map[chunk_id] = metadata.get("content_hash", "")
-            return hash_map
-        except Exception as e:
-            log.error(f"从集合《{self.collection_name}》中查询笔记 {note_id} 的现有块哈希失败: {e}")
-            return {}
 
 # %% [markdown]
 # ### delete_chunks_by_id_list(self, chunk_id_list: List[str]) -> int
