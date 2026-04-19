@@ -283,20 +283,18 @@ class VectorDBManager:
 
         # 构建要存储的元数据，合并所有必要信息
         db_metadata = {
-            "chunk_id": chunk_id,           # 当前块的ID
+            "chunk_id": chunk_id, # 当前块的ID
             "tags": ",".join(tags),
             "summary": metadata.get("chunk_summary", ""),
-            # 关键：保留从 joplinai.py 传入的完整元数据
             "source_note_title": metadata.get("source_note_title", ""),
             "source_note_id": metadata.get("source_note_id", ""),
-            # 可以根据需要添加其他字段，如 chunk_index
             "chunk_index": metadata.get("chunk_index", 1),
             "content_hash": metadata.get("content_hash", ""),
-            # === 新增字段 ===
             "source_notebook_title": metadata.get("source_notebook_title", ""),
             "source_notebook_id": metadata.get("source_notebook_id", ""),
             # === 新增字段 ===
-            "note_author": metadata.get("note_author", "白晔峰"), # 确保入库
+            "note_author": metadata.get("note_author", "白晔峰"),
+            "note_type": metadata.get("note_type", "个人笔记"),
         }
 
         # 确保使用 upsert 方法
@@ -789,15 +787,20 @@ def migrate_all_chunks_with_author(
             continue
 
         # 3. 重新计算作者（使用 embedding_generator 中的方法）
-        note_author = embedding_gen._extract_author_from_note(note_title, note_tags_str)
+        source_notebook_title = old_meta.get("source_notebook_title")
+        note_author_type_meta = embedding_gen._extract_author_from_note(
+            note_title, note_tags_str, source_notebook_title
+        )
 
         # 4. 更新元数据
-        new_metadata = {**old_meta, "note_author": note_author}
+        new_metadata = {**old_meta, **note_author_type_meta}
         vector_db.collection.update(ids=[chunk_id], metadatas=[new_metadata])
         updated_count += 1
 
         if i % 100 == 0:
-            log.info(f"已处理 {i} 个块，最近示例：{note_title} -> {note_author}")
+            log.info(
+                f"已处理 {i} 个块，最近示例：{note_title} -> {note_author_type_meta}"
+            )
 
     log.info(f"迁移完成！共更新了 {updated_count} 个文本块的作者信息。")
 
