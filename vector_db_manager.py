@@ -76,26 +76,60 @@ class VectorDBManager:
                 self.collection = self.client.get_collection(self.collection_name)
                 log.info(f"成功加载现有集合: {self.collection_name}")
 
-                # 验证维度匹配
-                if self.collection.count() > 0:
-                    sample = self.collection.get(limit=1)
-                    if sample and "embeddings" in sample and sample["embeddings"]:
-                        existing_dim = len(sample["embeddings"][0])
-                        current_dim = self._get_model_dimension(self.embedding_model)
-                        if existing_dim != current_dim:
-                            log.warning(f"维度不匹配: 现有{existing_dim}D, 需要{current_dim}D")
-                            if for_creation:
-                                log.info("创建模式下重建集合")
-                                self.client.delete_collection(self.collection_name)
-                                self.collection = self.client.create_collection(
-                                    name=self.collection_name,
-                                    metadata={
-                                        "hnsw:space": "cosine",
-                                        "dimension": current_dim,
-                                    },
-                                )
-            except Exception as e:
-                log.info(f"集合不存在，创建新集合: {self.collection_name}")
+                # === 【关键修复】尝试验证集合可访问性，捕获索引损坏 ===
+                try:
+                    # 执行一个轻量级操作来验证集合是否健康
+                    _ = self.collection.count()
+                    log.debug(f"集合《{self.collection_name}》状态健康。")
+
+                    # 如果健康，继续原有的维度验证逻辑
+                    if self.collection.count() > 0:
+                        sample = self.collection.get(limit=1)
+                        if sample and "embeddings" in sample and sample["embeddings"]:
+                            existing_dim = len(sample["embeddings"][0])
+                            current_dim = self._get_model_dimension(self.embedding_model)
+                            if existing_dim != current_dim:
+                                log.warning(f"维度不匹配: 现有{existing_dim}D, 需要{current_dim}D")
+                                if for_creation:
+                                    log.info("创建模式下重建集合（因维度不匹配）")
+                                    self.client.delete_collection(self.collection_name)
+                                    self.collection = self.client.create_collection(
+                                        name=self.collection_name,
+                                        metadata={
+                                            "hnsw:space": "cosine",
+                                            "dimension": current_dim,
+                                        },
+                                    )
+                except Exception as inner_e:
+                    # 捕获 count() 或 get() 时的错误，这很可能意味着索引损坏
+                    log.error(f"集合《{self.collection_name}》可能已损坏或无法访问: {inner_e}")
+                    if for_creation:
+                        log.warning(f"创建模式下，将尝试删除并重建损坏的集合《{self.collection_name}》。")
+                        try:
+                            self.client.delete_collection(self.collection_name)
+                            log.info(f"已删除损坏的集合《{self.collection_name}》。")
+                        except Exception as delete_e:
+                            log.error(f"删除集合失败: {delete_e}")
+                            raise RuntimeError(f"无法删除损坏的集合，请手动清理: {delete_e}")
+                        # 重建集合
+                        self.collection = self.client.create_collection(
+                            name=self.collection_name,
+                            metadata={
+                                "hnsw:space": "cosine",
+                                "dimension": self._get_model_dimension(self.embedding_model),
+                            },
+                        )
+                        log.info(f"已重建集合《{self.collection_name}》。")
+                    else:
+                        # 非创建模式，无法自动修复，抛出更清晰的错误
+                        raise RuntimeError(
+                            f"集合《{self.collection_name}》已存在但可能已损坏，错误详情: {inner_e}。"
+                            f"请尝试运行带有 `--force_update` 参数的 `joplinai.py` 来重建向量库。"
+                        ) from inner_e
+
+            except Exception as outer_e:
+                # 此处的异常是 self.client.get_collection 失败，意味着集合真的不存在
+                log.info(f"集合《{self.collection_name}》不存在，创建新集合。")
                 self.collection = self.client.create_collection(
                     name=self.collection_name,
                     metadata={
@@ -103,10 +137,8 @@ class VectorDBManager:
                         "dimension": self._get_model_dimension(self.embedding_model),
                     },
                 )
-
         except Exception as e:
-            log.error(f"初始化向量数据库失败: {e}")
-            raise
+            log.error(f"初始化向量数据库时出错：{e}")
 
 # %% [markdown]
 # ### _ensure_collection(self)
@@ -187,16 +219,16 @@ class VectorDBManager:
             "qwen:1.8b": 2048,
             # 可以添加更多已知模型
         }
-        
+
         if model_name in known_dimensions:
             dim = known_dimensions[model_name]
             self._model_dimension_cache[model_name] = dim
-            log.info(f"使用已知模型维度: {model_name} -> {dim}D")
+            # log.info(f"使用已知模型维度: {model_name} -> {dim}D")
             return dim
-        
+
         if model_name in self._model_dimension_cache:
             return self._model_dimension_cache[model_name]
-    
+
         # 尝试从Ollama获取模型信息
         try:
             # 通过生成一个简单嵌入来获取维度
