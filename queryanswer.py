@@ -444,12 +444,13 @@ class OptimizedJoplinQASystem(JoplinQASystem):
         from embedding_generator import EmbeddingGenerator  # 请根据实际模块名调整
 
         self.embedding_generator = EmbeddingGenerator(
-            self.config,
+            config,
             model_name=config["embedding_model"],
             cache_manager=global_cache_manager,  # 传入统一的缓存管理器
         )
         log.info(
-            f"OptimizedJoplinQASystem 初始化完成，已加载 embedding_generator，嵌入模型为：{config['embedding_model']}"
+            f"OptimizedJoplinQASystem 初始化完成，已加载 embedding_generator，"
+            f"嵌入模型为：{config['embedding_model']}"
         )
 
 # %% [markdown]
