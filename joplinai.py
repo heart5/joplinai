@@ -277,10 +277,10 @@ def process_note_chunks(
                 if (old_c_hash and old_c_hash == chunk_hash) and (
                     old_m_hash and old_m_hash == meta_hash
                 ):
-                    log.debug(
-                        f"笔记《{note.title}》中的块 {metadata_chunk_idx_from_one} 内容"
-                        f"（长度：{len(chunk_content)}）未变，元数据也未变，跳过嵌入生成。"
-                    )
+                    # log.debug(
+                    #     f"笔记《{note.title}》中的块 {metadata_chunk_idx_from_one} 内容"
+                    #     f"（长度：{len(chunk_content)}）未变，元数据也未变，跳过嵌入生成。"
+                    # )
                     need_process = False
                     skipped_chunks += 1
                 else:
@@ -429,7 +429,7 @@ def process_notes_incremental(notebook_title: str, config: Dict):
     model_name = config["embedding_model"]
     # 动态获取模型最大上下文
     # chunk_size = EmbeddingGenerator(config["embedding_model"]).chunk_size
-    log.info(f"使用模型“{model_name}”")
+    # log.info(f"使用模型“{model_name}”")
 
 
 # %% [markdown]
