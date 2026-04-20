@@ -657,34 +657,34 @@ class CacheStatsAnalyzer:
         return row[0]
 
 # %% [markdown]
-# ## 基础统计
+# ## 基础统计：get_basic_stats(self) -> Dict[str, Any]
 
     # %%
     def get_basic_stats(self) -> Dict[str, Any]:
         stats = {}
-        
+
         # 总记录数 - 使用fetchone()[0]或对Row使用键名获取值
         self.cursor.execute("SELECT COUNT(*) as total FROM processing_cache")
         row = self.cursor.fetchone()
         stats["total_entries"] = row["total"] if row else 0  # 关键修改：提取字段值
-    
+
         # 总命中次数
         self.cursor.execute("SELECT SUM(total_hits) as total_hits FROM processing_cache")
         row = self.cursor.fetchone()
         # 注意：如果所有行的total_hits都为NULL，SUM()会返回NULL，需要处理
         stats["total_hits"] = row["total_hits"] if row and row["total_hits"] is not None else 0
-    
+
         # 当前周期命中次数
         self.cursor.execute("SELECT SUM(hit_count) as current_hits FROM processing_cache")
         row = self.cursor.fetchone()
         stats["current_hits"] = row["current_hits"] if row and row["current_hits"] is not None else 0
-    
+
         # 平均命中率（估算）
         if stats["total_entries"] > 0:
             stats["avg_hits_per_entry"] = stats["total_hits"] / stats["total_entries"]
         else:
             stats["avg_hits_per_entry"] = 0
-    
+
         # 任务类型分布（这部分代码原本正确，因为fetchall()返回Row列表，后续dict(row)处理得当）
         self.cursor.execute("""
             SELECT task, COUNT(*) as count,
@@ -695,7 +695,23 @@ class CacheStatsAnalyzer:
             ORDER BY count DESC
         """)
         stats["task_distribution"] = [dict(row) for row in self.cursor.fetchall()]
-    
+
+        # === 【新增】自适应分块缓存的专项统计 ===
+        self.cursor.execute("""
+            SELECT
+                COUNT(*) as total_entries,
+                SUM(total_hits) as total_hits,
+                AVG(total_hits) as avg_hits_per_entry,
+                SUM(hit_count) as current_period_hits
+            FROM processing_cache
+            WHERE task = 'adaptive_chunk_size'
+        """)
+        row = self.cursor.fetchone()
+        stats["adaptive_chunk_cache"] = dict(row) if row else {
+            "total_entries": 0, "total_hits": 0, "avg_hits_per_entry": 0, "current_period_hits": 0
+        }
+        # === 新增结束 ===
+
         return stats
 
     # %%
@@ -823,6 +839,68 @@ class CacheStatsAnalyzer:
         return analysis
 
 # %% [markdown]
+# ## get_adaptive_chunk_effectiveness(self) -> Dict[str, Any]
+
+    # %%
+    def get_adaptive_chunk_effectiveness(self) -> Dict[str, Any]:
+        """分析自适应分块缓存的有效性"""
+        effectiveness = {}
+
+        # 1. 基础数据
+        self.cursor.execute("""
+            SELECT
+                COUNT(*) as entries,
+                SUM(total_hits) as total_hits
+            FROM processing_cache
+            WHERE task = 'adaptive_chunk_size'
+        """)
+        row = self.cursor.fetchone()
+        entries = row['entries'] if row and row['entries'] else 0
+        total_hits = row['total_hits'] if row and row['total_hits'] else 0
+
+        effectiveness["entries"] = entries
+        effectiveness["total_hits"] = total_hits
+
+        # 2. 计算“估计节省的探测次数”
+        # 原理：每次缓存命中，意味着避免了一次对Ollama的嵌入调用（即一次探测）。
+        # 假设每次探测平均消耗0.5秒（包含网络和计算），可估算节省的时间。
+        estimated_saved_probes = total_hits
+        estimated_saved_time_seconds = estimated_saved_probes * 0.5
+        effectiveness["estimated_saved_probes"] = estimated_saved_probes
+        effectiveness["estimated_saved_time_hours"] = round(estimated_saved_time_seconds / 3600, 2)
+
+        # 3. 缓存新鲜度：最后访问时间分布
+        self.cursor.execute("""
+            SELECT
+                CASE
+                    WHEN julianday('now') - julianday(last_accessed) <= 1 THEN '1天内'
+                    WHEN julianday('now') - julianday(last_accessed) <= 7 THEN '7天内'
+                    WHEN julianday('now') - julianday(last_accessed) <= 30 THEN '30天内'
+                    ELSE '超过30天'
+                END as access_recency,
+                COUNT(*) as count
+            FROM processing_cache
+            WHERE task = 'adaptive_chunk_size'
+            GROUP BY access_recency
+        """)
+        effectiveness["access_recency"] = [dict(row) for row in self.cursor.fetchall()]
+
+        # 4. 高价值缓存（命中次数最多的分块建议）
+        self.cursor.execute("""
+            SELECT
+                substr(cache_key, 1, 50) as sample_key,
+                total_hits,
+                created_at
+            FROM processing_cache
+            WHERE task = 'adaptive_chunk_size'
+            ORDER BY total_hits DESC
+            LIMIT 5
+        """)
+        effectiveness["top_hit_entries"] = [dict(row) for row in self.cursor.fetchall()]
+
+        return effectiveness
+
+# %% [markdown]
 # ## get_performance_metrics(self) -> Dict[str, Any]
 
     # %%
@@ -870,7 +948,7 @@ class CacheStatsAnalyzer:
 
         # 缓存命中时间模式（按小时）
         self.cursor.execute("""
-            SELECT 
+            SELECT
                 strftime('%H', last_accessed) as hour,
                 COUNT(*) as access_count
             FROM processing_cache
@@ -922,6 +1000,9 @@ class CacheStatsAnalyzer:
 
         return trends
 
+# %% [markdown]
+# ## get_comprehensive_report(self) -> Dict[str, Any]
+
     # %%
     def get_comprehensive_report(self) -> Dict[str, Any]:
         """生成综合报告"""
@@ -933,6 +1014,8 @@ class CacheStatsAnalyzer:
             "validation_analysis": self.get_validation_analysis(),
             "performance_metrics": self.get_performance_metrics(),
             "growth_trends": self.get_growth_trends(30),
+            # === 【新增】集成自适应分块缓存分析 ===
+            "adaptive_chunk_effectiveness": self.get_adaptive_chunk_effectiveness(),
             "summary": {},
         }
 
@@ -940,6 +1023,9 @@ class CacheStatsAnalyzer:
         basic = report["basic_stats"]
         time_ana = report["time_analysis"]
         valid_ana = report["validation_analysis"]
+
+        # 也可以在summary中加入分块缓存的關鍵指標
+        adaptive_stats = report["adaptive_chunk_effectiveness"]
 
         report["summary"] = {
             "total_cache_entries": basic["total_entries"],
@@ -949,6 +1035,8 @@ class CacheStatsAnalyzer:
             "validation_coverage": f"{sum([v['count'] for v in valid_ana['validation_states'] if v['validation_state'] != 'not_validated'])} entries validated",
             "estimated_size": f"{report['performance_metrics']['estimated_size_mb']} MB",
             "growth_rate": f"{report['growth_trends']['predicted_weekly_growth']} entries/week (predicted)",
+            "adaptive_cache_entries": adaptive_stats.get("entries", 0),
+            "adaptive_cache_saved_probes": adaptive_stats.get("estimated_saved_probes", 0),
         }
 
         return report
@@ -966,6 +1054,11 @@ class CacheReportGenerator:
         self.analyzer = analyzer
         self.report_data = None
 
+
+# %% [markdown]
+# ## generate_markdown_report(self) -> str
+
+    # %%
     def generate_markdown_report(self) -> str:
         """生成 Markdown 格式的报告"""
         if not self.report_data:
@@ -1086,6 +1179,31 @@ class CacheReportGenerator:
                 )
                 md_lines.append(f"| {daily['date']} | {daily['new_entries']} | {cum} |")
 
+        # === 【新增章节】自适应分块缓存有效性分析 ===
+        md_lines.append("## 🔧 自适应分块缓存分析")
+        adaptive_eff = self.report_data["adaptive_chunk_effectiveness"]
+
+        md_lines.append(f"- **总缓存条目数**: {adaptive_eff['entries']}")
+        md_lines.append(f"- **总命中次数**: {adaptive_eff['total_hits']}")
+        md_lines.append(f"- **估计节省探测次数**: {adaptive_eff['estimated_saved_probes']}")
+        md_lines.append(f"- **估计节省时间**: ~{adaptive_eff['estimated_saved_time_hours']} 小时")
+
+        md_lines.append("### 缓存访问新鲜度")
+        md_lines.append("| 最后访问时间 | 条目数 |")
+        md_lines.append("|--------------|--------|")
+        for recency in adaptive_eff.get('access_recency', []):
+            md_lines.append(f"| {recency['access_recency']} | {recency['count']} |")
+
+        if adaptive_eff['top_hit_entries']:
+            md_lines.append("### 高命中分块建议（Top 5）")
+            md_lines.append("| 缓存键样例 | 总命中 | 创建时间 |")
+            md_lines.append("|------------|--------|----------|")
+            for entry in adaptive_eff['top_hit_entries']:
+                md_lines.append(f"| `{entry['sample_key']}` | {entry['total_hits']} | {entry['created_at'][:10]} |")
+
+        md_lines.append("") # 空行
+        # === 新增章节结束 ===
+
         # 建议和洞察
         md_lines.append("")
         md_lines.append("## 💡 洞察与建议")
@@ -1105,7 +1223,10 @@ class CacheReportGenerator:
             insights.append(
                 "**活跃度低**: 近期活跃缓存比例较低，考虑优化缓存策略或检查数据新鲜度"
             )
-
+        if adaptive_eff['entries'] > 0 and adaptive_eff['total_hits'] / adaptive_eff['entries'] < 0.5:
+            insights.append("**分块缓存利用率低**: 自适应分块缓存平均命中率较低，考虑检查文本特征多样性或调整探测策略。")
+        if adaptive_eff.get('estimated_saved_probes', 0) > 1000:
+            insights.append("**分块缓存效果显著**: 已节省大量探测调用，有效提升了系统效率。")
         if not insights:
             insights.append("缓存系统运行良好，继续保持当前策略")
 
@@ -1133,7 +1254,6 @@ class CacheReportGenerator:
 
         return "\n".join(md_lines)
 
-
 # %% [markdown]
 # ## save_to_joplin(self, notebook_title: str = None, note_title: str = None) -> bool
 
@@ -1143,7 +1263,7 @@ class CacheReportGenerator:
     ) -> bool:
         """保存报告到 Joplin 笔记"""
         try:
-            from func.jpfuncs import createnote, searchnotes, updatenote_body
+            from func.jpfuncs import createnote, searchnotes, updatenote_body, searchnotebook
 
             # 生成报告内容
             report_content = self.generate_markdown_report()
@@ -1156,34 +1276,25 @@ class CacheReportGenerator:
             )
 
             # 搜索是否已存在今日报告
-            search_query = f'title:"{REPORT_NOTE_TITLE_PREFIX}"'
+            search_query = f'{REPORT_NOTE_TITLE_PREFIX}'
+            # 找到最近的相关笔记
             existing_notes = searchnotes(search_query)
 
-            note_id = None
+            success = False
             if existing_notes:
-                # 找到最近的相关笔记
-                for note in existing_notes:
-                    if notebook_title in getattr(note, "notebook_title", ""):
-                        note_id = note.id
-                        break
-
-            if note_id:
                 # 更新现有笔记
-                success = updatenote_body(note_id, report_content)
+                note = existing_notes[0]
+                updatenote_body(note.id, report_content)
                 log.info(f"已更新缓存统计报告笔记: {title}")
+                success = True
             else:
                 # 创建新笔记
                 note_id = createnote(
                     title=title,
                     body=report_content,
-                    parent_id=None,  # 将自动放入指定笔记本
+                    parent_id=searchnotebook(notebook),  # 将自动放入指定笔记本
                 )
-                if note_id:
-                    log.info(f"已创建缓存统计报告笔记: {title}")
-                    success = True
-                else:
-                    log.error("创建报告笔记失败")
-                    success = False
+                success = True
 
             return success
 
