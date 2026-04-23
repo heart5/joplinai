@@ -1509,27 +1509,27 @@ class EmbeddingGenerator:
         response = ollama.embeddings(model=self.model_name, prompt=text)
         return response["embedding"]
 
-
 # %% [markdown]
-# ## get_ollama_embedding(text: str, model: str, host: str = "10.9.0.2", port: int = 11434)
+# ## get_ollama_embedding(self, text: str, host: str = "10.9.0.2", port: int = 11434)
 
-# %%
-def get_ollama_embedding(
-    text: str, model: str, host: str = "10.9.0.2", port: int = 11034
-):
-    """调用远程恒创云Ollama生成嵌入"""
-    host = self.config.get("ollama_host", host)
-    port = self.config.get("ollama_port", port)
-    url = f"http://{host}:{port}/api/embeddings"
-    payload = {"model": model, "prompt": text}
-    try:
-        resp = requests.post(url, json=payload, timeout=30)
-        resp.raise_for_status()
-        return resp.json()["embedding"]
-    except Exception as e:
-        log.error(f"远程Ollama嵌入调用失败: {e}")
-        raise
-
+    # %%
+    def get_ollama_embedding(
+        self, text: str, host: str = "10.9.0.2", port: int = 11034
+    ):
+        """调用远程恒创云Ollama生成嵌入"""
+        host = self.config.get("ollama_host", host)
+        port = self.config.get("ollama_port", port)
+        url = f"http://{host}:{port}/api/embeddings"
+        model = self.model_name
+        print(host, port, model)
+        payload = {"model": model, "prompt": text}
+        try:
+            resp = requests.post(url, json=payload, timeout=30)
+            resp.raise_for_status()
+            return resp.json()["embedding"]
+        except Exception as e:
+            log.error(f"远程Ollama嵌入调用失败: {e}")
+            raise
 
 # %% [markdown]
 # ## get_cached_embedding(self, text_hash: str) -> Optional[List[float]]
