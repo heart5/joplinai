@@ -90,12 +90,15 @@ class VectorDBManager:
 
                     # 如果健康，继续原有的维度验证逻辑
                     if count > 0:
-                        sample = self.collection.get(limit=1)
-                        log.debug(sample)
-                        if sample and "embeddings" in sample and sample["embeddings"]:
+                        sample = self.collection.get(include=['embeddings', 'metadatas'], limit=1)
+                        # log.debug(sample)
+                        if sample and "embeddings" in sample and sample["embeddings"].any():
                             existing_dim = len(sample["embeddings"][0])
-                            log.info(f"测试向量数据集合的维度为{existing_dim}")
                             current_dim = self._get_model_dimension(self.embedding_model)
+                            log.info(
+                                f"测试向量数据集合的维度为：{existing_dim}，"
+                                f"测试模型获取的向量维度为：{current_dim}。"
+                            )
                             if existing_dim != current_dim:
                                 log.warning(f"维度不匹配: 现有{existing_dim}D, 需要{current_dim}D")
                                 if for_creation:
