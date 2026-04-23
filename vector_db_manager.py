@@ -85,14 +85,16 @@ class VectorDBManager:
                 # === 【关键修复】尝试验证集合可访问性，捕获索引损坏 ===
                 try:
                     # 执行一个轻量级操作来验证集合是否健康
-                    _ = self.collection.count()
-                    log.debug(f"集合《{self.collection_name}》状态健康。")
+                    count = self.collection.count()
+                    log.debug(f"集合《{self.collection_name}》状态健康，数量为：{count}。")
 
                     # 如果健康，继续原有的维度验证逻辑
-                    if self.collection.count() > 0:
+                    if count > 0:
                         sample = self.collection.get(limit=1)
+                        log.debug(sample)
                         if sample and "embeddings" in sample and sample["embeddings"]:
                             existing_dim = len(sample["embeddings"][0])
+                            log.info(f"测试向量数据集合的维度为{existing_dim}")
                             current_dim = self._get_model_dimension(self.embedding_model)
                             if existing_dim != current_dim:
                                 log.warning(f"维度不匹配: 现有{existing_dim}D, 需要{current_dim}D")
