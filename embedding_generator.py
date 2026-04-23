@@ -640,6 +640,7 @@ class EmbeddingGenerator:
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
         self.embedding_dim = self._get_model_dimension()
+        self._model_dimension_cache = {}  # 添加这行：初始化缓存字典
         self.embedding_cache = {}  # 简单缓存
         # 【新增】如果没有传入，则创建一个（确保 deepseek_cache 目录存在）
         if cache_manager is None:
@@ -666,12 +667,31 @@ class EmbeddingGenerator:
 
     # %%
     def _get_model_dimension(self):
+        """获取模型维度"""
+        # 已知模型维度映射
+        known_dimensions = {
+            "dengcao/bge-large-zh-v1.5": 1024,  # 根据日志显示实际是1024维
+            "nomic-embed-text": 768,
+            "qwen:1.8b": 2048,
+            # 可以添加更多已知模型
+        }
+
+        if model_name in known_dimensions:
+            dim = known_dimensions[model_name]
+            self._model_dimension_cache[model_name] = dim
+            # log.info(f"使用已知模型维度: {model_name} -> {dim}D")
+            return dim
+
+        if model_name in self._model_dimension_cache:
+            return self._model_dimension_cache[model_name]
+
         # 尝试从Ollama获取模型信息
         try:
             # 通过生成一个简单嵌入来获取维度
-            test_response = ollama.embeddings(model=self.model_name, prompt="test")
+            test_response = ollama.embeddings(model=model_name, prompt="test")
             dim = len(test_response["embedding"])
-            log.info(f"通过测试嵌入获取模型维度: {self.model_name} -> {dim}D")
+            self._model_dimension_cache[model_name] = dim
+            log.info(f"通过测试嵌入获取模型维度: {model_name} -> {dim}D")
             return dim
         except Exception as e:
             log.error(f"获取模型维度失败: {e}")
