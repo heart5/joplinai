@@ -639,8 +639,8 @@ class EmbeddingGenerator:
         self.model_name = model_name
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
-        self.embedding_dim = self._get_model_dimension()
         self._model_dimension_cache = {}  # 添加这行：初始化缓存字典
+        self.embedding_dim = self._get_model_dimension()
         self.embedding_cache = {}  # 简单缓存
         # 【新增】如果没有传入，则创建一个（确保 deepseek_cache 目录存在）
         if cache_manager is None:
