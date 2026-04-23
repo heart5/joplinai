@@ -99,7 +99,7 @@ CONFIG = {
     "max_workers": min(
         8, (os.cpu_count() or 1) * 2
     ),  # 动态设置最大工作者数：CPU核心数 * 2，上限为16
-    "db_path": getdirmain() / "data" / "joplin_vector_db",  # ChromaDB存储路径
+    "db_path": str(getdirmain() / "data" / "joplin_vector_db"),  # ChromaDB存储路径
     # "enable_deepseek_embed": False,  # 是否用DeepSeek嵌入替代本地嵌入（增强向量质量）
     "enable_deepseek_summary": False,  # 是否用DeepSeek生成摘要（增强笔记元数据）
     "enable_deepseek_tags": False,  # 是否用DeepSeek提取标签（增强笔记标签）
@@ -118,7 +118,7 @@ CONFIG = {
 model_name_str = (
     CONFIG.get("embedding_model").replace(":", "_").replace("/", "_").replace("-", "_")
 )
-CONFIG["state_path"] = (
+CONFIG["state_path"] = str(
     getdirmain() / "data" / f"joplin_process_state_{model_name_str}.json"
 )  # 处理状态文件路径
 
@@ -903,6 +903,10 @@ def main():
     log.info(
         f"动态配置：模型={dynamic_config['embedding_model']}, \
         处理状态文件={dynamic_config['state_path']}, \
+        ollama server={dynamic_config['ollama_host']}, \
+        ollama port={dynamic_config['ollama_port']}, \
+        chroma server={dynamic_config['chroma_server_host']}, \
+        chroma port={dynamic_config['chroma_server_port']}, \
         笔记本={dynamic_config['notebook_titles']}, \
         并发数={dynamic_config['max_workers']}， \
         使能deepseek摘要功能为{dynamic_config['enable_deepseek_summary']}， \
