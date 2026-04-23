@@ -676,25 +676,25 @@ class EmbeddingGenerator:
             # 可以添加更多已知模型
         }
 
-        if model_name in known_dimensions:
-            dim = known_dimensions[model_name]
-            self._model_dimension_cache[model_name] = dim
+        if self.model_name in known_dimensions:
+            dim = known_dimensions[self.model_name]
+            self._model_dimension_cache[self.model_name] = dim
             # log.info(f"使用已知模型维度: {model_name} -> {dim}D")
             return dim
 
-        if model_name in self._model_dimension_cache:
-            return self._model_dimension_cache[model_name]
+        if self.model_name in self._model_dimension_cache:
+            return self._model_dimension_cache[self.model_name]
 
         # 尝试从Ollama获取模型信息
         try:
             # 通过生成一个简单嵌入来获取维度
-            test_response = ollama.embeddings(model=model_name, prompt="test")
+            test_response = ollama.embeddings(model=self.model_name, prompt="test")
             dim = len(test_response["embedding"])
-            self._model_dimension_cache[model_name] = dim
-            log.info(f"通过测试嵌入获取模型维度: {model_name} -> {dim}D")
+            self._model_dimension_cache[self.model_name] = dim
+            log.info(f"通过测试嵌入获取模型维度: {self.model_name} -> {dim}D")
             return dim
         except Exception as e:
-            log.error(f"获取模型维度失败: {e}")
+            log.error(f"获取模型{self.model_name}维度失败: {e}")
             # 默认返回常见维度
             return 1024
 
