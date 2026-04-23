@@ -83,6 +83,13 @@ except ImportError as e:
 
 # %%
 CONFIG = {
+    "environment": "production",
+    "ollama_host": getinivaluefromcloud("joplinai", f"ollama_host_{getdeviceid()}"),
+    "ollama_port": getinivaluefromcloud("joplinai", "ollama_port"),
+    "chroma_server_host": getinivaluefromcloud(
+        "joplinai", f"chroma_server_{getdeviceid()}"
+    ),
+    "chroma_server_port": getinivaluefromcloud("joplinai", "chroma_port"),
     "notebook_titles": "顺风顺水, 日新白异, 运营管理",  # 改为笔记本名称列表字符串
     "embedding_model": "dengcao/bge-large-zh-v1.5",  # 嵌入模型（Ollama本地模型，优先选dengcao/bge-large-zh-v1.5
     # "embedding_model": "qwen:1.8b",  # 嵌入模型（Ollama本地模型，优先选nomic-embed-text）
@@ -176,9 +183,7 @@ def save_process_state(state: Dict, state_path: Path):
 
 # %%
 def filter_notes(notes):
-    """
-    根据云端配置过滤需要排除的笔记
-    """
+    """根据云端配置过滤需要排除的笔记"""
     try:
         if filter_notes_titles := getinivaluefromcloud(
             "joplinai", "filter_notes_titles"
