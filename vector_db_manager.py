@@ -64,9 +64,15 @@ class VectorDBManager:
     def __init__(self, db_path: Path, embedding_model: str, for_creation: bool = False):
         """初始化向量数据库管理器"""
         try:
-            self.client = chromadb.PersistentClient(
-                path=str(db_path),
+            from joplinai import CONFIG
+            config = CONFIG
+            self.client = chromadb.HttpClient(
+                host=config.get("chroma_server_host", "10.9.0.1"),
+                port=config.get("chroma_server_port", 8000)
             )
+            # self.client = chromadb.PersistentClient(
+            #     path=str(db_path),
+            # )
             self.embedding_model = embedding_model
             self._model_dimension_cache = {}  # 添加这行：初始化缓存字典
             self.collection_name = f"joplin_{embedding_model.replace(':', '_').replace('/', '_').replace('-', '_')}"
