@@ -36,7 +36,9 @@ from flask import Flask, jsonify, request
 # 尝试导入项目核心模块
 try:
     from func.logme import log
-    from queryanswer import CONFIG, JoplinQASystem, OptimizedJoplinQASystem
+    from joplinai import CONFIG as CONFIG_JA
+    from queryanswer import CONFIG as CONFIG_QA
+    from queryanswer import JoplinQASystem, OptimizedJoplinQASystem
 except ImportError as e:
     # 降级处理：配置基础日志并定义占位类
     import logging as log_module
@@ -60,8 +62,8 @@ except ImportError as e:
 # # 全局配置
 
 # %%
-# 默认配置 (与queryanswer.py中的CONFIG保持一致)
-DEFAULT_CONFIG = CONFIG.copy()
+# 默认配置 (与joplinai.py中的CONFIG保持一致)
+DEFAULT_CONFIG = {**CONFIG_JA.copy(), **CONFIG_QA.copy()}
 
 # %%
 # 默认配置结构示例如下
