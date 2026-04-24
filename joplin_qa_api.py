@@ -28,6 +28,7 @@ import json
 import logging
 import threading
 from datetime import datetime
+from functools import wraps
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -35,6 +36,10 @@ from flask import Flask, jsonify, request
 
 # 尝试导入项目核心模块
 try:
+    from func.datatools import getkeysfromcloud
+    from func.jpfuncs import (
+        getinivaluefromcloud,
+    )
     from func.logme import log
     from joplinai import CONFIG as CONFIG_JA
     from queryanswer import CONFIG as CONFIG_QA
@@ -66,19 +71,7 @@ except ImportError as e:
 DEFAULT_CONFIG = {**CONFIG_JA.copy(), **CONFIG_QA.copy()}
 
 # %%
-# 默认配置结构示例如下
-# DEFAULT_CONFIG = {
-#     "db_path": str(Path.home() / ".joplin_ai" / "data" / "joplin_vector_db"),
-#     "embedding_model": "nomic-embed-text",
-#     "chat_model": "qwen2.5:7b",
-#     "max_retrieved_notes": 10,
-#     "max_retrieved_chunks": 15,
-#     "similarity_threshold": 0.3,
-#     "context_max_length": 4000,  # 为提高答案长度而增加
-#     "enable_deepseek": False,
-#     "deepseek_api_key": None,
-#     "deepseek_chat_model": "deepseek-chat",
-# }
+API_KEYS = getkeysfromcloud()
 
 # %% [markdown]
 # # 全局问答系统实例（单例，线程安全）
@@ -187,6 +180,21 @@ def update_session_history(session_id: str, question: str, answer: str, metadata
 
 
 # %% [markdown]
+# ## require_api_key(f)
+
+# %%
+def require_api_key(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        api_key = request.headers.get("X-API-Key")
+        if not api_key or api_key not in API_KEYS.values():
+            return jsonify({"error": "Invalid or missing API Key"}), 401
+        return f(*args, **kwargs)
+
+    return decorated_function
+
+
+# %% [markdown]
 # # Flask API 端点
 
 # %% [markdown]
@@ -194,6 +202,7 @@ def update_session_history(session_id: str, question: str, answer: str, metadata
 
 # %%
 @app.route("/ask", methods=["POST"])
+@require_api_key
 def api_ask():
     """
     提问接口
@@ -265,6 +274,7 @@ def api_ask():
 
 # %%
 @app.route("/history", methods=["GET"])
+@require_api_key
 def api_get_history():
     """
     获取指定会话的历史记录
@@ -298,6 +308,7 @@ def api_get_history():
 
 # %%
 @app.route("/clear_history", methods=["POST"])
+@require_api_key
 def api_clear_history():
     """清空指定会话的对话历史"""
     data = request.get_json()
@@ -333,6 +344,7 @@ def api_clear_history():
 
 # %%
 @app.route("/stats", methods=["GET", "POST"])
+@require_api_key
 def api_get_stats():
     """获取指定会话的统计信息"""
     # 支持通过JSON body或查询参数传递session_id
@@ -361,6 +373,7 @@ def api_get_stats():
 
 # %%
 @app.route("/health", methods=["GET"])
+@require_api_key
 def api_health():
     """健康检查端点"""
     try:
