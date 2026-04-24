@@ -73,8 +73,8 @@ class VectorDBManager:
             # self.client = chromadb.PersistentClient(
             #     path=str(db_path),
             # )
-            self.embedding_model = embedding_model
             self._model_dimension_cache = {}  # 添加这行：初始化缓存字典
+            self.embedding_model = embedding_model
             self.collection_name = f"joplin_{embedding_model.replace(':', '_').replace('/', '_').replace('-', '_')}"
 
             # 先尝试获取集合，如果不存在则创建
