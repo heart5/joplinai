@@ -1147,7 +1147,9 @@ def main():
     args = parse_args()
 
     # 更新配置
-    dynamic_config = CONFIG.copy()
+    from joplinai import CONFIG as config
+
+    dynamic_config = {**CONFIG.copy(), **config}
     dynamic_config["chat_model"] = args.model
     dynamic_config["enable_deepseek"] = args.use_deepseek
     dynamic_config["max_retrieved_notes"] = args.max_notes
