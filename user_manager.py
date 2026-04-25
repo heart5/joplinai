@@ -21,6 +21,7 @@
 
 # %%
 import hashlib
+import json
 import logging
 import secrets
 import sqlite3
@@ -87,6 +88,20 @@ class UserManager:
                 ip_address TEXT,
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (user_id) REFERENCES users (id)
+            )
+        """)
+
+        # 问答历史表 (用于永久保存用户的问答记录)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS qa_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                session_id TEXT NOT NULL, -- 可用于区分不同设备或浏览器会话
+                question TEXT NOT NULL,
+                answer TEXT NOT NULL,
+                metadata TEXT, -- 存储JSON格式的元数据，如来源笔记、是否基于笔记等
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
             )
         """)
 
@@ -247,6 +262,58 @@ class UserManager:
         )
         conn.commit()
         conn.close()
+
+    def save_qa_history(
+        self,
+        user_id: int,
+        session_id: str,
+        question: str,
+        answer: str,
+        metadata: dict = None,
+    ):
+        """保存一次用户问答记录到数据库"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        metadata_json = json.dumps(metadata) if metadata else None
+        cursor.execute(
+            """
+            INSERT INTO qa_history (user_id, session_id, question, answer, metadata)
+            VALUES (?, ?, ?, ?, ?)
+        """,
+            (user_id, session_id, question, answer, metadata_json),
+        )
+        conn.commit()
+        conn.close()
+
+    def get_qa_history(self, user_id: int, limit: int = 50, offset: int = 0):
+        """获取指定用户的问答历史，按时间倒序排列（最新的在前）"""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row  # 返回字典形式的行
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT session_id, question, answer, metadata, created_at
+            FROM qa_history
+            WHERE user_id = ?
+            ORDER BY created_at DESC
+            LIMIT ? OFFSET ?
+        """,
+            (user_id, limit, offset),
+        )
+        rows = cursor.fetchall()
+        conn.close()
+
+        history = []
+        for row in rows:
+            item = dict(row)
+            # 将metadata JSON字符串解析回字典
+            if item["metadata"]:
+                try:
+                    item["metadata"] = json.loads(item["metadata"])
+                except:
+                    item["metadata"] = {}
+            history.append(item)
+        return history
 
 
 # %% [markdown]
