@@ -263,17 +263,42 @@ class VectorDBManager:
 # ### search_similar_chunks(self, query_embedding: list, top_k: int = 10)
 
     # %%
-    def search_similar_chunks(self, query_embedding: list, top_k: int = 10):
-        """搜索最相似的文本块（使用 ChromaDB 正确 API）"""
+    def search_similar_chunks(self, query_embedding: list, top_k: int = 10, user_identity: Optional[Dict] = None):
+        """搜索最相似的文本块（使用 ChromaDB 正确 API），基于用户身份的权限过滤"""
         if not self.collection:
             log.error("集合未加载")
             return []
 
+        # 构建基础查询
+        n_results = min(top_k * 2, 50)  # 多取一些，以便后续过滤
+        
+        # === 核心：构建元数据过滤条件 ===
+        where_filter = None
+        if user_identity:
+            user_role = user_identity.get('role')
+            user_display_name = user_identity.get('display_name')
+            
+            if user_role == 'admin':
+                # 管理员（您）：不过滤，可以看到所有笔记
+                where_filter = {}
+            elif user_role == 'colleague':
+                # 同事：只能看到“团队_共同维护”和自己创建的笔记
+                where_filter = {
+                    "$or": [
+                        {"note_author": {"$eq": "团队_共同维护"}},
+                        {"note_author": {"$eq": f"同事_{user_display_name}"}}
+                    ]
+                }
+            # 其他角色或无角色，则不设置过滤器（即无权访问任何笔记）
+            else:
+                where_filter = {"note_author": {"$eq": "__NO_ACCESS__"}}  # 确保返回空结果
+
         try:
-            # ChromaDB 的正确查询方法
+           # ChromaDB 的正确查询方法
             results = self.collection.query(
                 query_embeddings=[query_embedding],
-                n_results=top_k,
+                n_results=n_results,
+                where=where_filter,  # ChromaDB 将应用此过滤器
                 include=["documents", "metadatas", "distances"] # 确保包含这些字段
             )
 
@@ -571,23 +596,23 @@ class VectorDBManager:
         if not self.collection:
             log.error(f"集合《{self.collection_name}》中未加载")
             return []
-        
+
         try:
             # 生成查询的嵌入向量
             query_embedding = self._generate_query_embedding(query)
             if not query_embedding:
                 log.error(f"从集合《{self.collection_name}》中查询嵌入生成失败")
                 return []
-            
+
             log.info(f"集合《{self.collection_name}》查询嵌入维度: {len(query_embedding)}")
-            
+
             # 在向量数据库中搜索
             results = self.collection.query(
                 query_embeddings=[query_embedding],
                 n_results=n_results,
                 include=["documents", "metadatas", "distances"],
             )
-            
+
             # 格式化结果
             similar_notes = []
             
