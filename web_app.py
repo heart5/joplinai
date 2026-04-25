@@ -211,10 +211,58 @@ def api_ask():
             ip_address=request.remote_addr,
         )
 
+        # 保存此次问答记录到数据库
+        try:
+            USER_MANAGER.save_qa_history(
+                user_id=session["user"]["id"],
+                session_id=f"web_{session['user']['username']}",
+                question=question,
+                answer=result.get("answer", ""),
+                metadata={
+                    "is_based_on_notes": result.get("metadata", {}).get(
+                        "is_based_on_notes", False
+                    ),
+                    "relevant_notes_count": result.get("metadata", {}).get(
+                        "relevant_notes_count", 0
+                    ),
+                    "sources": result.get("metadata", {}).get("sources", []),
+                },
+            )
+        except Exception as e:
+            log.error(f"保存问答历史到数据库失败: {e}")
+            # 不影响主流程，仅记录错误
+
         return jsonify(result)
     except requests.exceptions.RequestException as e:
         log.error(f"调用QA API失败: {e}")
         return jsonify({"error": "问答服务暂时不可用", "details": str(e)}), 502
+
+
+# %% [markdown]
+# ## api_get_history()
+
+# %%
+@app.route("/api/history", methods=["GET"])
+@login_required
+def api_get_history():
+    """获取当前登录用户的持久化问答历史"""
+    try:
+        limit = request.args.get("limit", default=20, type=int)
+        offset = request.args.get("offset", default=0, type=int)
+
+        history = USER_MANAGER.get_qa_history(
+            user_id=session["user"]["id"],
+            limit=min(limit, 100),  # 防止一次请求过多
+            offset=offset,
+        )
+
+        return jsonify(
+            {"success": True, "history": history, "total": len(history)}
+        ), 200
+
+    except Exception as e:
+        log.error(f"获取用户历史失败: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 # %% [markdown]
