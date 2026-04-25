@@ -33,32 +33,35 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 # %%
-try:
-    from func.configpr import (
-        findvaluebykeyinsection,
-        getcfpoptionvalue,
-        setcfpoptionvalue,
-    )
-    from func.first import dirmainpath, getdirmain
-    from func.getid import getdeviceid, getdevicename, gethostuser
-    from func.jpfuncs import (
-        createnote,
-        getinivaluefromcloud,
-        getnote,
-        jpapi,
-        searchnotebook,
-        searchnotes,
-        updatenote_body,
-    )
-    from func.logme import log
-    from func.sysfunc import execcmd, not_IPython
-    from func.wrapfuncs import timethis
-except ImportError as e:
-    import logging
+import pathmagic
 
-    logging.basicConfig(level=logging.INFO)
-    log = logging.getLogger(__name__)
-    log.error(f"导入项目模块失败: {e}")
+with pathmagic.context():
+    try:
+        from func.configpr import (
+            findvaluebykeyinsection,
+            getcfpoptionvalue,
+            setcfpoptionvalue,
+        )
+        from func.first import dirmainpath, getdirmain
+        from func.getid import getdeviceid, getdevicename, gethostuser
+        from func.jpfuncs import (
+            createnote,
+            getinivaluefromcloud,
+            getnote,
+            jpapi,
+            searchnotebook,
+            searchnotes,
+            updatenote_body,
+        )
+        from func.logme import log
+        from func.sysfunc import execcmd, not_IPython
+        from func.wrapfuncs import timethis
+    except ImportError as e:
+        import logging
+
+        logging.basicConfig(level=logging.INFO)
+        log = logging.getLogger(__name__)
+        log.error(f"导入项目模块失败: {e}")
 
 
 # %% [markdown]

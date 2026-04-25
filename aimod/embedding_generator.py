@@ -29,28 +29,33 @@ from functools import lru_cache
 from typing import Dict, List, Optional, Tuple
 
 import ollama
+import pathmagic
 import requests
 
-try:
-    from func.datatools import compute_content_hash
-    from func.jpfuncs import (
-        createnote,
-        get_notebook_ids_for_note,
-        get_notes_in_notebook_by_title,
-        get_tag_titles,
-        getinivaluefromcloud,
-        getnote,
-        jpapi,
-        searchnotebook,
-        searchnotes,
-        updatenote_body,
-        updatenote_title,
-    )
-    from func.logme import log
-except ImportError as e:
-    logging.basicConfig(level=logging.INFO)
-    log = logging.getLogger(__name__)
-    log.error(f"导入项目模块失败: {e}")
+
+# %%
+with pathmagic.context():
+    try:
+        from aimod.deepseek_enhancer import deepseek_process_note, get_cache_manager
+        from func.datatools import compute_content_hash
+        from func.jpfuncs import (
+            createnote,
+            get_notebook_ids_for_note,
+            get_notes_in_notebook_by_title,
+            get_tag_titles,
+            getinivaluefromcloud,
+            getnote,
+            jpapi,
+            searchnotebook,
+            searchnotes,
+            updatenote_body,
+            updatenote_title,
+        )
+        from func.logme import log
+    except ImportError as e:
+        logging.basicConfig(level=logging.INFO)
+        log = logging.getLogger(__name__)
+        log.error(f"导入项目模块失败: {e}")
 
 
 # %% [markdown]
@@ -645,7 +650,7 @@ class EmbeddingGenerator:
         # 【新增】如果没有传入，则创建一个（确保 deepseek_cache 目录存在）
         if cache_manager is None:
             from cache_manager import SQLiteCacheManager  # 导入
-            from func.dirme import getdirmain
+            from func.first import getdirmain
             import os
             cache_dir = getdirmain() / "data" / ".deepseek_cache"
             os.makedirs(cache_dir, exist_ok=True)
@@ -800,7 +805,6 @@ class EmbeddingGenerator:
     # %%
     def enhance_by_deepseek_for_summary_tags(self, chunk_content: str, note_tags: str, config: Dict):
         """DeepSeek 官方模型增强生成小结和标签（和笔记既有标签进行融合）"""
-        from deepseek_enhancer import deepseek_process_note, get_cache_manager
 
         # log.info(get_cache_manager().get_stats())
 
