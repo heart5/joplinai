@@ -457,8 +457,15 @@ class OptimizedJoplinQASystem(JoplinQASystem):
 # ### ask(self, question: str, use_history: bool = True) -> Dict
 
     # %%
-    def ask(self, question: str, use_history: bool = True) -> Dict:
-        """提问入口，现在基于块进行检索和回答。"""
+    def ask(self, question: str, use_history: bool = True, user_identity: Optional[Dict] = None) -> Dict:
+        """提问入口，现在基于块进行检索和回答。
+        用户身份示例：
+        user_identity = {
+            'username': 'chenzhiwei',
+            'display_name': '陈志伟',
+            'role': 'colleague'  # 'admin' 或 'colleague'
+        }
+        """
         # 1. 预处理问题
         processed_question = self._preprocess_question(question)
 
@@ -479,6 +486,7 @@ class OptimizedJoplinQASystem(JoplinQASystem):
         similar_chunks = self.vector_db.search_similar_chunks(
             query_embedding,
             top_k=self.config.get("max_retrieved_chunks", 15),  # 可配置
+            user_identity=user_identity  # 新增参数
         )
 
         # 4. 过滤和重排序块
