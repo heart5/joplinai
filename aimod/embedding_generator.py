@@ -1545,7 +1545,7 @@ class EmbeddingGenerator:
         port = self.config.get("ollama_port", port)
         url = f"http://{host}:{port}/api/embeddings"
         model = self.model_name
-        print(host, port, model)
+        # print(host, port, model)
         payload = {"model": model, "prompt": text}
         try:
             resp = requests.post(url, json=payload, timeout=30)
