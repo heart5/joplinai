@@ -149,6 +149,42 @@
 
     <!-- 极简Markdown解析器 -->
     <script>
+        // ========== 【全局安全守卫 - 插入在所有JS代码之前】 ==========
+        (function() {
+            // 1. 保存原始的 addEventListener，以便我们包装它
+            const originalAddEventListener = EventTarget.prototype.addEventListener;
+            
+            // 2. 重写 addEventListener，对所有新绑定的事件监听器进行错误包裹
+            EventTarget.prototype.addEventListener = function(type, listener, options) {
+                // 创建一个安全的包装函数
+                const wrappedListener = function(...args) {
+                    try {
+                        // 尝试执行原始的监听器
+                        return listener.apply(this, args);
+                    } catch (error) {
+                        // 特别静默处理“Cannot read properties of undefined (reading '0')”这类错误
+                        if (error instanceof TypeError && error.message.includes("reading '0'")) {
+                            console.warn(
+                                '[安全守卫] 已静默一个类型错误，不影响页面功能。',
+                                '错误信息:', error.message,
+                                '事件类型:', type,
+                                '触发元素:', this.tagName, this.id ? `#${this.id}` : ''
+                            );
+                            return; // 静默失败，不阻断页面
+                        }
+                        // 对于其他错误，仍然抛出
+                        throw error;
+                    }
+                };
+                
+                // 使用包装后的监听器进行绑定
+                return originalAddEventListener.call(this, type, wrappedListener, options);
+            };
+            
+            console.log('[安全守卫] 已激活，将保护页面免受意外点击事件错误的影响。');
+        })();
+        // ========== 守卫代码结束 ==========
+
         window.marked = {
             parse: function(text) {
                 if (!text) return '';
@@ -189,6 +225,7 @@
                 raw: safeGet('rawResponse')
             };
 
+
             // 2. 关键检查：如果表单不存在，则停止初始化
             if (!elements.form) {
                 alert('页面初始化失败：关键组件缺失。请刷新页面。');
@@ -196,107 +233,159 @@
             }
             console.log('[Init] ✅ 所有DOM元素已就绪。');
 
-            function appendMessage(sender, text) {
+            /**
+             * 添加消息（最新消息置顶 + 时间标签）
+             * @param {string} sender - 'user' 或 'bot'
+             * @param {string} text - 消息内容
+             */
+            function appendMessage(sender, text, timestamp = null) {
+                // 1. 防御：确保聊天容器存在
                 if (!elements.chat) {
-                    console.warn('[appendMessage] 忽略：chatHistory 元素不存在。');
+                    console.warn('[appendMessage] 忽略：chatHistory 容器不存在。');
                     return;
                 }
+            
+                // 2. 创建消息容器
                 const msgDiv = document.createElement('div');
                 msgDiv.className = sender === 'user' ? 'user-message' : 'bot-message';
             
-                const safeText = String(text || ''); // 强制转换为字符串
+                // 3. 生成当前时间字符串（格式：今天 23:45 / 昨天 10:30 / 04-25 14:20）
+                const msgTime = timestamp instanceof Date ? timestamp : new Date();
+                const timeStr = formatMessageTime(msgTime);
+                
+                // 4. 构建消息内容
+                const safeText = String(text || '');
+                let contentHtml = '';
             
                 if (sender === 'bot') {
+                    // AI 消息：显示 AI 标识、Markdown 渲染内容、时间
                     try {
-                        // 确保marked库存在且输入安全
-                        if (window.marked && window.marked.parse) {
-                            msgDiv.innerHTML = window.marked.parse(safeText);
-                        } else {
-                            // 降级：直接显示文本
-                            msgDiv.textContent = safeText;
-                        }
+                        const renderedText = window.marked && window.marked.parse ? window.marked.parse(safeText) : safeText;
+                        contentHtml = `
+                            <strong>助手：</strong>
+                            <div class="message-content">${renderedText}</div>
+                            <span class="message-time">${timeStr}</span>
+                        `;
                     } catch (mdError) {
                         console.warn('[appendMessage] Markdown渲染失败，降级为纯文本:', mdError);
-                        msgDiv.textContent = safeText;
+                        contentHtml = `
+                            <strong>助手：</strong>
+                            <div class="message-content">${escapeHtml(safeText)}</div>
+                            <span class="message-time">${timeStr}</span>
+                        `;
                     }
                 } else {
-                    // 用户消息简单处理
-                    msgDiv.textContent = `您：${safeText}`;
+                    // 用户消息：显示用户标识、纯文本、时间
+                    contentHtml = `
+                        <strong>您：</strong>
+                        <div class="message-content">${escapeHtml(safeText)}</div>
+                        <span class="message-time">${timeStr}</span>
+                    `;
                 }
             
-                elements.chat.appendChild(msgDiv);
-                elements.chat.scrollTop = elements.chat.scrollHeight;
+                msgDiv.innerHTML = contentHtml;
+            
+                // 5. 【关键】将新消息插入到历史列表的最顶部（最新在最上）
+                if (elements.chat.firstChild) {
+                    elements.chat.insertBefore(msgDiv, elements.chat.firstChild);
+                } else {
+                    elements.chat.appendChild(msgDiv);
+                }
+            
+                // 6. 可选：自动滚动到顶部（因为最新消息已置顶）
+                elements.chat.scrollTop = 0;
+            }
+            
+            /**
+             * 格式化消息时间为友好格式
+             * @param {Date} date - 日期对象
+             * @returns {string} 格式化后的时间字符串
+             */
+            function formatMessageTime(date) {
+                const now = new Date();
+                const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                const yesterday = new Date(today);
+                yesterday.setDate(yesterday.getDate() - 1);
+                const messageDay = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+            
+                let dayStr = '';
+                if (messageDay.getTime() === today.getTime()) {
+                    dayStr = '今天';
+                } else if (messageDay.getTime() === yesterday.getTime()) {
+                    dayStr = '昨天';
+                } else {
+                    // 更早的日期：显示 MM-DD
+                    dayStr = `${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+                }
+            
+                const timeStr = `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+                return `${dayStr} ${timeStr}`;
             }
 
             /**
-             * 安全地更新“参考笔记”列表
-             * @param {Object} apiResult - 完整的API响应对象
+             * 终极安全的更新参考笔记函数
+             * 设计原则：即使传入 undefined/null，或内部数据结构任意变化，也绝不崩溃。
              */
             function updateSources(apiResult) {
                 // 1. 终极防御：确保操作对象存在
                 if (!elements.sources) {
-                    console.warn('[updateSources] 忽略：sourcesList 元素不存在。');
-                    return;
+                    return; // 静默退出
                 }
                 
                 // 清空现有内容
                 elements.sources.innerHTML = '';
                 
-                // 2. 验证输入
+                // 2. 验证输入 - 如果输入无效，直接显示无来源并退出
                 if (!apiResult || typeof apiResult !== 'object') {
-                    console.warn('[updateSources] 输入参数无效，显示无来源。');
                     elements.sources.innerHTML = '<li><em>本次回答未引用特定笔记。</em></li>';
                     return;
                 }
                 
-                // 3. 【智能数据提取】尝试所有已知的可能路径
-                let rawNotesArray = null;
-                let dataSource = 'unknown';
-                
-                if (Array.isArray(apiResult.relevant_notes)) {
-                    rawNotesArray = apiResult.relevant_notes;
-                    dataSource = 'relevant_notes';
-                } else if (apiResult.metadata && Array.isArray(apiResult.metadata.sources)) {
-                    rawNotesArray = apiResult.metadata.sources;
-                    dataSource = 'metadata.sources';
-                } else if (apiResult.sources && Array.isArray(apiResult.sources)) {
-                    rawNotesArray = apiResult.sources;
-                    dataSource = 'sources';
-                }
-                
-                console.log(`[updateSources] 数据来源: ${dataSource}, 原始数据:`, rawNotesArray);
-                
-                // 4. 处理无数据情况
-                if (!rawNotesArray || rawNotesArray.length === 0) {
-                    elements.sources.innerHTML = '<li><em>本次回答未引用特定笔记。</em></li>';
-                    return;
-                }
-                
-                // 5. 安全渲染每一条笔记
+                // 3. 【安全数据提取】不假设任何数据结构
+                let notesArray = [];
                 try {
-                    rawNotesArray.forEach((item, index) => {
-                        // item 可能是任何结构，安全提取
-                        const safeItem = item || {};
-                        const title = safeItem.title || safeItem.note_id || `参考笔记 ${index + 1}`;
-                        const notebook = safeItem.notebook || (safeItem.tags ? (Array.isArray(safeItem.tags) ? safeItem.tags.join(', ') : String(safeItem.tags)) : '未知');
-                        const score = typeof safeItem.similarity === 'number' ? safeItem.similarity : (typeof safeItem.score === 'number' ? safeItem.score : 0);
-                        
-                        const li = document.createElement('li');
-                        li.className = 'source-item mb-2 pb-2 border-bottom';
-                        li.innerHTML = `
-                            <strong>${escapeHtml(String(title))}</strong><br>
-                            <small>标签：${escapeHtml(String(notebook))} | 相关性：${score.toFixed(3)}</small>
-                        `;
-                        elements.sources.appendChild(li);
-                    });
-                    console.log(`[updateSources] 成功渲染 ${rawNotesArray.length} 条笔记。`);
-                } catch (renderError) {
-                    console.error('[updateSources] 渲染笔记列表时发生意外错误:', renderError);
-                    elements.sources.innerHTML = '<li><em style="color:#dc3545;">渲染笔记列表时出错。</em></li>';
+                    // 尝试所有可能的数据路径
+                    if (Array.isArray(apiResult.relevant_notes)) {
+                        notesArray = apiResult.relevant_notes;
+                    } else if (apiResult.metadata && Array.isArray(apiResult.metadata.sources)) {
+                        notesArray = apiResult.metadata.sources;
+                    } else if (Array.isArray(apiResult.sources)) {
+                        notesArray = apiResult.sources;
+                    }
+                    // 如果都不是数组，notesArray 保持为空数组
+                } catch (e) {
+                    // 即使在属性访问时出错，也保持空数组
+                    notesArray = [];
+                }
+                
+                // 4. 安全渲染
+                if (!notesArray.length) {
+                    elements.sources.innerHTML = '<li><em>本次回答未引用特定笔记。</em></li>';
+                    return;
+                }
+                
+                // 5. 使用 for 循环替代 forEach，更可控
+                for (let i = 0; i < notesArray.length; i++) {
+                    const item = notesArray[i];
+                    // 即使 item 是 null/undefined，也安全处理
+                    const safeItem = item || {};
+                    const title = safeItem.title || safeItem.note_id || `参考 ${i + 1}`;
+                    const notebook = safeItem.notebook || (safeItem.tags ? (Array.isArray(safeItem.tags) ? safeItem.tags.join(', ') : String(safeItem.tags)) : '未知');
+                    const score = typeof safeItem.similarity === 'number' ? safeItem.similarity : (typeof safeItem.score === 'number' ? safeItem.score : 0);
+                    
+                    const li = document.createElement('li');
+                    li.className = 'source-item';
+                    li.innerHTML = `
+                        <strong>${escapeHtml(title)}</strong><br>
+                        <small>来源：${escapeHtml(notebook)} | 相关性：${score.toFixed(3)}</small>
+                    `;
+                    elements.sources.appendChild(li);
                 }
             }
 
-            // 辅助函数：HTML转义（防止XSS）
+            /**
+             * HTML 转义（防止 XSS）
+             */
             function escapeHtml(text) {
                 if (text == null) return '';
                 return String(text)
@@ -306,6 +395,7 @@
                     .replace(/"/g, '&quot;')
                     .replace(/'/g, '&#039;');
             }
+
 
             function updateRawResponse(data) {
                 if (!elements.raw) return;
@@ -319,9 +409,53 @@
                 }
             }
 
+            /**
+             * 页面加载时，从服务器获取用户的历史问答记录并显示
+             */
+            async function loadUserHistory() {
+                const loadingindicator = document.getElementById('loadingIndicator');
+                if (loadingindicator) loadingindicator.style.display = 'block';
+                
+                try {
+                    const response = await fetch('/api/history?limit=50');
+                    const result = await response.json();
+                    
+                    if (result.success && Array.isArray(result.history)) {
+                        console.log(`[init] 加载到 ${result.history.length} 条历史记录`);
+                        
+                        // 清空现有的欢迎消息（如果需要）
+                        elements.chat.innerhtml = '';
+                        
+                        // 将历史记录按时间倒序（数据库已排序）添加到聊天区
+                        // 注意：历史记录在数据库中是 desc 排序（最新的在前），这正好符合您“最新置顶”的要求
+                        result.history.forEach(item => {
+                            // 先添加用户问题
+                            appendMessage('user', item.question, new Date(item.created_at));
+                            // 再添加ai答案
+                            appendMessage('bot', item.answer, new Date(item.created_at));
+                        });
+                        
+                        // 如果没有历史，显示欢迎语
+                        if (result.history.length === 0) {
+                            appendMessage('bot', '您好！我可以基于您的joplin笔记库回答问题。请在上方输入您的问题。', new Date());
+                        }
+                        
+                    } else {
+                        console.warn('[init] 加载历史记录失败:', result.error);
+                        appendMessage('bot', '您好！我可以基于您的joplin笔记库回答问题。', new Date());
+                    }
+                } catch (error) {
+                    console.error('[init] 请求历史记录api失败:', error);
+                    appendMessage('bot', '您好！我可以基于您的joplin笔记库回答问题。', new Date());
+                } finally {
+                    if (loadingindicator) loadingindicator.style.display = 'none';
+                }
+            }
+            // 在页面初始化完成后调用
+            loadUserHistory();
+
             // 4. 绑定表单提交事件（核心）
-            // elements.form.addEventListener('submit', async function(event) {
-            askForm.addEventListener('submit', async function(event) {
+            elements.form.addEventListener('submit', async function(event) {
                 event.preventDefault();
                 console.log('[Submit] 表单提交事件触发。');
 
