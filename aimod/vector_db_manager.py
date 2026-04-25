@@ -31,22 +31,25 @@ from typing import Dict, List, Optional, Tuple
 
 import chromadb
 import ollama
-from embedding_generator import EmbeddingGenerator  # 用于调用提取函数
 
 # %%
-try:
-    from func.datatools import compute_content_hash
-    from func.first import getdirmain
-    from func.jpfuncs import (
-        get_notebook_ids_for_note,
-        get_tag_titles,
-        getnote,
-    )
-    from func.logme import log
-except ImportError as e:
-    logging.basicConfig(level=logging.INFO)
-    log = logging.getLogger(__name__)
-    log.error(f"导入项目模块失败: {e}")
+import pathmagic
+
+with pathmagic.context():
+    try:
+        from aimod.embedding_generator import EmbeddingGenerator  # 用于调用提取函数
+        from func.datatools import compute_content_hash
+        from func.first import getdirmain
+        from func.jpfuncs import (
+            get_notebook_ids_for_note,
+            get_tag_titles,
+            getnote,
+        )
+        from func.logme import log
+    except ImportError as e:
+        logging.basicConfig(level=logging.INFO)
+        log = logging.getLogger(__name__)
+        log.error(f"导入项目模块失败: {e}")
 
 
 # %% [markdown]
@@ -64,8 +67,11 @@ class VectorDBManager:
     def __init__(self, db_path: Path, embedding_model: str, for_creation: bool = False):
         """初始化向量数据库管理器"""
         try:
-            from joplinai import CONFIG
-            config = CONFIG
+            import pathmagic
+            with pathmagic.context():
+                from joplinai import CONFIG as CONFIG_JA
+            config = CONFIG_JA
+            # print(config)
             self.client = chromadb.HttpClient(
                 host=config.get("chroma_server_host", "10.9.0.1"),
                 port=config.get("chroma_server_port", 8000)
@@ -887,11 +893,16 @@ def migrate_all_chunks_with_author(
 # %%
 if __name__ == "__main__":
     # 初始化，配置需与主程序一致
-    config = {
+    config_dynamic = {
         "embedding_model": "dengcao/bge-large-zh-v1.5",  # 根据实际情况修改
         "db_path": getdirmain() / "data" / "joplin_vector_db",  # ChromaDB存储路径
     }
-    vector_db = VectorDBManager(config.get("db_path"), config.get("embedding_model"))
-    embedding_gen = EmbeddingGenerator(config.get("embedding_model"))
+    config = {**config_dynamic}
+    print(config.get("db_path", ""), config.get("embedding_model", ""))
+    vector_db = VectorDBManager(
+        config.get("db_path", ""),
+        config.get("embedding_model", ""),
+    )
+    embedding_gen = EmbeddingGenerator(config, config.get("embedding_model"))
 
-    migrate_all_chunks_with_author(vector_db, embedding_gen)
+    # migrate_all_chunks_with_author(vector_db, embedding_gen)

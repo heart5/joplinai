@@ -42,7 +42,8 @@ from chromadb.config import Settings
 
 # %%
 try:
-    from cache_manager import SQLiteCacheManager
+    from aimod.cache_manager import SQLiteCacheManager
+    from aimod.vector_db_manager import VectorDBManager
     from func.configpr import (
         findvaluebykeyinsection,
         getcfpoptionvalue,
@@ -58,7 +59,6 @@ try:
     from func.logme import log
     from func.sysfunc import execcmd, not_IPython
     from func.wrapfuncs import timethis
-    from vector_db_manager import VectorDBManager
 except ImportError as e:
     logging.basicConfig(level=logging.INFO)
     log = logging.getLogger(__name__)
@@ -441,7 +441,7 @@ class OptimizedJoplinQASystem(JoplinQASystem):
 
         # 关键修复：初始化 embedding_generator
         # 需要导入或创建 EmbeddingGenerator 类（参考 joplinai.py 中的使用）
-        from embedding_generator import EmbeddingGenerator  # 请根据实际模块名调整
+        from aimod.embedding_generator import EmbeddingGenerator  # 请根据实际模块名调整
 
         self.embedding_generator = EmbeddingGenerator(
             config,
@@ -765,42 +765,43 @@ class OptimizedJoplinQASystem(JoplinQASystem):
     def _get_relevant_notes_for_return(self, filtered_chunks: List):
         # 1. 按原始笔记ID (original_note_id) 对块进行分组
         from collections import defaultdict
-    
+
         notes_dict = defaultdict(list)
-    
+
         for chunk in filtered_chunks:
             metadata = chunk.get("metadata", {})
             original_note_id = metadata.get("source_note_id")
+
             # 如果 original_note_id 不存在，尝试用其他逻辑获取（如从chunk_id解析）
             if not original_note_id:
                 # 备选方案：假设 chunk_id 格式为 “{note_id}_chunk_{index}”
                 chunk_id = chunk.get("chunk_id", "")
                 if "_chunk_" in chunk_id:
-                    original_note_id = chunk_id.split("_chunk_")
+                    # 【修正】取分割后的第一部分作为笔记ID
+                    original_note_id = chunk_id.split("_chunk_")[0]
                 else:
                     original_note_id = chunk_id  # 降级处理
-    
+
             notes_dict[original_note_id].append(chunk)
-    
+
         # 2. 为每个原始笔记构建一条返回记录
         relevant_notes_for_return = []
         for source_note_id, chunk_list in notes_dict.items():
             if not chunk_list:
                 continue
-    
+
             # 取第一个块获取笔记标题（假设同笔记的所有块metadata一致）
             sample_chunk = chunk_list[0]
             sample_metadata = sample_chunk.get("metadata", {})
-    
-            # 确定笔记标题：优先用 parent_note_title，其次用 note_title
-            note_title = sample_metadata.get("source_note_title")
-            if not note_title:
-                note_title = sample_metadata.get("source_note_title", "未知标题")
-    
+
+            # 确定笔记标题：优先用 source_note_title
+            # 【优化】此处逻辑有冗余，直接获取并设置默认值即可
+            note_title = sample_metadata.get("source_note_title", "未知标题")
+
             # 计算该笔记下所有块中的最高相似度作为此笔记的关联度
             max_similarity = max(chunk.get("similarity", 0.0) for chunk in chunk_list)
-    
-            # 可以聚合所有块的标签等信息（可选）
+
+            # 聚合所有块的标签等信息
             all_tags = set()
             for chunk in chunk_list:
                 tags_str = chunk.get("metadata", {}).get("tags", "")
@@ -808,7 +809,7 @@ class OptimizedJoplinQASystem(JoplinQASystem):
                     all_tags.update(
                         tag.strip() for tag in tags_str.split(",") if tag.strip()
                     )
-    
+
             note_entry = {
                 "note_id": source_note_id,  # 返回原始笔记ID
                 "title": note_title,  # 正确的来源笔记标题
@@ -824,7 +825,7 @@ class OptimizedJoplinQASystem(JoplinQASystem):
                 ],
             }
             relevant_notes_for_return.append(note_entry)
-    
+
         # 3. 按相似度排序
         relevant_notes_for_return.sort(key=lambda x: x["similarity"], reverse=True)
 

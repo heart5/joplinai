@@ -27,37 +27,40 @@ from datetime import datetime
 from typing import Dict, List, Optional
 
 import requests
-from cache_manager import SQLiteCacheManager
 
 # %%
-try:
-    from func.configpr import (
-        findvaluebykeyinsection,
-        getcfpoptionvalue,
-        setcfpoptionvalue,
-    )
-    from func.datatools import compute_content_hash
-    from func.first import dirmainpath, getdirmain
-    from func.getid import getdeviceid, getdevicename, gethostuser
-    from func.jpfuncs import (
-        createnote,
-        get_notes_in_notebook_by_title,
-        get_tag_titles,
-        getinivaluefromcloud,
-        getnote,
-        jpapi,
-        searchnotebook,
-        searchnotes,
-        updatenote_body,
-        updatenote_title,
-    )
-    from func.logme import log
-    from func.sysfunc import execcmd, not_IPython
-    from func.wrapfuncs import timethis
-except ImportError as e:
-    logging.basicConfig(level=logging.INFO)
-    log = logging.getLogger(__name__)
-    log.error(f"导入项目模块失败: {e}")
+import pathmagic
+
+with pathmagic.context():
+    try:
+        from aimod.cache_manager import SQLiteCacheManager
+        from func.configpr import (
+            findvaluebykeyinsection,
+            getcfpoptionvalue,
+            setcfpoptionvalue,
+        )
+        from func.datatools import compute_content_hash
+        from func.first import dirmainpath, getdirmain
+        from func.getid import getdeviceid, getdevicename, gethostuser
+        from func.jpfuncs import (
+            createnote,
+            get_notes_in_notebook_by_title,
+            get_tag_titles,
+            getinivaluefromcloud,
+            getnote,
+            jpapi,
+            searchnotebook,
+            searchnotes,
+            updatenote_body,
+            updatenote_title,
+        )
+        from func.logme import log
+        from func.sysfunc import execcmd, not_IPython
+        from func.wrapfuncs import timethis
+    except ImportError as e:
+        logging.basicConfig(level=logging.INFO)
+        log = logging.getLogger(__name__)
+        log.error(f"导入项目模块失败: {e}")
 
 # %% [markdown]
 # # DeepSeek配置

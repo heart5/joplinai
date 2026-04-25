@@ -42,21 +42,24 @@ from typing import Any, Dict, List, Optional, Tuple
 # ### func库
 
 # %%
-try:
-    from func.first import getdirmain
-    from func.jpfuncs import (
-        createnote,
-        getinivaluefromcloud,
-        searchnotes,
-        updatenote_body,
-    )
-    from func.logme import log
-    from func.sysfunc import execcmd, not_IPython
-    from func.wrapfuncs import timethis
-except ImportError as e:
-    logging.basicConfig(level=logging.INFO)
-    log = logging.getLogger(__name__)
-    log.error(f"导入项目模块失败: {e}")
+import pathmagic
+
+with pathmagic.context():
+    try:
+        from func.first import getdirmain
+        from func.jpfuncs import (
+            createnote,
+            getinivaluefromcloud,
+            searchnotes,
+            updatenote_body,
+        )
+        from func.logme import log
+        from func.sysfunc import execcmd, not_IPython
+        from func.wrapfuncs import timethis
+    except ImportError as e:
+        logging.basicConfig(level=logging.INFO)
+        log = logging.getLogger(__name__)
+        log.error(f"导入项目模块失败: {e}")
 
 
 # %% [markdown]

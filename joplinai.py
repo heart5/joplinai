@@ -45,38 +45,42 @@ import ollama
 from chromadb.config import Settings
 
 # %%
-try:
-    from cache_manager import SQLiteCacheManager
-    from embedding_generator import EmbeddingGenerator
-    from func.configpr import (
-        findvaluebykeyinsection,
-        getcfpoptionvalue,
-        setcfpoptionvalue,
-    )
-    from func.datatools import compute_content_hash
-    from func.first import dirmainpath, getdirmain
-    from func.getid import getdeviceid, getdevicename, gethostuser
-    from func.jpfuncs import (
-        createnote,
-        get_notebook_ids_for_note,
-        get_notes_in_notebook_by_title,
-        get_tag_titles,
-        getinivaluefromcloud,
-        getnote,
-        jpapi,
-        searchnotebook,
-        searchnotes,
-        updatenote_body,
-        updatenote_title,
-    )
-    from func.logme import log
-    from func.sysfunc import execcmd, not_IPython
-    from func.wrapfuncs import timethis
-    from vector_db_manager import VectorDBManager
-except ImportError as e:
-    logging.basicConfig(level=logging.INFO)
-    log = logging.getLogger(__name__)
-    log.error(f"导入项目模块失败: {e}")
+import pathmagic
+
+with pathmagic.context():
+    try:
+        from aimod.aitaskreporter import JoplinAITaskReporter
+        from aimod.cache_manager import SQLiteCacheManager
+        from aimod.embedding_generator import EmbeddingGenerator
+        from aimod.vector_db_manager import VectorDBManager
+        from func.configpr import (
+            findvaluebykeyinsection,
+            getcfpoptionvalue,
+            setcfpoptionvalue,
+        )
+        from func.datatools import compute_content_hash
+        from func.first import dirmainpath, getdirmain
+        from func.getid import getdeviceid, getdevicename, gethostuser
+        from func.jpfuncs import (
+            createnote,
+            get_notebook_ids_for_note,
+            get_notes_in_notebook_by_title,
+            get_tag_titles,
+            getinivaluefromcloud,
+            getnote,
+            jpapi,
+            searchnotebook,
+            searchnotes,
+            updatenote_body,
+            updatenote_title,
+        )
+        from func.logme import log
+        from func.sysfunc import execcmd, not_IPython
+        from func.wrapfuncs import timethis
+    except ImportError as e:
+        logging.basicConfig(level=logging.INFO)
+        log = logging.getLogger(__name__)
+        log.error(f"导入项目模块失败: {e}")
 
 # %% [markdown]
 # # 核心配置（根据需求调整）
@@ -949,8 +953,6 @@ def main():
 
     # %%
     # 初始化任务报告器
-    from aitaskreporter import JoplinAITaskReporter
-
     task_reporter = JoplinAITaskReporter(dynamic_config)
 
     log.info("===== 启动Joplin笔记向量化处理 =====")
