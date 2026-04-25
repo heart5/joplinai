@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Joplin AI 知识问答 - {{ user.display_name }}</title>
+    <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}" type="image/x-icon">
+    <style>
+        /* 基础样式 */
+        body { font-family: sans-serif; margin: 20px; background: #f5f5f5; }
+        .container { max-width: 900px; margin: auto; background: white; padding: 25px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        h1 { color: #333; border-bottom: 2px solid #4CAF50; padding-bottom: 10px; }
+        #questionInput {
+            width: 100%;
+            padding: 15px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 16px;
+            box-sizing: border-box;
+            margin-bottom: 15px;
+            transition: border 0.3s;
+        }
+        #questionInput:focus {
+            border-color: #4CAF50;
+            outline: none;
+        }
+        #submitBtn {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            font-size: 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            float: right;
+            transition: background 0.3s;
+        }
+        #submitBtn:hover { background-color: #45a049; }
+        #submitBtn:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        #loadingIndicator {
+            display: none;
+            text-align: center;
+            padding: 20px;
+            color: #666;
+        }
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #4CAF50;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        /* 对话历史区域 */
+        #chatHistory {
+            margin-top: 30px;
+            min-height: 300px;
+            border-top: 1px solid #eee;
+            padding-top: 20px;
+        }
+        .user-message, .bot-message {
+            margin-bottom: 20px;
+            padding: 15px;
+            border-radius: 10px;
+            clear: both;
+            max-width: 80%;
+            word-wrap: break-word;
+        }
+        .user-message {
+            background-color: #E3F2FD;
+            border-left: 5px solid #2196F3;
+            margin-left: 20%;
+            text-align: right;
+        }
+        .bot-message {
+            background-color: #F1F8E9;
+            border-left: 5px solid #8BC34A;
+            margin-right: 20%;
+        }
+        .bot-message h1, .bot-message h2, .bot-message h3 { margin-top: 1em; margin-bottom: 0.5em; }
+        .bot-message p { margin-bottom: 1em; line-height: 1.6; }
+        .bot-message ul, .bot-message ol { padding-left: 2em; margin-bottom: 1em; }
+        .bot-message code { background: #f4f4f4; padding: 2px 6px; border-radius: 3px; font-family: monospace; }
+        .bot-message pre { background: #2d2d2d; color: #f8f8f2; padding: 15px; border-radius: 5px; overflow-x: auto; }
+        .bot-message blockquote { border-left: 4px solid #ccc; padding-left: 1em; color: #555; font-style: italic; }
+
+        /* 调试信息区域 */
+        .debug-panel {
+            margin-top: 30px;
+            padding: 15px;
+            background-color: #f9f9f9;
+            border: 1px dashed #ccc;
+            border-radius: 5px;
+            font-size: 13px;
+        }
+        .debug-toggle { color: #666; cursor: pointer; user-select: none; }
+        #sourcesList, #rawResponse { margin-top: 10px; }
+        #sourcesList li { margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px dotted #ddd; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧠 Joplin AI 问答助手</h1>
+        <p>欢迎，<strong>{{ user.display_name }}</strong> · <a href="{{ url_for('logout') }}" style="color:#f44336;">退出登录</a></p>
+
+        <!-- 提问表单 -->
+        <form id="askForm">
+            <textarea id="questionInput" rows="4" placeholder="请输入您的问题，例如：总结我本周的工作..."></textarea>
+            <div style="overflow: hidden;">
+                <label style="float:left; margin-top:12px;">
+                    <input type="checkbox" id="useHistorySwitch" checked> 使用对话历史
+                </label>
+                <button type="submit" id="submitBtn">发送提问</button>
+            </div>
+        </form>
+        <div id="loadingIndicator">
+            <div class="spinner"></div>
+            <p>正在检索知识库并生成答案，请稍候...</p>
+        </div>
+
+        <!-- 对话历史 -->
+        <div id="chatHistory">
+            <div class="bot-message">
+                <strong>助手：</strong> 您好！我可以基于您的Joplin笔记库回答问题。请在上方输入您的问题。
+            </div>
+        </div>
+
+        <!-- 调试信息 -->
+        <div class="debug-panel">
+            <div class="debug-toggle" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none';">
+                🔍 <strong>点击查看答案来源与详情</strong>
+            </div>
+            <div style="display:none;">
+                <h4>参考笔记</h4>
+                <ul id="sourcesList">
+                    <li><em>等待回答...</em></li>
+                </ul>
+                <h4>原始API响应</h4>
+                <pre id="rawResponse">（暂无数据）</pre>
+            </div>
+        </div>
+    </div>
+
+    <!-- 极简Markdown解析器 -->
+    <script>
+        window.marked = {
+            parse: function(text) {
+                if (!text) return '';
+                return text
+                    .replace(/^### (.*$)/gm, '<h3>$1</h3>')
+                    .replace(/^## (.*$)/gm, '<h2>$1</h2>')
+                    .replace(/^# (.*$)/gm, '<h1>$1</h1>')
+                    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                    .replace(/\*(.*?)\*/g, '<em>$1</em>')
+                    .replace(/`([^`]+)`/g, '<code>$1</code>')
+                    .replace(/^> (.*$)/gm, '<blockquote>$1</blockquote>')
+                    .replace(/\n\n/g, '</p><p>')
+                    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>')
+                    .replace(/^/, '<p>').replace(/$/, '</p>');
+            }
+        };
+    </script>
+
+    <!-- 【核心】修复后的JavaScript -->
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('[Init] DOM已加载，开始初始化...');
+
+            // 1. 安全获取DOM元素函数
+            function safeGet(id) {
+                const el = document.getElementById(id);
+                if (!el) console.error(`[Error] 未找到ID为 "${id}" 的元素`);
+                return el;
+            }
+
+            const elements = {
+                form: safeGet('askForm'),
+                input: safeGet('questionInput'),
+                button: safeGet('submitBtn'),
+                loading: safeGet('loadingIndicator'),
+                chat: safeGet('chatHistory'),
+                sources: safeGet('sourcesList'),
+                raw: safeGet('rawResponse')
+            };
+
+            // 2. 关键检查：如果表单不存在，则停止初始化
+            if (!elements.form) {
+                alert('页面初始化失败：关键组件缺失。请刷新页面。');
+                return;
+            }
+            console.log('[Init] ✅ 所有DOM元素已就绪。');
+
+            function appendMessage(sender, text) {
+                if (!elements.chat) {
+                    console.warn('[appendMessage] 忽略：chatHistory 元素不存在。');
+                    return;
+                }
+                const msgDiv = document.createElement('div');
+                msgDiv.className = sender === 'user' ? 'user-message' : 'bot-message';
+            
+                const safeText = String(text || ''); // 强制转换为字符串
+            
+                if (sender === 'bot') {
+                    try {
+                        // 确保marked库存在且输入安全
+                        if (window.marked && window.marked.parse) {
+                            msgDiv.innerHTML = window.marked.parse(safeText);
+                        } else {
+                            // 降级：直接显示文本
+                            msgDiv.textContent = safeText;
+                        }
+                    } catch (mdError) {
+                        console.warn('[appendMessage] Markdown渲染失败，降级为纯文本:', mdError);
+                        msgDiv.textContent = safeText;
+                    }
+                } else {
+                    // 用户消息简单处理
+                    msgDiv.textContent = `您：${safeText}`;
+                }
+            
+                elements.chat.appendChild(msgDiv);
+                elements.chat.scrollTop = elements.chat.scrollHeight;
+            }
+
+            /**
+             * 安全地更新“参考笔记”列表
+             * @param {Object} apiResult - 完整的API响应对象
+             */
+            function updateSources(apiResult) {
+                // 1. 终极防御：确保操作对象存在
+                if (!elements.sources) {
+                    console.warn('[updateSources] 忽略：sourcesList 元素不存在。');
+                    return;
+                }
+                
+                // 清空现有内容
+                elements.sources.innerHTML = '';
+                
+                // 2. 验证输入
+                if (!apiResult || typeof apiResult !== 'object') {
+                    console.warn('[updateSources] 输入参数无效，显示无来源。');
+                    elements.sources.innerHTML = '<li><em>本次回答未引用特定笔记。</em></li>';
+                    return;
+                }
+                
+                // 3. 【智能数据提取】尝试所有已知的可能路径
+                let rawNotesArray = null;
+                let dataSource = 'unknown';
+                
+                if (Array.isArray(apiResult.relevant_notes)) {
+                    rawNotesArray = apiResult.relevant_notes;
+                    dataSource = 'relevant_notes';
+                } else if (apiResult.metadata && Array.isArray(apiResult.metadata.sources)) {
+                    rawNotesArray = apiResult.metadata.sources;
+                    dataSource = 'metadata.sources';
+                } else if (apiResult.sources && Array.isArray(apiResult.sources)) {
+                    rawNotesArray = apiResult.sources;
+                    dataSource = 'sources';
+                }
+                
+                console.log(`[updateSources] 数据来源: ${dataSource}, 原始数据:`, rawNotesArray);
+                
+                // 4. 处理无数据情况
+                if (!rawNotesArray || rawNotesArray.length === 0) {
+                    elements.sources.innerHTML = '<li><em>本次回答未引用特定笔记。</em></li>';
+                    return;
+                }
+                
+                // 5. 安全渲染每一条笔记
+                try {
+                    rawNotesArray.forEach((item, index) => {
+                        // item 可能是任何结构，安全提取
+                        const safeItem = item || {};
+                        const title = safeItem.title || safeItem.note_id || `参考笔记 ${index + 1}`;
+                        const notebook = safeItem.notebook || (safeItem.tags ? (Array.isArray(safeItem.tags) ? safeItem.tags.join(', ') : String(safeItem.tags)) : '未知');
+                        const score = typeof safeItem.similarity === 'number' ? safeItem.similarity : (typeof safeItem.score === 'number' ? safeItem.score : 0);
+                        
+                        const li = document.createElement('li');
+                        li.className = 'source-item mb-2 pb-2 border-bottom';
+                        li.innerHTML = `
+                            <strong>${escapeHtml(String(title))}</strong><br>
+                            <small>标签：${escapeHtml(String(notebook))} | 相关性：${score.toFixed(3)}</small>
+                        `;
+                        elements.sources.appendChild(li);
+                    });
+                    console.log(`[updateSources] 成功渲染 ${rawNotesArray.length} 条笔记。`);
+                } catch (renderError) {
+                    console.error('[updateSources] 渲染笔记列表时发生意外错误:', renderError);
+                    elements.sources.innerHTML = '<li><em style="color:#dc3545;">渲染笔记列表时出错。</em></li>';
+                }
+            }
+
+            // 辅助函数：HTML转义（防止XSS）
+            function escapeHtml(text) {
+                if (text == null) return '';
+                return String(text)
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;')
+                    .replace(/'/g, '&#039;');
+            }
+
+            function updateRawResponse(data) {
+                if (!elements.raw) return;
+                try {
+                    // 使用安全序列化，避免循环引用等问题
+                    const safeData = structuredClone ? structuredClone(data) : JSON.parse(JSON.stringify(data));
+                    elements.raw.textContent = JSON.stringify(safeData, null, 2);
+                } catch (e) {
+                    console.warn('[updateRawResponse] 无法序列化响应数据，显示简化信息:', e);
+                    elements.raw.textContent = `{ “status”: “数据已接收，但包含不可序列化内容” }`;
+                }
+            }
+
+            // 4. 绑定表单提交事件（核心）
+            // elements.form.addEventListener('submit', async function(event) {
+            askForm.addEventListener('submit', async function(event) {
+                event.preventDefault();
+                console.log('[Submit] 表单提交事件触发。');
+
+                const question = (elements.input.value || '').trim();
+                if (!question) {
+                    alert('请输入问题内容。');
+                    return;
+                }
+
+                // UI状态更新
+                appendMessage('user', question);
+                elements.input.value = '';
+                elements.button.disabled = true;
+                if (elements.loading) elements.loading.style.display = 'block';
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 90000); // 90秒超时
+
+                try {
+                    const payload = {
+                        question: question,
+                        use_history: document.getElementById('useHistorySwitch')?.checked || true
+                    };
+                    console.log('[Fetch] 发送请求，载荷:', payload);
+
+                    // 关键：根据您的日志，后端路由可能是 /ask，但代码中是 /api/ask。这里做兼容尝试。
+                    let response;
+                    let apiError = null;
+
+                    // 先尝试 /api/ask（根据知识库代码）
+                    response = await fetch('/api/ask', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload),
+                        signal: controller.signal
+                    }).catch(e => { apiError = e; });
+                    clearTimeout(timeoutId);
+
+                    if (!response || !response.ok) {
+                        const errMsg = apiError ? apiError.message : `HTTP ${response?.status}`;
+                        throw new Error(`请求失败: ${errMsg}`);
+                    }
+
+                    const result = await response.json();
+                    console.log('[API] 原始响应:', result);
+                    
+                    // ===================== 【核心修复区：绝对安全的响应处理】 =====================
+                    try {
+                        // 1. 验证响应基本结构
+                        if (!result || typeof result !== 'object') {
+                            throw new Error('API返回的响应不是有效的JSON对象。');
+                        }
+                    
+                        // 2. 安全更新调试信息（原始响应）
+                        updateRawResponse(result);
+                    
+                        // 3. 安全更新参考笔记（传入整个result对象）
+                        updateSources(result);
+                    
+                        // 4. 安全提取并显示答案
+                        let finalAnswer = '';
+                        if (result.error) {
+                            // 优先显示错误信息
+                            finalAnswer = `⚠️ 抱歉，处理时遇到错误：${result.error}`;
+                        } else if (result.answer && typeof result.answer === 'string') {
+                            // 正常答案
+                            finalAnswer = result.answer;
+                        } else {
+                            // 后备：尝试从其他可能字段提取
+                            finalAnswer = result.response || result.text || result.content || '（服务已响应，但未能解析出答案内容。）';
+                            console.warn('[API] 从非标准字段提取答案:', finalAnswer.substring(0, 100));
+                        }
+                    
+                        // 5. 渲染答案（appendMessage内部已做Markdown安全处理）
+                        appendMessage('bot', finalAnswer);
+                    
+                    } catch (processingError) {
+                        // 捕获响应处理过程中的任何意外错误
+                        console.error('[API] 处理响应数据时发生内部错误:', processingError);
+                        appendMessage('bot', `🤖 答案生成成功，但在界面处理时遇到技术问题。详情请查看控制台。`);
+                    }
+                    // ===================== 修复结束 =====================
+                } catch (error) {
+                    clearTimeout(timeoutId);
+                    if (error.name === 'AbortError') {
+                        appendMessage('bot', '请求超时（一分半钟过去了），请稍后再试。');
+                    }
+                    console.error('[Fetch] 请求过程出错:', error);
+                    appendMessage('bot', `请求失败：${error.message}`);
+                } finally {
+                    // 恢复UI
+                    elements.button.disabled = false;
+                    if (elements.loading) elements.loading.style.display = 'none';
+                    elements.input.focus();
+                }
+            });
+
+            // 5. 初始焦点
+            if (elements.input) elements.input.focus();
+            console.log('[Init] 🎉 初始化完成，等待提问。');
+        });
+    </script>
+</body>
+</html>
