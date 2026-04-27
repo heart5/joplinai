@@ -278,6 +278,186 @@ def list_users():
 
 
 # %% [markdown]
+# ## 管理员功能路由
+
+# %% [markdown]
+# ### admin_dashboard()
+
+# %%
+@app.route("/admin")
+@login_required
+@admin_required
+def admin_dashboard():
+    """管理员仪表盘（用户管理主页）"""
+    return render_template("admin/users.html", user=session["user"])
+
+
+# %% [markdown]
+# ### api_admin_get_users()
+
+# %%
+@app.route("/api/admin/users", methods=["GET"])
+@admin_required
+def api_admin_get_users():
+    """API: 获取所有用户详细信息（供管理界面使用）"""
+    users = USER_MANAGER.get_all_users()
+    # 对敏感信息进行脱敏（如不返回密码哈希）
+    safe_users = []
+    for u in users:
+        safe_u = {
+            "id": u["id"],
+            "username": u["username"],
+            "display_name": u["display_name"],
+            "role": u["role"],
+            "is_active": bool(u["is_active"]),
+            "created_at": u["created_at"],
+            "last_login": u["last_login"],
+        }
+        safe_users.append(safe_u)
+    return jsonify({"success": True, "users": safe_users})
+
+
+# %% [markdown]
+# ### api_admin_reset_password()
+
+# %%
+@app.route("/api/admin/user/reset_password", methods=["POST"])
+@admin_required
+def api_admin_reset_password():
+    """API: 管理员重置用户密码"""
+    data = request.get_json()
+    target_username = data.get("username")
+    new_password = data.get("new_password")
+
+    if not target_username or not new_password:
+        return jsonify({"success": False, "error": "用户名和新密码不能为空"}), 400
+
+    # 可选：检查密码强度
+    if len(new_password) < 6:
+        return jsonify({"success": False, "error": "密码长度至少6位"}), 400
+
+    success = USER_MANAGER.reset_user_password(
+        target_username, new_password, admin_username=session["user"]["username"]
+    )
+    if success:
+        return jsonify({"success": True, "message": "密码重置成功"})
+    else:
+        return jsonify({"success": False, "error": "用户不存在或操作失败"}), 400
+
+
+# %% [markdown]
+# ### api_admin_toggle_active()
+
+# %%
+@app.route("/api/admin/user/toggle_active", methods=["POST"])
+@admin_required
+def api_admin_toggle_active():
+    """API: 切换用户启用/禁用状态"""
+    data = request.get_json()
+    target_username = data.get("username")
+    is_active = data.get("is_active")  # True or False
+
+    if target_username is None or is_active is None:
+        return jsonify({"success": False, "error": "参数不完整"}), 400
+
+    # 禁止管理员禁用自己
+    if target_username == session["user"]["username"]:
+        return jsonify({"success": False, "error": "不能禁用自己的账户"}), 403
+
+    success = USER_MANAGER.update_user_active_status(
+        target_username, is_active, admin_username=session["user"]["username"]
+    )
+    if success:
+        return jsonify({"success": True, "message": "用户状态更新成功"})
+    else:
+        return jsonify({"success": False, "error": "操作失败"}), 400
+
+
+# %% [markdown]
+# ### api_admin_update_role()
+
+# %%
+@app.route("/api/admin/user/update_role", methods=["POST"])
+@admin_required
+def api_admin_update_role():
+    """API: 更新用户角色"""
+    data = request.get_json()
+    target_username = data.get("username")
+    new_role = data.get("new_role")
+
+    if not target_username or new_role not in ["admin", "colleague"]:
+        return jsonify({"success": False, "error": "参数无效"}), 400
+
+    # 防止最后一个管理员被降级（可选，根据业务逻辑）
+    # 此处省略，可根据实际情况添加检查
+
+    success = USER_MANAGER.update_user_role(
+        target_username, new_role, admin_username=session["user"]["username"]
+    )
+    if success:
+        return jsonify({"success": True, "message": "用户角色更新成功"})
+    else:
+        return jsonify({"success": False, "error": "操作失败"}), 400
+
+
+# %% [markdown]
+# ### api_admin_update_display_name()
+
+# %%
+@app.route("/api/admin/user/update_display_name", methods=["POST"])
+@admin_required
+def api_admin_update_display_name():
+    """API: 更新用户显示名称"""
+    data = request.get_json()
+    target_username = data.get("username")
+    new_display_name = data.get("new_display_name")
+
+    if not target_username or not new_display_name or not new_display_name.strip():
+        return jsonify({"success": False, "error": "显示名称不能为空"}), 400
+
+    success = USER_MANAGER.change_user_display_name(
+        target_username, new_display_name, admin_username=session["user"]["username"]
+    )
+    if success:
+        return jsonify({"success": True, "message": "显示名称更新成功"})
+    else:
+        return jsonify({"success": False, "error": "操作失败"}), 400
+
+
+# %% [markdown]
+# ### api_admin_create_user()
+
+# %%
+@app.route("/api/admin/user/create", methods=["POST"])
+@admin_required
+def api_admin_create_user():
+    """API: 管理员创建新用户"""
+    data = request.get_json()
+    username = data.get("username")
+    password = data.get("password")
+    display_name = data.get("display_name")
+    role = data.get("role", "colleague")
+
+    if not all([username, password, display_name]):
+        return jsonify({"success": False, "error": "必填字段缺失"}), 400
+
+    if role not in ["admin", "colleague"]:
+        role = "colleague"
+
+    success = USER_MANAGER.create_user(username, password, display_name, role)
+    if success:
+        USER_MANAGER.log_audit(
+            session["user"]["id"],
+            "CREATE_USER",
+            details=f"创建新用户: {username} ({display_name}, {role})",
+            ip_address=request.remote_addr,
+        )
+        return jsonify({"success": True, "message": "用户创建成功"})
+    else:
+        return jsonify({"success": False, "error": "用户名已存在或创建失败"}), 400
+
+
+# %% [markdown]
 # ## system_health()
 
 # %%
