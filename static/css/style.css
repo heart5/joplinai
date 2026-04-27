@@ -1,0 +1,144 @@
+<style>
+    /* 基础样式 */
+    body { font-family: sans-serif; margin: 20px; background: #f5f5f5; }
+    .container { max-width: 900px; margin: auto; background: white; padding: 25px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+    h1 { color: #333; border-bottom: 2px solid #4CAF50; padding-bottom: 10px; }
+    #questionInput {
+        width: 100%;
+        padding: 15px;
+        border: 2px solid #ddd;
+        border-radius: 8px;
+        font-size: 16px;
+        box-sizing: border-box;
+        margin-bottom: 15px;
+        transition: border 0.3s;
+    }
+    #questionInput:focus {
+        border-color: #4CAF50;
+        outline: none;
+    }
+    #submitBtn {
+        background-color: #4CAF50;
+        color: white;
+        border: none;
+        padding: 15px 30px;
+        font-size: 16px;
+        border-radius: 8px;
+        cursor: pointer;
+        float: right;
+        transition: background 0.3s;
+    }
+    #submitBtn:hover { background-color: #45a049; }
+    #submitBtn:disabled {
+        background-color: #cccccc;
+        cursor: not-allowed;
+    }
+    #loadingIndicator {
+        display: none;
+        text-align: center;
+        padding: 20px;
+        color: #666;
+    }
+    .spinner {
+        border: 4px solid #f3f3f3;
+        border-top: 4px solid #4CAF50;
+        border-radius: 50%;
+        width: 40px;
+        height: 40px;
+        animation: spin 1s linear infinite;
+        margin: 0 auto 10px;
+    }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+    /* 对话历史区域 */
+    #chatHistory {
+        margin-top: 30px;
+        min-height: 300px;
+        border-top: 1px solid #eee;
+        padding-top: 20px;
+    }
+    .user-message, .bot-message {
+        margin-bottom: 20px;
+        padding: 15px;
+        border-radius: 10px;
+        clear: both;
+        max-width: 80%;
+        word-wrap: break-word;
+    }
+    .user-message {
+        background-color: #E3F2FD;
+        border-left: 5px solid #2196F3;
+        margin-left: 20%;
+        text-align: right;
+    }
+    .bot-message {
+        background-color: #F1F8E9;
+        border-left: 5px solid #8BC34A;
+        margin-right: 20%;
+    }
+    .bot-message h1, .bot-message h2, .bot-message h3 { margin-top: 1em; margin-bottom: 0.5em; }
+    .bot-message p { margin-bottom: 1em; line-height: 1.6; }
+    .bot-message ul, .bot-message ol { padding-left: 2em; margin-bottom: 1em; }
+    .bot-message code { background: #f4f4f4; padding: 2px 6px; border-radius: 3px; font-family: monospace; }
+    .bot-message pre { background: #2d2d2d; color: #f8f8f2; padding: 15px; border-radius: 5px; overflow-x: auto; }
+    .bot-message blockquote { border-left: 4px solid #ccc; padding-left: 1em; color: #555; font-style: italic; }
+
+    /* 参考笔记区块样式 */
+    .source-collapse-section {
+        margin-top: 16px;
+        border-top: 1px solid #eee;
+        padding-top: 12px;
+    }
+    .source-toggle {
+        color: #666;
+        cursor: pointer;
+        user-select: none;
+        font-size: 0.9rem;
+    }
+    .source-toggle:hover {
+        color: #1890ff;
+    }
+    .source-toggle .icon {
+        display: inline-block;
+        transition: transform 0.2s;
+        margin-right: 4px;
+    }
+    .source-toggle.collapsed .icon {
+        transform: rotate(-90deg);
+    }
+    .source-list {
+        list-style: none;
+        padding-left: 0;
+        margin-top: 10px;
+        font-size: 0.85rem;
+        max-height: 300px;
+        overflow-y: auto;
+    }
+    .source-item {
+        padding: 8px 0;
+        border-bottom: 1px dotted #eaeaea;
+    }
+    .source-item:last-child {
+        border-bottom: none;
+    }
+    .source-title {
+        font-weight: bold;
+        color: #333;
+    }
+    .source-meta {
+        color: #888;
+        font-size: 0.8rem;
+    }
+
+    /* 调试信息区域 */
+    .debug-panel {
+        margin-top: 30px;
+        padding: 15px;
+        background-color: #f9f9f9;
+        border: 1px dashed #ccc;
+        border-radius: 5px;
+        font-size: 13px;
+    }
+    .debug-toggle { color: #666; cursor: pointer; user-select: none; }
+    #sourcesList li { margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px dotted #ddd; }
+</style>
