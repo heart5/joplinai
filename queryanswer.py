@@ -454,7 +454,7 @@ class OptimizedJoplinQASystem(JoplinQASystem):
         )
 
 # %% [markdown]
-# ### ask(self, question: str, use_history: bool = True) -> Dict
+# ### ask(self, question: str, use_history: bool = True, user_identity: Optional[Dict] = None) -> Dict
 
     # %%
     def ask(self, question: str, use_history: bool = True, user_identity: Optional[Dict] = None) -> Dict:
@@ -485,7 +485,7 @@ class OptimizedJoplinQASystem(JoplinQASystem):
         # 3. 搜索相似块（注意：调用的是 search_similar_chunks）
         similar_chunks = self.vector_db.search_similar_chunks(
             query_embedding,
-            top_k=self.config.get("max_retrieved_chunks", 15),  # 可配置
+            limit=self.config.get("max_retrieved_chunks", 15),  # 可配置
             user_identity=user_identity  # 新增参数
         )
 
@@ -493,7 +493,11 @@ class OptimizedJoplinQASystem(JoplinQASystem):
         filtered_chunks = self._filter_and_rank_chunks(similar_chunks, question)
 
         # 5. 构建优化上下文（基于块）
-        context = self._build_optimized_context_from_chunks(filtered_chunks, question)
+        context = self._build_optimized_context_from_chunks(
+            filtered_chunks,
+            question,
+            user_identity=user_identity  # 新增参数
+        )
         log.debug(f"过滤后块数: {len(filtered_chunks)}")
         log.debug(f"构建的上下文长度: {len(context)}")
         # log.debug(f"上下文预览 (前500字符): {context[:500]}")
@@ -620,11 +624,13 @@ class OptimizedJoplinQASystem(JoplinQASystem):
         return filtered
 
 # %% [markdown]
-# ### _build_optimized_context_from_chunks(self, chunks: List[Dict], question: str) -> str
+# ### _build_optimized_context_from_chunks(self, chunks: List[Dict], question: str, user_identity: Optional[Dict] = None) -> str
 
     # %%
     def _build_optimized_context_from_chunks(
-        self, chunks: List[Dict], question: str
+        self, chunks: List[Dict],
+        question: str,
+        user_identity: Optional[Dict] = None,
     ) -> str:
         """基于检索到的块构建问答上下文。"""
         if not chunks:
@@ -639,21 +645,55 @@ class OptimizedJoplinQASystem(JoplinQASystem):
             notes_dict[note_id].append(chunk)
 
         # 构建系统提示
-        if not (sys_prompt := getinivaluefromcloud("joplinai", "sys_prompt")):
-            sys_prompt = """你是我（白晔峰）个人的笔记助手，基于Joplin笔记回答问题。笔记库包含：
-    0. **收藏或摘抄的文章笔记**：作者为“收藏”，是收藏或者摘抄的第三方文章。
-    1. **我个人的笔记**：作者为“白晔峰”，是我本人的记录。
-    2. **同事的工作笔记**：作者为“同事_姓名”（如“同事_梅富忠”），是共享笔记本中由同事记录的个人工作内容。
-    3. **团队的共同笔记**：作者为“团队_共同维护”，是共享笔记本中由多人共同维护的记录（如《广州番禺林总》）。
+        if user_identity:
+            user_role = user_identity.get('role')
+            user_display_name = user_identity.get('display_name')
+            # === 【新增】调试日志：记录角色和显示名 ===
+            log.debug(f"[权限过滤] 解析身份 -> role: '{user_role}', display_name: '{user_display_name}'")
 
-    笔记片段的元数据包含【类型】和【作者】，请根据以下规则回答：
-    *   **类型为“收藏”**：这是外部资料，请以“相关资料显示：...”或“根据收藏的文章：...”开头。
-    *   **类型为“会议记录”**：这是对会议讨论的客观记载。回答时请以“根据[记录者]的会议记录：...”开头，并客观概括会议内容，避免使用“我认为”。
-    *   **类型为“谈话记录”**：这是对双方沟通的客观记载。回答时请以“根据谈话记录：...”开头，并区分记录者与谈话对象。
-    *   **类型为“团队协作”且作者为“团队_共同维护”**：这是多人维护的共享信息，请以“根据团队共享信息：...”开头。
-    *   **类型为“个人笔记”且作者为“同事_XXX”**：这是同事的个人观点，请以“根据[XXX]的笔记：...”开头。
-    *   **类型为“个人笔记”且作者为“白晔峰”**：这是我本人的记录，可直接引用。
-    如果笔记中没有相关信息，请如实告知。"""
+            default_personal_author = getinivaluefromcloud("joplinai", "default_personal_author")
+
+            import re
+            split_ptn = re.compile(r"[,，]")
+            if (colleague_str := getinivaluefromcloud("joplinai", "colleague")):
+                colleague = [title.strip() for title in split_ptn.split(colleague_str)]
+            else:
+                colleague= ["XXA", "XXB"]
+            colleague_str = "，".join([f"“{person}”" for person in colleague])
+
+            if user_role == 'admin':
+                if not (sys_prompt := getinivaluefromcloud("joplinai", "sys_prompt")):
+                    sys_prompt = f"""你是我（{default_personal_author}）个人的笔记助手，基于Joplin笔记回答问题。笔记库包含：
+0. **收藏或摘抄的文章笔记**：作者为“收藏”，是收藏或者摘抄的第三方文章。
+1. **我个人的笔记**：作者为{default_personal_author}，是我本人的记录。
+2. **同事的工作笔记**：作者为{colleague_str}，是共享笔记本中由同事记录的个人工作内容。
+3. **团队的共同笔记**：作者为“团队_共同维护”，是共享笔记本中由多人共同维护的记录（如《广州番禺林总》）。
+
+笔记片段的元数据包含【类型】和【作者】，请根据以下规则回答：
+*   **类型为“收藏”**：这是外部资料，请以“相关资料显示：...”或“根据收藏的文章：...”开头。
+*   **类型为“会议记录”**：这是对会议讨论的客观记载。回答时请以“根据[记录者]的会议记录：...”开头，并客观概括会议内容，避免使用“我认为”。
+*   **类型为“谈话记录”**：这是对双方沟通的客观记载。回答时请以“根据谈话记录：...”开头，并区分记录者与谈话对象。
+*   **类型为“团队协作”且作者为“团队_共同维护”**：这是多人维护的共享信息，请以“根据团队共享信息：...”开头。
+*   **类型为“个人笔记”且作者为{colleague_str}**：这是同事的个人观点，请以“根据[XXX]的笔记：...”开头。
+*   **类型为“个人笔记”且作者为“白晔峰”**：这是我本人的记录，可直接引用。
+如果笔记中没有相关信息，请如实告知。"""
+            elif user_role == 'colleague':
+                log.debug("[权限过滤] 同事角色，调用专用模板。")
+                if not (sys_prompt := getinivaluefromcloud("joplinai", "sys_colleague_prompt")):
+                    sys_prompt = f"""你是我（{user_display_name}）个人的笔记助手，基于Joplin笔记回答问题。笔记库包含：
+1. **收藏或摘抄的文章笔记**：作者为“收藏”，是收藏或者摘抄的第三方文章。
+2. **我个人的笔记**：作者为“同事_{user_display_name}”，是我本人的记录。
+3. **团队的共同笔记**：作者为“团队_共同维护”，是共享笔记本中由多人共同维护的记录（如《广州番禺林总》）。
+
+笔记片段的元数据包含【类型】和【作者】，请根据以下规则回答：
+*   **类型为“收藏”**：这是外部资料，请以“相关资料显示：...”或“根据收藏的文章：...”开头。
+*   **类型为“会议记录”**：这是对会议讨论的客观记载。回答时请以“根据[记录者]的会议记录：...”开头，并客观概括会议内容，避免使用“我认为”。
+*   **类型为“谈话记录”**：这是对双方沟通的客观记载。回答时请以“根据谈话记录：...”开头，并区分记录者与谈话对象。
+*   **类型为“团队协作”且作者为“团队_共同维护”**：这是多人维护的共享信息，请以“根据团队共享信息：...”开头。
+*   **类型为“个人笔记”且作者为“{user_display_name}”**：这是我本人的记录，可直接引用。
+如果笔记中没有相关信息，请如实告知。"""
+        else:
+            log.warning("[权限过滤] user_identity 为 None！将不应用任何过滤。这可能是个安全问题！")
 
         # 为每个原始笔记构建上下文部分
         note_contexts = []
@@ -661,7 +701,9 @@ class OptimizedJoplinQASystem(JoplinQASystem):
             # 取该笔记的第一个块获取标题等信息（假设所有块metadata一致）
             sample_chunk = chunk_list[0]
             note_title = sample_chunk["metadata"].get("source_note_title", "未知标题")
-            note_author = sample_chunk.get("metadata", {}).get("note_author", "白晔峰")
+            default_author = user_display_name if user_role != 'admin' else default_personal_author
+            # log.info(default_author)
+            note_author = sample_chunk.get("metadata", {}).get("note_author", default_author)
             note_type = sample_chunk.get("metadata", {}).get("note_type", "个人笔记")
 
             # 合并该笔记所有相关块的标签字符串，拆分合并，并用集合去重
@@ -677,7 +719,7 @@ class OptimizedJoplinQASystem(JoplinQASystem):
             # 合并该笔记的所有相关块内容
             combined_content = "\n---\n".join([c["content"] for c in chunk_list])
 
-            note_context = f"""【笔记：{note_title} | 类型：{note_type} | 来源：{note_author}】
+            note_context = f"""【笔记：{note_title} | 类型：{note_type} | 作者：{note_author}】
     标签：{note_tags}
     相关内容：
     {combined_content}
