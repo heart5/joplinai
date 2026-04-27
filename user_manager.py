@@ -230,7 +230,7 @@ class UserManager:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT id, username, display_name, role, is_active, last_login FROM users ORDER BY id"
+            "SELECT id, username, display_name, role, is_active, created_at, last_login FROM users ORDER BY id"
         )
         rows = cursor.fetchall()
         conn.close()
@@ -314,6 +314,166 @@ class UserManager:
                     item["metadata"] = {}
             history.append(item)
         return history
+
+    # 在 UserManager 类中添加以下方法
+
+    def reset_user_password(
+        self, target_username: str, new_password: str, admin_username: str
+    ) -> bool:
+        """
+        管理员重置用户密码
+        Args:
+            target_username: 被操作用户名
+            new_password: 新密码（明文）
+            admin_username: 执行操作的管理员用户名（用于审计）
+        Returns:
+            成功与否
+        """
+        password_hash = self._hash_password(new_password)
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE users SET password_hash = ? WHERE username = ?",
+                (password_hash, target_username),
+            )
+            if cursor.rowcount == 0:
+                conn.close()
+                return False
+            conn.commit()
+            conn.close()
+            # 记录审计日志（需要先查出admin_user_id，这里简化，可根据实际情况调整）
+            admin_user = self._get_user_by_username(admin_username)
+            if admin_user:
+                self.log_audit(
+                    admin_user["id"],
+                    "RESET_PASSWORD",
+                    details=f"重置用户 [{target_username}] 的密码",
+                    ip_address="",  # IP可在web层补充
+                )
+            log.info(f"管理员 {admin_username} 重置了用户 {target_username} 的密码")
+            return True
+        except Exception as e:
+            log.error(f"重置密码失败: {e}")
+            return False
+
+    def update_user_active_status(
+        self, target_username: str, is_active: bool, admin_username: str
+    ) -> bool:
+        """
+        启用/禁用用户账户
+        """
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE users SET is_active = ? WHERE username = ?",
+                (1 if is_active else 0, target_username),
+            )
+            if cursor.rowcount == 0:
+                conn.close()
+                return False
+            conn.commit()
+            conn.close()
+            admin_user = self._get_user_by_username(admin_username)
+            if admin_user:
+                self.log_audit(
+                    admin_user["id"],
+                    "UPDATE_USER_STATUS",
+                    details=f"将用户 [{target_username}] 状态设为 {'活跃' if is_active else '禁用'}",
+                    ip_address="",
+                )
+            log.info(
+                f"管理员 {admin_username} 将用户 {target_username} 状态设为 {'活跃' if is_active else '禁用'}"
+            )
+            return True
+        except Exception as e:
+            log.error(f"更新用户状态失败: {e}")
+            return False
+
+    def update_user_role(
+        self, target_username: str, new_role: str, admin_username: str
+    ) -> bool:
+        """
+        更新用户角色（admin/colleague）
+        """
+        if new_role not in ["admin", "colleague"]:
+            return False
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE users SET role = ? WHERE username = ?",
+                (new_role, target_username),
+            )
+            if cursor.rowcount == 0:
+                conn.close()
+                return False
+            conn.commit()
+            conn.close()
+            admin_user = self._get_user_by_username(admin_username)
+            if admin_user:
+                self.log_audit(
+                    admin_user["id"],
+                    "UPDATE_USER_ROLE",
+                    details=f"将用户 [{target_username}] 角色改为 {new_role}",
+                    ip_address="",
+                )
+            log.info(
+                f"管理员 {admin_username} 将用户 {target_username} 角色改为 {new_role}"
+            )
+            return True
+        except Exception as e:
+            log.error(f"更新用户角色失败: {e}")
+            return False
+
+    def change_user_display_name(
+        self, target_username: str, new_display_name: str, admin_username: str
+    ) -> bool:
+        """
+        修改用户的显示名称
+        """
+        if not new_display_name.strip():
+            return False
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE users SET display_name = ? WHERE username = ?",
+                (new_display_name.strip(), target_username),
+            )
+            if cursor.rowcount == 0:
+                conn.close()
+                return False
+            conn.commit()
+            conn.close()
+            admin_user = self._get_user_by_username(admin_username)
+            if admin_user:
+                self.log_audit(
+                    admin_user["id"],
+                    "UPDATE_DISPLAY_NAME",
+                    details=f"将用户 [{target_username}] 显示名改为 {new_display_name}",
+                    ip_address="",
+                )
+            log.info(f"管理员 {admin_username} 修改了用户 {target_username} 的显示名")
+            return True
+        except Exception as e:
+            log.error(f"更新用户显示名失败: {e}")
+            return False
+
+    # 辅助方法：根据用户名获取用户ID等信息（内部使用）
+    def _get_user_by_username(self, username: str) -> Optional[Dict]:
+        """根据用户名获取用户信息（简化版，用于审计）"""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, username, display_name, role FROM users WHERE username = ?",
+            (username,),
+        )
+        row = cursor.fetchone()
+        conn.close()
+        return dict(row) if row else None
 
 
 # %% [markdown]
