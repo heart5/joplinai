@@ -1156,16 +1156,14 @@ class EmbeddingGenerator:
     def _extract_author_from_note(self, note_title: str, note_tags: str, source_notebook_title: str = "") -> str:
         """
         从笔记标题、标签和笔记本信息中提取作者信息。
-        返回格式："白晔峰"、"同事_陈志伟"、"团队_共同维护"。
+        返回格式："XXA"、"XXB"、"团队_共同维护"。
         """
         import re
         split_ptn = re.compile(r"[,，]")
-        default_personal_author = "白晔峰"
-        colleague_prefix = "同事_"
-        team_prefix = "团队_"
+        default_personal_author = getinivaluefromcloud("joplinai", "default_personal_author")
 
         # 初始化
-        metadata = {'note_author': '白晔峰', 'note_type': '个人笔记'}
+        metadata = {'note_author': default_personal_author, 'note_type': '个人笔记'}
 
         # —— 配置：定义共享笔记本列表和同事列表（可从配置读取）——
         if (shared_nb_titles_str := getinivaluefromcloud("joplinai", "shared_notebook_titles")):
@@ -1176,7 +1174,7 @@ class EmbeddingGenerator:
         if (colleague_str := getinivaluefromcloud("joplinai", "colleague")):
             colleague = [title.strip() for title in split_ptn.split(colleague_str)]
         else:
-            colleague= ["陈志伟", "张永"]
+            colleague= ["XXA", "XXB"]
 
         # --- 第0层：收藏判定（最高优先级）---
         collection_kws = ['收藏', '好文', '摘抄', '转载']
@@ -1200,20 +1198,20 @@ class EmbeddingGenerator:
                 if tag.startswith("author_"):
                     author_candidate = tag[7:]  # 移除 "author_"
                     if author_candidate and author_candidate in colleague:
-                        metadata['note_author'] = f'同事_{author_candidate}'
+                        metadata['note_author'] = f'{author_candidate}'
                     break
 
         # 2.2 标题解析 (姓名) 或 [姓名] （如果作者还未被标签确定）
-        if metadata['note_author'] == '白晔峰':  # 默认状态才解析标题
+        if metadata['note_author'] == default_personal_author:  # 默认状态才解析标题
             bracket_pattern = re.compile(r"[（【\(\[]([\u4e00-\u9fa5]{2,4})[）】\)\]]")
             match = bracket_pattern.search(note_title)
             if match:
                 author_candidate = match.group(1)
                 if author_candidate in colleague:
-                    metadata['note_author'] = f'同事_{author_candidate}'
+                    metadata['note_author'] = f'{author_candidate}'
 
         # 2.3 笔记本上下文判定（如果作者仍为默认，且笔记本是共享的）
-        if metadata['note_author'] == '白晔峰' and source_notebook_title in shared_nb_titles:
+        if metadata['note_author'] == default_personal_author and source_notebook_title in shared_nb_titles:
             metadata.update({'note_author': '团队_共同维护', 'note_type': '团队协作'})
 
         return metadata
