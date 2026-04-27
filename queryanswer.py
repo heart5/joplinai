@@ -420,6 +420,94 @@ class JoplinQASystem:
 
 
 # %% [markdown]
+# ## PromptManager类
+
+# %%
+class PromptManager:
+    """集中管理从云端获取的系统提示词，杜绝硬编码。"""
+
+    @staticmethod
+    def get_sys_prompt_for_role(user_identity: Optional[Dict]) -> str:
+        """
+        根据用户身份，从云端获取对应的系统提示词。
+        如果云端未配置，则返回一个极简的、安全的通用提示。
+        """
+        from func.jpfuncs import getinivaluefromcloud
+
+        if not user_identity:
+            # 如果没有身份信息，使用最基础的提示
+            base_prompt = getinivaluefromcloud("joplinai", "sys_prompt_base")
+            if base_prompt:
+                return base_prompt
+            else:
+                # 终极后备：一个完全不涉及具体业务的中性提示
+                return "请根据提供的笔记内容回答问题。如果笔记中没有相关信息，请说明。"
+
+        user_role = user_identity.get("role")
+        user_display_name = user_identity.get("display_name", "")
+
+        # 从云端获取默认个人作者和同事列表（这些也是配置）
+        default_personal_author = (
+            getinivaluefromcloud("joplinai", "default_personal_author") or "用户"
+        )
+
+        import re
+
+        split_ptn = re.compile(r"[,，]")
+        if colleague_str := getinivaluefromcloud("joplinai", "colleague"):
+            colleagues = [title.strip() for title in split_ptn.split(colleague_str)]
+        else:
+            colleagues = []
+        colleague_str_for_prompt = "，".join([f"“{person}”" for person in colleagues])
+
+        # 根据角色获取对应的提示词配置键
+        prompt_key = ""
+        if user_role == "admin":
+            prompt_key = "sys_prompt"
+        elif user_role == "colleague":
+            prompt_key = "sys_colleague_prompt"
+        else:
+            # 未知角色，使用基础提示
+            prompt_key = "sys_prompt_base"
+
+        # 核心：从云端获取提示词模板
+        prompt_template = getinivaluefromcloud("joplinai", prompt_key)
+
+        if prompt_template:
+            # 如果模板中存在占位符，进行动态替换
+            # 例如，模板中可能有 {default_personal_author}、{colleague_str}、{user_display_name} 等占位符
+            prompt = prompt_template.replace(
+                "{default_personal_author}", default_personal_author
+            )
+            prompt = prompt.replace("{colleague_str}", colleague_str_for_prompt)
+            prompt = prompt.replace("{user_display_name}", user_display_name)
+            return prompt
+        else:
+            # 云端未配置对应提示词，根据角色返回一个结构化的默认提示
+            log.warning(f"云端未配置提示词键: {prompt_key}，将使用内置通用模板。")
+            if user_role == "admin":
+                return f"""你是我（{default_personal_author}）的笔记助手，基于笔记回答问题。笔记可能包含个人记录、团队共享信息或收藏文章。请根据笔记片段的【类型】和【作者】元数据，客观、准确地回答。如果笔记中没有相关信息，请说明。"""
+            elif user_role == "colleague":
+                return f"""你是{user_display_name}的笔记助手，基于共享笔记库回答问题。你只能访问作者为“团队_共同维护”或“同事_{user_display_name}”的笔记片段。请基于这些内容回答，如果无相关信息，请说明。"""
+            else:
+                return "请根据提供的笔记内容回答问题。如果笔记中没有相关信息，请说明。"
+
+    @staticmethod
+    def get_common_prompt_variants():
+        """获取其他可能需要从云端获取的常用提示词变体（如摘要、标签生成提示）。"""
+        from func.jpfuncs import getinivaluefromcloud
+
+        variants = {}
+        variant_keys = [
+            "prompt_for_summarization",
+            "prompt_for_tag_extraction",
+            "prompt_for_answer_refinement",
+        ]
+        for key in variant_keys:
+            variants[key] = getinivaluefromcloud("joplinai", key)
+        return variants
+
+# %% [markdown]
 # ## 优化的问答系统核心OptimizedJoplinQASystem(JoplinQASystem)
 
 
@@ -661,37 +749,10 @@ class OptimizedJoplinQASystem(JoplinQASystem):
                 colleague= ["XXA", "XXB"]
             colleague_str = "，".join([f"“{person}”" for person in colleague])
 
-            if user_role == 'admin':
-                if not (sys_prompt := getinivaluefromcloud("joplinai", "sys_prompt")):
-                    sys_prompt = f"""你是我（{default_personal_author}）个人的笔记助手，基于Joplin笔记回答问题。笔记库包含：
-0. **收藏或摘抄的文章笔记**：作者为“收藏”，是收藏或者摘抄的第三方文章。
-1. **我个人的笔记**：作者为{default_personal_author}，是我本人的记录。
-2. **同事的工作笔记**：作者为{colleague_str}，是共享笔记本中由同事记录的个人工作内容。
-3. **团队的共同笔记**：作者为“团队_共同维护”，是共享笔记本中由多人共同维护的记录（如《广州番禺林总》）。
+            # 使用 PromptManager 获取动态提示词
+            sys_prompt = PromptManager.get_sys_prompt_for_role(user_identity)
+            log.debug(f"[提示词管理] 为用户角色 '{user_identity.get('role') if user_identity else None}' 获取到系统提示词，长度: {len(sys_prompt)}")
 
-笔记片段的元数据包含【类型】和【作者】，请根据以下规则回答：
-*   **类型为“收藏”**：这是外部资料，请以“相关资料显示：...”或“根据收藏的文章：...”开头。
-*   **类型为“会议记录”**：这是对会议讨论的客观记载。回答时请以“根据[记录者]的会议记录：...”开头，并客观概括会议内容，避免使用“我认为”。
-*   **类型为“谈话记录”**：这是对双方沟通的客观记载。回答时请以“根据谈话记录：...”开头，并区分记录者与谈话对象。
-*   **类型为“团队协作”且作者为“团队_共同维护”**：这是多人维护的共享信息，请以“根据团队共享信息：...”开头。
-*   **类型为“个人笔记”且作者为{colleague_str}**：这是同事的个人观点，请以“根据[XXX]的笔记：...”开头。
-*   **类型为“个人笔记”且作者为“白晔峰”**：这是我本人的记录，可直接引用。
-如果笔记中没有相关信息，请如实告知。"""
-            elif user_role == 'colleague':
-                log.debug("[权限过滤] 同事角色，调用专用模板。")
-                if not (sys_prompt := getinivaluefromcloud("joplinai", "sys_colleague_prompt")):
-                    sys_prompt = f"""你是我（{user_display_name}）个人的笔记助手，基于Joplin笔记回答问题。笔记库包含：
-1. **收藏或摘抄的文章笔记**：作者为“收藏”，是收藏或者摘抄的第三方文章。
-2. **我个人的笔记**：作者为“同事_{user_display_name}”，是我本人的记录。
-3. **团队的共同笔记**：作者为“团队_共同维护”，是共享笔记本中由多人共同维护的记录（如《广州番禺林总》）。
-
-笔记片段的元数据包含【类型】和【作者】，请根据以下规则回答：
-*   **类型为“收藏”**：这是外部资料，请以“相关资料显示：...”或“根据收藏的文章：...”开头。
-*   **类型为“会议记录”**：这是对会议讨论的客观记载。回答时请以“根据[记录者]的会议记录：...”开头，并客观概括会议内容，避免使用“我认为”。
-*   **类型为“谈话记录”**：这是对双方沟通的客观记载。回答时请以“根据谈话记录：...”开头，并区分记录者与谈话对象。
-*   **类型为“团队协作”且作者为“团队_共同维护”**：这是多人维护的共享信息，请以“根据团队共享信息：...”开头。
-*   **类型为“个人笔记”且作者为“{user_display_name}”**：这是我本人的记录，可直接引用。
-如果笔记中没有相关信息，请如实告知。"""
         else:
             log.warning("[权限过滤] user_identity 为 None！将不应用任何过滤。这可能是个安全问题！")
 
