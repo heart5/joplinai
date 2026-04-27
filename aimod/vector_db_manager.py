@@ -263,35 +263,51 @@ class VectorDBManager:
 # ### search_similar_chunks(self, query_embedding: list, top_k: int = 10)
 
     # %%
-    def search_similar_chunks(self, query_embedding: list, top_k: int = 10, user_identity: Optional[Dict] = None):
-        """搜索最相似的文本块（使用 ChromaDB 正确 API），基于用户身份的权限过滤"""
+    def query_similar_chunks(self, query_embedding: List[float], limit: int = 10, user_identity: Optional[Dict] = None):
+        """查询相似块，支持基于用户身份的权限过滤"""
         if not self.collection:
             log.error("集合未加载")
             return []
-
-        # 构建基础查询
-        n_results = min(top_k * 2, 50)  # 多取一些，以便后续过滤
+    
+        # === 【新增】调试日志：记录传入的身份信息 ===
+        log.debug(f"[权限过滤] 查询请求 received. user_identity: {user_identity}")
         
+        # 构建基础查询
+        n_results = min(limit * 2, 50)
+    
         # === 核心：构建元数据过滤条件 ===
         where_filter = None
         if user_identity:
             user_role = user_identity.get('role')
             user_display_name = user_identity.get('display_name')
             
+            # === 【新增】调试日志：记录角色和显示名 ===
+            log.debug(f"[权限过滤] 解析身份 -> role: '{user_role}', display_name: '{user_display_name}'")
+    
             if user_role == 'admin':
                 # 管理员（您）：不过滤，可以看到所有笔记
                 where_filter = {}
+                log.debug("[权限过滤] 管理员角色，不过滤。")
             elif user_role == 'colleague':
                 # 同事：只能看到“团队_共同维护”和自己创建的笔记
+                expected_author = f"同事_{user_display_name}"
                 where_filter = {
                     "$or": [
                         {"note_author": {"$eq": "团队_共同维护"}},
-                        {"note_author": {"$eq": f"同事_{user_display_name}"}}
+                        {"note_author": {"$eq": expected_author}}
                     ]
                 }
-            # 其他角色或无角色，则不设置过滤器（即无权访问任何笔记）
+                # === 【新增】调试日志：显示构建的过滤器 ===
+                log.debug(f"[权限过滤] 同事角色，构建过滤器: {where_filter}")
             else:
-                where_filter = {"note_author": {"$eq": "__NO_ACCESS__"}}  # 确保返回空结果
+                # 其他角色或无角色，则不设置过滤器（即无权访问任何笔记）
+                where_filter = {"note_author": {"$eq": "__NO_ACCESS__"}}
+                log.debug("[权限过滤] 未知角色，应用无权限过滤器。")
+        else:
+            log.warning("[权限过滤] user_identity 为 None！将不应用任何过滤。这可能是个安全问题！")
+    
+        # === 【新增】调试日志：显示最终发送给ChromaDB的过滤器 ===
+        log.debug(f"[权限过滤] 即将发送给 ChromaDB 的 where 参数: {where_filter}")
 
         try:
            # ChromaDB 的正确查询方法
@@ -307,6 +323,8 @@ class VectorDBManager:
 
             # 检查结果结构
             if results and "ids" in results and results["ids"]:
+                num_returned = len(results["ids"][0]) if results["ids"] and results["ids"][0] else 0
+                log.debug(f"[权限过滤] ChromaDB 返回了 {num_returned} 个结果。")
                 # ChromaDB返回的ids、metadatas、documents、distances都是列表的列表
                 # 因为query_embeddings是单元素列表，所以取第一个元素
                 ids_list = results["ids"][0] if results["ids"] else []
