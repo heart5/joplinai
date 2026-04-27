@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>用户管理 - Joplin AI 知识问答</title>
+    <!-- 继承主站样式和Bootstrap -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        .admin-container { padding: 20px; max-width: 1200px; margin: 0 auto; }
+        .page-title { margin-bottom: 30px; border-bottom: 2px solid #eee; padding-bottom: 10px; }
+        .user-table { background: white; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); overflow: hidden; }
+        .table th { background-color: #f8f9fa; border-top: none; }
+        .badge-admin { background-color: #dc3545; }
+        .badge-colleague { background-color: #6c757d; }
+        .badge-active { background-color: #28a745; }
+        .badge-inactive { background-color: #ffc107; color: #212529; }
+        .action-buttons .btn { margin-right: 5px; margin-bottom: 5px; }
+        .modal-footer .btn { min-width: 80px; }
+        #createUserModal input { margin-bottom: 10px; }
+    </style>
+</head>
+<body>
+    <!-- 导航栏 (与主站一致) -->
+    <nav class="navbar navbar-light bg-light border-bottom">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="{{ url_for('index') }}">Joplin AI 问答助手</a>
+            <div class="user-info">
+                <span>欢迎，{{ user.display_name }} (管理员) · </span>
+                <a href="{{ url_for('index') }}">返回问答</a>
+                <span> · </span>
+                <a href="{{ url_for('logout') }}">退出登录</a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- 主内容区 -->
+    <div class="admin-container">
+        <div class="page-title d-flex justify-content-between align-items-center">
+            <h2>👥 用户管理</h2>
+            <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createUserModal">
+                <i class="bi bi-person-plus"></i> 创建新用户
+            </button>
+        </div>
+
+        <!-- 用户列表表格 -->
+        <div class="user-table">
+            <table class="table table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th width=\"5%\">ID</th>
+                        <th width=\"15%\">用户名</th>
+                        <th width=\"20%\">显示名称</th>
+                        <th width=\"10%\">角色</th>
+                        <th width=\"10%\">状态</th>
+                        <th width=\"20%\">最后登录</th>
+                        <th width=\"20%\">操作</th>
+                    </tr>
+                </thead>
+                <tbody id="usersTableBody">
+                    <!-- 动态加载 -->
+                    <tr>
+                        <td colspan="7" class="text-center py-5">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">加载中...</span>
+                            </div>
+                            <p class="mt-2 text-muted">正在加载用户列表...</p>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- 系统提示区 -->
+        <div class="alert alert-info mt-4">
+            <small>
+                <strong>提示：</strong>
+                <ul class="mb-0 ps-3">
+                    <li>重置密码后，新密码将立即生效，请妥善告知用户。</li>
+                    <li>禁用用户后，该用户将无法登录，但其历史记录会保留。</li>
+                    <li>将普通用户提升为管理员需谨慎，管理员拥有全部权限。</li>
+                </ul>
+            </small>
+        </div>
+    </div>
+
+    <!-- 模态框：创建用户 -->
+    <div class="modal fade" id="createUserModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">创建新用户</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="createUserForm">
+                        <input type="text" class="form-control" placeholder="用户名（英文/数字）" name="username" required>
+                        <input type="password" class="form-control" placeholder="初始密码" name="password" required minlength="6">
+                        <input type="text" class="form-control" placeholder="显示名称（中文昵称）" name="display_name" required>
+                        <select class="form-select" name="role">
+                            <option value="colleague">同事</option>
+                            <option value="admin">管理员</option>
+                        </select>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-primary" onclick="submitCreateUser()">创建</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 模态框：重置密码 -->
+    <div class="modal fade" id="resetPasswordModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">重置密码</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>将为用户 <strong id="resetPwdUsername">-</strong> 设置新密码。</p>
+                    <input type="password" class="form-control" id="newPasswordInput" placeholder="输入新密码（至少6位）" minlength="6">
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-danger" onclick="confirmResetPassword()">确定重置</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 模态框：编辑显示名 -->
+    <div class="modal fade" id="editDisplayNameModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">修改显示名称</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>修改用户 <strong id="editDnUsername">-</strong> 的显示名称。</p>
+                    <input type="text" class="form-control" id="newDisplayNameInput" placeholder="输入新的显示名称">
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-primary" onclick="confirmUpdateDisplayName()">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 引入 Bootstrap JS 和自定义逻辑 -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // 全局变量，存储当前操作的目标用户
+        let currentTargetUsername = '';
+        let currentTargetDisplayName = '';
+
+        // 页面加载完成后，获取用户列表
+        document.addEventListener('DOMContentLoaded', function() {
+            loadUsers();
+        });
+
+        // 加载用户列表
+        async function loadUsers() {
+            try {
+                const resp = await fetch('/api/admin/users');
+                const result = await resp.json();
+                if (result.success) {
+                    renderUsersTable(result.users);
+                } else {
+                    showToast('加载失败: ' + (result.error || '未知错误'), 'danger');
+                }
+            } catch (error) {
+                console.error('加载用户列表失败:', error);
+                showToast('网络错误，请刷新重试', 'danger');
+            }
+        }
+
+        // 渲染表格
+        function renderUsersTable(users) {
+            const tbody = document.getElementById('usersTableBody');
+            if (users.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="7" class="text-center py-5 text-muted">暂无用户数据</td></tr>`;
+                return;
+            }
+            let html = '';
+            users.forEach(u => {
+                const lastLogin = u.last_login ? new Date(u.last_login).toLocaleString('zh-CN') : '从未登录';
+                html += `
+                <tr>
+                    <td>${u.id}</td>
+                    <td><code>${escapeHtml(u.username)}</code></td>
+                    <td>${escapeHtml(u.display_name)}</td>
+                    <td><span class="badge rounded-pill ${u.role === 'admin' ? 'badge-admin' : 'badge-colleague'}">${u.role === 'admin' ? '管理员' : '同事'}</span></td>
+                    <td><span class="badge rounded-pill ${u.is_active ? 'badge-active' : 'badge-inactive'}">${u.is_active ? '活跃' : '已禁用'}</span></td>
+                    <td><small class="text-muted">${lastLogin}</small></td>
+                    <td class="action-buttons">
+                        ${u.username !== '{{ user.username }}' ? `
+                        <button class="btn btn-sm btn-outline-warning" onclick="showResetPasswordModal('${u.username}')">重置密码</button>
+                        <button class="btn btn-sm btn-outline-secondary" onclick="showEditDisplayNameModal('${u.username}', '${escapeHtml(u.display_name)}')">改显示名</button>
+                        <button class="btn btn-sm btn-outline-${u.role === 'admin' ? 'secondary' : 'success'}" onclick="toggleRole('${u.username}', '${u.role}')">${u.role === 'admin' ? '降为同事' : '升为管理员'}</button>
+                        <button class="btn btn-sm btn-outline-${u.is_active ? 'danger' : 'success'}" onclick="toggleActive('${u.username}', ${u.is_active})">${u.is_active ? '禁用' : '启用'}</button>
+                        ` : `<small class="text-muted">(当前用户)</small>`}
+                    </td>
+                </tr>
+                `;
+            });
+            tbody.innerHTML = html;
+        }
+
+        // === 操作函数 ===
+        function showResetPasswordModal(username) {
+            currentTargetUsername = username;
+            document.getElementById('resetPwdUsername').textContent = username;
+            const modal = new bootstrap.Modal(document.getElementById('resetPasswordModal'));
+            modal.show();
+        }
+
+        async function confirmResetPassword() {
+            const newPassword = document.getElementById('newPasswordInput').value.trim();
+            if (newPassword.length < 6) {
+                alert('密码长度至少6位');
+                return;
+            }
+            try {
+                const resp = await fetch('/api/admin/user/reset_password', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({username: currentTargetUsername, new_password: newPassword})
+                });
+                const result = await resp.json();
+                if (result.success) {
+                    showToast('密码重置成功', 'success');
+                    bootstrap.Modal.getInstance(document.getElementById('resetPasswordModal')).hide();
+                    document.getElementById('newPasswordInput').value = '';
+                } else {
+                    showToast('操作失败: ' + result.error, 'danger');
+                }
+            } catch (error) {
+                showToast('网络错误', 'danger');
+            }
+        }
+
+        function showEditDisplayNameModal(username, currentName) {
+            currentTargetUsername = username;
+            currentTargetDisplayName = currentName;
+            document.getElementById('editDnUsername').textContent = username;
+            document.getElementById('newDisplayNameInput').value = currentName;
+            const modal = new bootstrap.Modal(document.getElementById('editDisplayNameModal'));
+            modal.show();
+        }
+
+        async function confirmUpdateDisplayName() {
+            const newName = document.getElementById('newDisplayNameInput').value.trim();
+            if (!newName) {
+                alert('显示名称不能为空');
+                return;
+            }
+            try {
+                const resp = await fetch('/api/admin/user/update_display_name', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({username: currentTargetUsername, new_display_name: newName})
+                });
+                const result = await resp.json();
+                if (result.success) {
+                    showToast('显示名称已更新', 'success');
+                    bootstrap.Modal.getInstance(document.getElementById('editDisplayNameModal')).hide();
+                    loadUsers(); // 刷新列表
+                } else {
+                    showToast('操作失败: ' + result.error, 'danger');
+                }
+            } catch (error) {
+                showToast('网络错误', 'danger');
+            }
+        }
+
+        async function toggleRole(username, currentRole) {
+            const newRole = currentRole === 'admin' ? 'colleague' : 'admin';
+            if (!confirm(`确定要将用户 ${username} 的角色改为 ${newRole === 'admin' ? '管理员' : '同事'} 吗？`)) {
+                return;
+            }
+            try {
+                const resp = await fetch('/api/admin/user/update_role', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({username: username, new_role: newRole})
+                });
+                const result = await resp.json();
+                if (result.success) {
+                    showToast('用户角色已更新', 'success');
+                    loadUsers();
+                } else {
+                    showToast('操作失败: ' + result.error, 'danger');
+                }
+            } catch (error) {
+                showToast('网络错误', 'danger');
+            }
+        }
+
+        async function toggleActive(username, currentlyActive) {
+            const newState = !currentlyActive;
+            const action = newState ? '启用' : '禁用';
+            if (!confirm(`确定要${action}用户 ${username} 吗？`)) {
+                return;
+            }
+            try {
+                const resp = await fetch('/api/admin/user/toggle_active', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({username: username, is_active: newState})
+                });
+                const result = await resp.json();
+                if (result.success) {
+                    showToast(`用户已${action}`, 'success');
+                    loadUsers();
+                } else {
+                    showToast('操作失败: ' + result.error, 'danger');
+                }
+            } catch (error) {
+                showToast('网络错误', 'danger');
+            }
+        }
+
+        async function submitCreateUser() {
+            const form = document.getElementById('createUserForm');
+            const formData = new FormData(form);
+            const payload = Object.fromEntries(formData.entries());
+            try {
+                const resp = await fetch('/api/admin/user/create', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(payload)
+                });
+                const result = await resp.json();
+                if (result.success) {
+                    showToast('用户创建成功', 'success');
+                    bootstrap.Modal.getInstance(document.getElementById('createUserModal')).hide();
+                    form.reset();
+                    loadUsers();
+                } else {
+                    showToast('创建失败: ' + result.error, 'danger');
+                }
+            } catch (error) {
+                showToast('网络错误', 'danger');
+            }
+        }
+
+        // === 工具函数 ===
+        function showToast(message, type = 'info') {
+            // 简单实现，可以用更优雅的Toast组件替换
+            alert(`[${type.toUpperCase()}] ${message}`);
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    </script>
+</body>
+</html>
