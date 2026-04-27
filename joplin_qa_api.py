@@ -233,7 +233,7 @@ def api_ask():
         qa_system = get_qa_system_for_session(session_id, config_overrides)
 
         # 2. 获取用户身份
-        user_identity = request.get("user_identity")
+        user_identity = data.get("user_identity")
 
         # 3. 调用核心问答功能
         # result = qa_system.ask(question, use_history=use_history)
