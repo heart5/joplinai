@@ -263,7 +263,7 @@ class VectorDBManager:
 # ### search_similar_chunks(self, query_embedding: list, top_k: int = 10)
 
     # %%
-    def query_similar_chunks(self, query_embedding: List[float], limit: int = 10, user_identity: Optional[Dict] = None):
+    def search_similar_chunks(self, query_embedding: List[float], limit: int = 10, user_identity: Optional[Dict] = None):
         """查询相似块，支持基于用户身份的权限过滤"""
         if not self.collection:
             log.error("集合未加载")
@@ -290,7 +290,7 @@ class VectorDBManager:
                 log.debug("[权限过滤] 管理员角色，不过滤。")
             elif user_role == 'colleague':
                 # 同事：只能看到“团队_共同维护”和自己创建的笔记
-                expected_author = f"同事_{user_display_name}"
+                expected_author = f"{user_display_name}"
                 where_filter = {
                     "$or": [
                         {"note_author": {"$eq": "团队_共同维护"}},
@@ -948,4 +948,4 @@ if __name__ == "__main__":
     )
     embedding_gen = EmbeddingGenerator(config, config.get("embedding_model"))
 
-    # migrate_all_chunks_with_author(vector_db, embedding_gen)
+    migrate_all_chunks_with_author(vector_db, embedding_gen)
