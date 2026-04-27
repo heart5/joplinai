@@ -16,7 +16,16 @@
 <body>
     <div class="container">
         <h1>🧠 Joplin AI 问答助手</h1>
-        <p>欢迎，<strong>{{ user.display_name }}</strong> · <a href="{{ url_for('logout') }}" style="color:#f44336;">退出登录</a></p>
+
+        <div class="user-info">
+            <span>欢迎，{{ user.display_name }} · </span>
+            <!-- 新增管理员入口 -->
+            {% if user.role == 'admin' %}
+            <a href="{{ url_for('admin_dashboard') }}" class="admin-link">用户管理</a>
+            <span> · </span>
+            {% endif %}
+            <a href="{{ url_for('logout') }}">退出登录</a>
+        </div>
 
         <!-- 提问表单 -->
         <form id="askForm">
