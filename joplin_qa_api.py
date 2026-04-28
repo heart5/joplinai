@@ -27,6 +27,7 @@ import argparse
 import json
 import logging
 import threading
+import time
 from datetime import datetime
 from functools import wraps
 from pathlib import Path
@@ -36,6 +37,7 @@ from flask import Flask, jsonify, request
 
 # 尝试导入项目核心模块
 try:
+    from config_manager import CONFIG_MANAGER
     from func.datatools import getkeysfromcloud
     from func.jpfuncs import (
         getinivaluefromcloud,
@@ -121,30 +123,65 @@ def sanitize_config(obj):
 def get_qa_system_for_session(
     session_id: str, config_overrides: Optional[Dict] = None
 ) -> OptimizedJoplinQASystem:
-    """获取或创建指定会话的问答系统实例（线程安全）"""
+    """获取或创建指定会话的问答系统实例（支持云端配置热更新）"""
     global _qa_system_instances
 
+    # 1. 获取最新的云端配置快照及其指纹
+    cloud_config_snapshot = CONFIG_MANAGER.get_config_snapshot()
+    current_cloud_fingerprint = CONFIG_MANAGER.get_config_fingerprint()
+
+    # 2. 构建本次请求的最终配置（云端快照 + 本次覆盖）
+    effective_config = cloud_config_snapshot.copy()
+    if config_overrides:
+        effective_config.update(config_overrides)
+    # 注意：这里不需要再计算指纹，直接使用云端指纹即可。
+    # 因为 config_overrides 通常是会话级参数（如api_key），不影响业务逻辑配置。
+
+    # 3. 检查是否需要为该会话创建新实例
+    need_new_instance = False
     if session_id not in _qa_system_instances:
+        need_new_instance = True
+        log.debug(f"会话 [{session_id}] 首次请求，将创建实例。")
+    else:
+        # 获取已缓存实例的元信息
+        cached_data = _qa_system_instances[session_id]
+        cached_fingerprint = cached_data.get("cloud_fingerprint")
+        # 如果云端配置指纹变了，就需要重建实例
+        if cached_fingerprint != current_cloud_fingerprint:
+            log.info(
+                f"会话 [{session_id}] 的云端配置已更新 "
+                f"({cached_fingerprint[:8]}... -> {current_cloud_fingerprint[:8]}...)，将重建问答实例。"
+            )
+            need_new_instance = True
+
+    # 4. 如果需要新实例，则创建（线程安全）
+    if need_new_instance:
         with _qa_system_lock:
-            if session_id not in _qa_system_instances:  # 双重检查锁定
-                config = DEFAULT_CONFIG.copy()
-                if config_overrides:
-                    config.update(config_overrides)
-                config_show = {
-                    k: v for k, v in config.items() if k != "deepseek_api_key"
-                }
-                sanitized_config = sanitize_config(config_show)
+            # 双重检查锁定
+            if (
+                session_id not in _qa_system_instances
+                or _qa_system_instances[session_id].get("cloud_fingerprint")
+                != current_cloud_fingerprint
+            ):
                 log.info(
-                    f"为会话 [{session_id}] 初始化问答系统，配置: {json.dumps(sanitized_config, indent=2, ensure_ascii=False)}"
+                    f"为会话 [{session_id}] 创建新的问答系统实例 (配置指纹: {current_cloud_fingerprint[:8]}...)"
                 )
+
                 try:
-                    # 注意：这里每个会话都会创建一个新的 OptimizedJoplinQASystem 实例
-                    _qa_system_instances[session_id] = OptimizedJoplinQASystem(config)
-                    log.info(f"✅ 会话 [{session_id}] 的问答系统初始化成功")
+                    # 注意：这里需要确保 OptimizedJoplinQASystem 能接受我们的 config 字典
+                    qa_instance = OptimizedJoplinQASystem(effective_config)
+                    # 存储实例及其关联的云端配置指纹
+                    _qa_system_instances[session_id] = {
+                        "instance": qa_instance,
+                        "cloud_fingerprint": current_cloud_fingerprint,
+                        "created_at": time.time(),
+                    }
                 except Exception as e:
-                    log.error(f"❌ 会话 [{session_id}] 的问答系统初始化失败: {e}")
-                    raise RuntimeError(f"无法为会话 {session_id} 初始化问答系统: {e}")
-    return _qa_system_instances[session_id]
+                    log.error(f"创建会话 [{session_id}] 的问答系统实例失败: {e}")
+                    raise
+
+    # 5. 返回实例
+    return _qa_system_instances[session_id]["instance"]
 
 
 # %% [markdown]
@@ -306,6 +343,33 @@ def api_get_history():
         ), 200
     except Exception as e:
         log.error(f"获取历史记录时出错: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# %% [markdown]
+# ## api_reload_config()
+
+# %%
+@app.route("/admin/reload_config", methods=["POST"])
+@require_api_key
+def api_reload_config():
+    """手动触发从云端重载配置（管理员功能）"""
+    try:
+        updated = CONFIG_MANAGER.force_refresh()
+        if updated:
+            new_fingerprint = CONFIG_MANAGER.get_config_fingerprint()[:8]
+            # 不清除实例，让它们按需重建（惰性更新）
+            log.warning(f"手动强制刷新云端配置完成。新指纹: {new_fingerprint}...")
+            return jsonify(
+                {
+                    "success": True,
+                    "message": "云端配置已强制刷新。现有会话将在下次请求时使用新配置。",
+                    "new_fingerprint": new_fingerprint,
+                }
+            )
+        else:
+            return jsonify({"success": True, "message": "云端配置未发生变化。"})
+    except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
 
