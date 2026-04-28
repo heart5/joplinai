@@ -124,14 +124,17 @@ class JoplinQASystem:
     """Joplin笔记问答系统"""
 
 # %% [markdown]
-# ### __init__(self, config: Dict)
+# ### __init__(self, config: Dict = None)
 
     # %%
-    def __init__(self, config: Dict):
-        self.config = config
+    def __init__(self, config: Dict = None):
+        from joplinai import CONFIG as CONFIG_JA
+        from queryanswer import CONFIG as CONFIG_QA
+        config_all = {**CONFIG_JA, **CONFIG_QA, **config}
+        self.config = config_all
         # for_creation=False表示用于查询
         self.vector_db = VectorDBManager(
-            config["db_path"], config["embedding_model"], for_creation=False
+            self.config["db_path"], self.config["embedding_model"], for_creation=False
         )
         self.conversation_history = []  # 对话历史
 
@@ -532,13 +535,13 @@ class OptimizedJoplinQASystem(JoplinQASystem):
         from aimod.embedding_generator import EmbeddingGenerator  # 请根据实际模块名调整
 
         self.embedding_generator = EmbeddingGenerator(
-            config,
-            model_name=config["embedding_model"],
+            self.config,
+            model_name=self.config["embedding_model"],
             cache_manager=global_cache_manager,  # 传入统一的缓存管理器
         )
         log.info(
             f"OptimizedJoplinQASystem 初始化完成，已加载 embedding_generator，"
-            f"嵌入模型为：{config['embedding_model']}"
+            f"嵌入模型为：{self.config['embedding_model']}"
         )
 
 # %% [markdown]
