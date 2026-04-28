@@ -235,6 +235,18 @@ def require_api_key(f):
 # # Flask API 端点
 
 # %% [markdown]
+# ## index()
+
+# %%
+@app.route("/")
+def index():
+    """简单的健康检查端点"""
+    return jsonify(
+        {"service": "Joplin QA API", "status": "running", "version": "1.0"}
+    ), 200
+
+
+# %% [markdown]
 # ## api_ask()
 
 # %%
