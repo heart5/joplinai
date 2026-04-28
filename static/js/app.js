@@ -403,7 +403,7 @@ document.addEventListener('DOMContentLoaded', function() {
         elements.button.disabled = true;
         if (elements.loading) elements.loading.style.display = 'block';
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 90000); // 90秒超时
+        const timeoutId = setTimeout(() => controller.abort(), 150000); // 150秒超时
 
         try {
             const payload = {
