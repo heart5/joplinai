@@ -274,38 +274,63 @@ class VectorDBManager:
         
         # 构建基础查询
         n_results = min(limit * 2, 50)
-    
-        # === 核心：构建元数据过滤条件 ===
+
+        # === 权限过滤逻辑 ===
         where_filter = None
+        
         if user_identity:
             user_role = user_identity.get('role')
             user_display_name = user_identity.get('display_name')
             
-            # === 【新增】调试日志：记录角色和显示名 ===
-            log.debug(f"[权限过滤] 解析身份 -> role: '{user_role}', display_name: '{user_display_name}'")
-    
+            # 获取笔记本白名单（JSON数组格式）
+            allowed_notebooks = user_identity.get('allowed_notebooks', [])
+            
+            log.debug(
+                f"[权限过滤] 用户: {user_display_name}, 角色: {user_role}, "
+                f"授权笔记本数: {len(allowed_notebooks)}"
+            )
+            
             if user_role == 'admin':
-                # 管理员（您）：不过滤，可以看到所有笔记
+                # 管理员：无过滤，访问全部
                 where_filter = None
-                log.debug("[权限过滤] 管理员角色，应用无过滤（where=None）。")
-            elif user_role == 'colleague':
-                # 同事：只能看到“团队_共同维护”和自己创建的笔记
-                expected_author = f"{user_display_name}"
-                where_filter = {
-                    "$or": [
-                        {"note_author": {"$eq": "团队_共同维护"}},
-                        {"note_author": {"$eq": expected_author}}
-                    ]
-                }
-                # === 【新增】调试日志：显示构建的过滤器 ===
-                log.debug(f"[权限过滤] 同事角色，构建过滤器: {where_filter}")
+                log.debug("[权限过滤] 管理员角色，无过滤。")
+                
+            elif user_role in ['team_leader', 'team_member']:
+                # 团队领导 & 团队成员：统一使用笔记本白名单机制
+                # 个人作者标识（根据您的命名规范）
+                personal_author = f"{user_display_name}"
+                
+                if not allowed_notebooks:
+                    # 如果没有授权任何笔记本，只能访问个人笔记
+                    where_filter = {
+                        "note_author": {"$eq": personal_author}
+                    }
+                    log.debug(f"[权限过滤] 无授权笔记本，仅限个人笔记。")
+                    
+                else:
+                    # 构建复合过滤器：个人笔记 OR (团队笔记 AND 在授权笔记本中)
+                    where_filter = {
+                        "$or": [
+                            # 条件1：个人创建的笔记
+                            {"note_author": {"$eq": personal_author}},
+                            
+                            # 条件2：团队笔记且在授权笔记本范围内
+                            {
+                                "$and": [
+                                    {"note_author": {"$eq": "团队_共同维护"}},
+                                    {"source_notebook_title": {"$in": allowed_notebooks}}
+                                ]
+                            }
+                        ]
+                    }
+                    log.debug(
+                        f"[权限过滤] 应用笔记本白名单过滤，"
+                        f"授权笔记本: {allowed_notebooks[:3]}{'...' if len(allowed_notebooks) > 3 else ''}"
+                    )
             else:
-                # 其他角色或无角色，则不设置过滤器（即无权访问任何笔记）
+                # 未知角色：严格限制
                 where_filter = {"note_author": {"$eq": "__NO_ACCESS__"}}
-                log.debug("[权限过滤] 未知角色，应用无权限过滤器。")
-        else:
-            log.warning("[权限过滤] user_identity 为 None！将不应用任何过滤（where=None）。这可能是个安全问题！")
-            where_filter = None
+                log.warning(f"[权限过滤] 未知角色 '{user_role}'，禁止访问。")
     
         # === 【新增】调试日志：显示最终发送给ChromaDB的过滤器 ===
         log.debug(f"[权限过滤] 即将发送给 ChromaDB 的 where 参数: {where_filter}")
@@ -870,6 +895,69 @@ class VectorDBManager:
                 )  # 避免堆栈过长
     
         log.info(f"迁移完成。成功更新 {updated_count} 个块，遇到 {error_count} 个错误。")
+
+# %% [markdown]
+# ### extract_unique_notebook_titles(self) -> List[str]
+
+    # %%
+    def extract_unique_notebook_titles(self) -> List[str]:
+        """
+        从向量库提取所有唯一的笔记本标题
+        
+        Returns:
+            排序后的唯一笔记本标题列表
+        """
+        if not self.collection:
+            log.error("集合未加载")
+            return
+    
+        # 获取集合中的所有元数据
+        try:
+            results = self.collection.get(include=["metadatas"])
+            metadatas = results.get("metadatas", [])
+            
+            # 提取并去重
+            notebook_titles = set()
+            for metadata in metadatas:
+                title = metadata.get("source_notebook_title")
+                if title and title.strip():
+                    notebook_titles.add(title.strip())
+            
+            # 排序并返回
+            sorted_titles = sorted(list(notebook_titles))
+            log.info(f"提取到 {len(sorted_titles)} 个唯一笔记本标题")
+            
+            return sorted_titles
+        except Exception as e:
+            log.error(f"提取文本块所在笔记本（所有）标题失败: {e}")
+            return []
+
+# %% [markdown]
+# ### get_notebook_statistics(self) -> Dict
+
+    # %%
+    def get_notebook_statistics(self) -> Dict:
+        """
+        获取笔记本统计信息
+        
+        Returns:
+            包含统计信息的字典
+        """
+        titles = self.extract_unique_notebook_titles()
+        
+        # 按首字分组统计（便于前端展示）
+        grouped = {}
+        for title in titles:
+            first_char = title[0] if title else "其他"
+            if first_char not in grouped:
+                grouped[first_char] = []
+            grouped[first_char].append(title)
+        
+        return {
+            "total_count": len(titles),
+            "titles": titles,
+            "grouped": grouped
+        }
 
 
 # %% [markdown]
