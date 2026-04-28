@@ -53,19 +53,25 @@ class UserManager:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
 
-        # 用户表
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT UNIQUE NOT NULL,
                 password_hash TEXT NOT NULL,
                 display_name TEXT NOT NULL,
-                role TEXT NOT NULL CHECK(role IN ('admin', 'colleague')),
+                role TEXT NOT NULL CHECK(role IN ('admin', 'team_leader', 'team_member')),
+                allowed_notebooks TEXT, -- JSON数组格式：["笔记本A", "笔记本B"]
                 is_active BOOLEAN DEFAULT 1,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 last_login TIMESTAMP
             )
         """)
+        # 创建索引
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)"
+        )
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)")
+        log.info("用户数据库表结构已初始化（支持三级权限）")
 
         # 会话表 (用于持久化登录)
         cursor.execute("""
@@ -468,12 +474,125 @@ class UserManager:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT id, username, display_name, role FROM users WHERE username = ?",
+            "SELECT id, username, display_name, role, allowed_notebooks FROM users WHERE username = ?",
             (username,),
         )
         row = cursor.fetchone()
         conn.close()
         return dict(row) if row else None
+
+    def create_user(
+        self,
+        username: str,
+        password: str,
+        display_name: str,
+        role: str = "team_member",
+        allowed_notebooks: list = None,
+    ) -> bool:
+        """
+        创建新用户（支持笔记本白名单）
+
+        Args:
+            username: 用户名
+            password: 密码
+            display_name: 显示名称
+            role: 角色（admin/team_leader/team_member）
+            allowed_notebooks: 允许访问的笔记本列表
+        """
+        if allowed_notebooks is None:
+            allowed_notebooks = []
+
+        # 验证角色
+        valid_roles = ["admin", "team_leader", "team_member"]
+        if role not in valid_roles:
+            log.error(f"无效的角色: {role}")
+            return False
+
+        # 将笔记本列表转为JSON字符串
+        notebooks_json = json.dumps(allowed_notebooks, ensure_ascii=False)
+
+        password_hash = self._hash_password(password)
+
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "INSERT INTO users (username, password_hash, display_name, role, allowed_notebooks) VALUES (?, ?, ?, ?, ?)",
+                    (username, password_hash, display_name, role, notebooks_json),
+                )
+                conn.commit()
+
+                log.info(
+                    f"创建用户成功: {username} (角色: {role}, 授权笔记本: {len(allowed_notebooks)}个)"
+                )
+                return True
+        except sqlite3.IntegrityError:
+            log.error(f"用户名已存在: {username}")
+            return False
+
+    def update_user_permissions(
+        self, username: str, role: str = None, allowed_notebooks: list = None
+    ) -> bool:
+        """
+        更新用户权限配置
+
+        Args:
+            username: 用户名
+            role: 新角色（可选）
+            allowed_notebooks: 新笔记本白名单（可选）
+        """
+        updates = []
+        params = []
+
+        if role is not None:
+            updates.append("role = ?")
+            params.append(role)
+
+        if allowed_notebooks is not None:
+            updates.append("allowed_notebooks = ?")
+            params.append(json.dumps(allowed_notebooks, ensure_ascii=False))
+
+        if not updates:
+            return True  # 无更新
+
+        params.append(username)
+
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                update_sql = f"UPDATE users SET {', '.join(updates)} WHERE username = ?"
+                cursor.execute(update_sql, params)
+                conn.commit()
+
+                log.info(
+                    f"更新用户权限: {username} - 角色: {role}, 笔记本: {allowed_notebooks}"
+                )
+                return True
+        except Exception as e:
+            log.error(f"更新用户权限失败: {e}")
+            return False
+
+    def get_user_with_notebooks(self, username: str) -> Optional[Dict]:
+        """
+        获取用户信息（包含解析后的笔记本列表）
+        """
+        user = self._get_user_by_username(username)
+        if not user:
+            return None
+
+        # 解析笔记本白名单
+        notebooks_json = user.get("allowed_notebooks", "[]")
+        try:
+            allowed_notebooks = json.loads(notebooks_json)
+        except:
+            allowed_notebooks = []
+
+        user["allowed_notebooks"] = allowed_notebooks
+        user["allowed_notebooks_str"] = (
+            ", ".join(allowed_notebooks) if allowed_notebooks else "无"
+        )
+
+        return user
 
 
 # %% [markdown]
