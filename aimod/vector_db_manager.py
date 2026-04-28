@@ -286,8 +286,8 @@ class VectorDBManager:
     
             if user_role == 'admin':
                 # 管理员（您）：不过滤，可以看到所有笔记
-                where_filter = {}
-                log.debug("[权限过滤] 管理员角色，不过滤。")
+                where_filter = None
+                log.debug("[权限过滤] 管理员角色，应用无过滤（where=None）。")
             elif user_role == 'colleague':
                 # 同事：只能看到“团队_共同维护”和自己创建的笔记
                 expected_author = f"{user_display_name}"
@@ -304,7 +304,8 @@ class VectorDBManager:
                 where_filter = {"note_author": {"$eq": "__NO_ACCESS__"}}
                 log.debug("[权限过滤] 未知角色，应用无权限过滤器。")
         else:
-            log.warning("[权限过滤] user_identity 为 None！将不应用任何过滤。这可能是个安全问题！")
+            log.warning("[权限过滤] user_identity 为 None！将不应用任何过滤（where=None）。这可能是个安全问题！")
+            where_filter = None
     
         # === 【新增】调试日志：显示最终发送给ChromaDB的过滤器 ===
         log.debug(f"[权限过滤] 即将发送给 ChromaDB 的 where 参数: {where_filter}")
