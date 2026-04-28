@@ -22,6 +22,7 @@
 # %%
 import json
 import logging
+import re
 from functools import wraps
 from pathlib import Path
 
@@ -39,6 +40,11 @@ from flask import (
 
 # 导入自定义用户管理器
 try:
+    from func.jpfuncs import (
+        getinivaluefromcloud,
+        getnote,
+    )
+    from func.logme import log
     from user_manager import USER_MANAGER
 except ImportError:
     # 简易回退
@@ -173,6 +179,13 @@ def api_ask():
     if not question:
         return jsonify({"error": "问题不能为空"}), 400
 
+    # 获取当前用户完整信息（包含笔记本白名单）
+    current_user = session["user"]
+    user_details = USER_MANAGER.get_user_with_notebooks(current_user["username"])
+
+    if not user_details:
+        return jsonify({"success": False, "error": "用户信息获取失败"}), 500
+
     # 准备转发给QA API的请求体
     qa_request_payload = {
         "question": question,
@@ -185,6 +198,7 @@ def api_ask():
             "username": session["user"]["username"],
             "display_name": session["user"]["display_name"],
             "role": session["user"]["role"],
+            "allowed_notebooks": user_details["allowed_notebooks"],  # 笔记本白名单
         },
     }
 
@@ -279,6 +293,101 @@ def list_users():
 
 # %% [markdown]
 # ## 管理员功能路由
+
+# %% [markdown]
+# ### api_get_available_notebooks()
+
+# %%
+# web_app.py 中添加以下路由
+@app.route("/api/admin/available-notebooks", methods=["GET"])
+@login_required
+@admin_required
+def api_get_available_notebooks():
+    """获取向量库中所有可用的笔记本标题"""
+    try:
+        # 提取笔记本标题
+        split_ptn = re.compile(r"[,，]")
+        notebooks = [
+            title.strip()
+            for title in split_ptn.split(
+                getinivaluefromcloud("joplinai", "shared_notebook_titles")
+            )
+        ]
+
+        return jsonify(
+            {"success": True, "notebooks": notebooks, "count": len(notebooks)}
+        )
+    except Exception as e:
+        log.error(f"获取笔记本列表失败: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# %% [markdown]
+# ### api_get_user_details(username)
+
+# %%
+@app.route("/api/admin/user/<username>", methods=["GET"])
+@login_required
+@admin_required
+def api_get_user_details(username):
+    """获取用户详细信息（包含笔记本白名单）"""
+    user = USER_MANAGER.get_user_with_notebooks(username)
+    if not user:
+        return jsonify({"success": False, "error": "用户不存在"}), 404
+
+    # 移除敏感信息
+    user.pop("password_hash", None)
+
+    return jsonify({"success": True, "user": user})
+
+
+# %% [markdown]
+# ### api_update_user_permissions()
+
+# %%
+@app.route("/api/admin/user/update", methods=["POST"])
+@login_required
+@admin_required
+def api_update_user_permissions():
+    """更新用户权限配置"""
+    data = request.get_json()
+
+    required_fields = ["username", "display_name", "role"]
+    for field in required_fields:
+        if field not in data:
+            return jsonify({"success": False, "error": f"缺少必填字段: {field}"}), 400
+
+    # 验证角色
+    valid_roles = ["admin", "team_leader", "team_member"]
+    if data["role"] not in valid_roles:
+        return jsonify({"success": False, "error": f"无效角色: {data['role']}"}), 400
+
+    # # 更新用户信息
+    # success = USER_MANAGER.update_user(
+    #     username=data["username"],
+    #     display_name=data["display_name"],
+    #     role=data["role"],
+    #     is_active=data.get("is_active", True),
+    # )
+
+    # if not success:
+    #     return jsonify({"success": False, "error": "更新用户基本信息失败"}), 500
+
+    # 更新笔记本白名单（非管理员角色）
+    if data["role"] != "admin":
+        allowed_notebooks = data.get("allowed_notebooks", [])
+        success = USER_MANAGER.update_user_permissions(
+            username=data["username"],
+            role=data["role"],
+            allowed_notebooks=allowed_notebooks,
+        )
+
+        if not success:
+            return jsonify({"success": False, "error": "更新笔记本白名单失败"}), 500
+
+    log.info(f"管理员更新用户权限: {data['username']} -> 角色: {data['role']}")
+    return jsonify({"success": True, "message": "用户权限更新成功"})
+
 
 # %% [markdown]
 # ### admin_dashboard()
@@ -436,13 +545,13 @@ def api_admin_create_user():
     username = data.get("username")
     password = data.get("password")
     display_name = data.get("display_name")
-    role = data.get("role", "colleague")
+    role = data.get("role", "team_member")
 
     if not all([username, password, display_name]):
         return jsonify({"success": False, "error": "必填字段缺失"}), 400
 
-    if role not in ["admin", "colleague"]:
-        role = "colleague"
+    if role not in ["admin", "team_leader", "team_member"]:
+        role = "team_member"
 
     success = USER_MANAGER.create_user(username, password, display_name, role)
     if success:
