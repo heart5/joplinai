@@ -44,10 +44,19 @@ with pathmagic.context():
 class UserManager:
     """基于SQLite的用户、会话及权限管理器"""
 
+
+# %% [markdown]
+# ## __init__(self, db_path: str)
+
+    # %%
     def __init__(self, db_path: str):
         self.db_path = Path(db_path)
         self._init_db()
 
+# %% [markdown]
+# ## _init_db(self)
+
+    # %%
     def _init_db(self):
         """初始化数据库表结构"""
         conn = sqlite3.connect(self.db_path)
@@ -128,12 +137,20 @@ class UserManager:
         conn.close()
         log.info(f"用户数据库初始化完成: {self.db_path}")
 
+# %% [markdown]
+# ## _hash_password(self, password: str) -> str
+
+    # %%
     def _hash_password(self, password: str) -> str:
         """使用SHA-256加盐哈希密码（生产环境建议使用bcrypt）"""
         if not (salt := getinivaluefromcloud("joplinai", "salt")):
             salt = "joplinai_salt_1232024"  # 应改为从配置文件读取
         return hashlib.sha256((salt + password).encode()).hexdigest()
 
+# %% [markdown]
+# ## create_user(self, username: str, password: str, display_name: str, role: str = "colleague") -> bool
+
+    # %%
     def create_user(
         self, username: str, password: str, display_name: str, role: str = "colleague"
     ) -> bool:
@@ -160,6 +177,10 @@ class UserManager:
             log.warning(f"用户名已存在: {username}")
             return False
 
+# %% [markdown]
+# ## verify_user(self, username: str, password: str) -> Optional[Dict]
+
+    # %%
     def verify_user(self, username: str, password: str) -> Optional[Dict]:
         """验证用户凭据，返回用户信息字典"""
         password_hash = self._hash_password(password)
@@ -184,6 +205,10 @@ class UserManager:
             return user
         return None
 
+# %% [markdown]
+# ## _update_last_login(self, user_id: int)
+
+    # %%
     def _update_last_login(self, user_id: int):
         """更新用户最后登录时间"""
         conn = sqlite3.connect(self.db_path)
@@ -194,6 +219,10 @@ class UserManager:
         conn.commit()
         conn.close()
 
+# %% [markdown]
+# ## create_session(self, user_id: int, duration_hours: int = 24) -> str
+
+    # %%
     def create_session(self, user_id: int, duration_hours: int = 24) -> str:
         """为用户创建会话，返回session_id"""
         session_id = secrets.token_urlsafe(32)
@@ -212,6 +241,10 @@ class UserManager:
         conn.close()
         return session_id
 
+# %% [markdown]
+# ## validate_session(self, session_id: str) -> Optional[Dict]
+
+    # %%
     def validate_session(self, session_id: str) -> Optional[Dict]:
         """验证session_id是否有效并返回关联的用户信息"""
         conn = sqlite3.connect(self.db_path)
@@ -235,6 +268,10 @@ class UserManager:
             return dict(row)
         return None
 
+# %% [markdown]
+# ## delete_session(self, session_id: str)
+
+    # %%
     def delete_session(self, session_id: str):
         """注销会话"""
         conn = sqlite3.connect(self.db_path)
@@ -243,6 +280,10 @@ class UserManager:
         conn.commit()
         conn.close()
 
+# %% [markdown]
+# ## get_all_users(self) -> List[Dict]
+
+    # %%
     def get_all_users(self) -> List[Dict]:
         """获取所有用户列表（管理员功能）"""
         conn = sqlite3.connect(self.db_path)
@@ -255,6 +296,10 @@ class UserManager:
         conn.close()
         return [dict(row) for row in rows]
 
+# %% [markdown]
+# ## update_user_role(self, target_username: str, new_role: str, admin_username: str)
+
+    # %%
     def update_user_role(
         self, target_username: str, new_role: str, admin_username: str
     ):
@@ -262,6 +307,10 @@ class UserManager:
         # 实现略，包含事务和审计日志插入
         pass
 
+# %% [markdown]
+# ## log_audit(self,user_id: Optional[int],action: str,details: str = "",ip_address: str = "",)
+
+    # %%
     def log_audit(
         self,
         user_id: Optional[int],
@@ -282,6 +331,10 @@ class UserManager:
         conn.commit()
         conn.close()
 
+# %% [markdown]
+# ## save_qa_history(self, user_id: int, session_id: str, question: str, answer: str, metadata: dict = None,)
+
+    # %%
     def save_qa_history(
         self,
         user_id: int,
@@ -304,6 +357,10 @@ class UserManager:
         conn.commit()
         conn.close()
 
+# %% [markdown]
+# ## get_qa_history(self, user_id: int, limit: int = 50, offset: int = 0, session_id: Optional[str] = None,)
+
+    # %%
     def get_qa_history(
         self,
         user_id: int,
@@ -346,6 +403,10 @@ class UserManager:
 
     # 在 UserManager 类中添加以下方法
 
+# %% [markdown]
+# ## reset_user_password(self, target_username: str, new_password: str, admin_username: str ) -> bool
+
+    # %%
     def reset_user_password(
         self, target_username: str, new_password: str, admin_username: str
     ) -> bool:
@@ -386,6 +447,10 @@ class UserManager:
             log.error(f"重置密码失败: {e}")
             return False
 
+# %% [markdown]
+# ## update_user_active_status(self, target_username: str, is_active: bool, admin_username: str) -> bool
+
+    # %%
     def update_user_active_status(
         self, target_username: str, is_active: bool, admin_username: str
     ) -> bool:
@@ -420,6 +485,10 @@ class UserManager:
             log.error(f"更新用户状态失败: {e}")
             return False
 
+# %% [markdown]
+# ## update_user_role(self, target_username: str, new_role: str, admin_username: str) -> bool
+
+    # %%
     def update_user_role(
         self, target_username: str, new_role: str, admin_username: str
     ) -> bool:
@@ -456,6 +525,10 @@ class UserManager:
             log.error(f"更新用户角色失败: {e}")
             return False
 
+# %% [markdown]
+# ## change_user_display_name(self, target_username: str, new_display_name: str, admin_username: str) -> bool
+
+    # %%
     def change_user_display_name(
         self, target_username: str, new_display_name: str, admin_username: str
     ) -> bool:
@@ -490,6 +563,10 @@ class UserManager:
             log.error(f"更新用户显示名失败: {e}")
             return False
 
+# %% [markdown]
+# ## _get_user_by_username(self, username: str) -> Optional[Dict]
+
+    # %%
     # 辅助方法：根据用户名获取用户ID等信息（内部使用）
     def _get_user_by_username(self, username: str) -> Optional[Dict]:
         """根据用户名获取用户信息（简化版，用于审计）"""
@@ -504,6 +581,10 @@ class UserManager:
         conn.close()
         return dict(row) if row else None
 
+# %% [markdown]
+# ## create_user(self, username: str, password: str, display_name: str, role: str = "team_member", allowed_notebooks: list = None,) -> bool
+
+    # %%
     def create_user(
         self,
         username: str,
@@ -553,6 +634,10 @@ class UserManager:
             log.error(f"用户名已存在: {username}")
             return False
 
+# %% [markdown]
+# ## update_user_permissions(self, username: str, role: str = None, allowed_notebooks: list = None) -> bool
+
+    # %%
     def update_user_permissions(
         self, username: str, role: str = None, allowed_notebooks: list = None
     ) -> bool:
@@ -595,6 +680,10 @@ class UserManager:
             log.error(f"更新用户权限失败: {e}")
             return False
 
+# %% [markdown]
+# ## get_user_with_notebooks(self, username: str) -> Optional[Dict]
+
+    # %%
     def get_user_with_notebooks(self, username: str) -> Optional[Dict]:
         """
         获取用户信息（包含解析后的笔记本列表）
@@ -617,6 +706,10 @@ class UserManager:
 
         return user
 
+# %% [markdown]
+# ## create_chat_session(self, user_id: int, name: str = "新对话") -> str
+
+    # %%
     def create_chat_session(self, user_id: int, name: str = "新对话") -> str:
         """创建新的问答会话，返回 session_id"""
         session_id = f"chat_{user_id}_{secrets.token_urlsafe(16)}"
@@ -630,27 +723,33 @@ class UserManager:
         conn.close()
         return session_id
 
+# %% [markdown]
+# ## get_user_chat_sessions(self, user_id: int) -> List[Dict]
+
+    # %%
     def get_user_chat_sessions(self, user_id: int) -> List[Dict]:
         """获取用户所有问答会话，按更新时间倒序，并附带消息数量"""
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
-
-        # 联查 qa_history 表获取消息数量（基于 session_id）
         cursor.execute(
-            """SELECT cs.session_id, cs.name, cs.created_at, cs.updated_at,
-                      COUNT(qh.id) AS message_count
-               FROM chat_sessions cs
-               LEFT JOIN qa_history qh ON cs.session_id = qh.session_id
-               WHERE cs.user_id = ?
-               GROUP BY cs.session_id
-               ORDER BY cs.updated_at DESC""",
+            """
+            SELECT cs.id, cs.session_id, cs.name, cs.created_at, cs.updated_at,
+                   (SELECT COUNT(*) FROM qa_history WHERE session_id = cs.session_id) as message_count
+            FROM chat_sessions cs
+            WHERE cs.user_id = ?
+            ORDER BY cs.updated_at DESC
+        """,
             (user_id,),
         )
-        rows = [dict(row) for row in cursor.fetchall()]
+        rows = cursor.fetchall()
         conn.close()
-        return rows
+        return [dict(row) for row in rows]
 
+# %% [markdown]
+# ## rename_chat_session(self, session_id: str, new_name: str) -> bool
+
+    # %%
     def rename_chat_session(self, session_id: str, new_name: str) -> bool:
         """重命名会话"""
         conn = sqlite3.connect(self.db_path)
@@ -664,6 +763,10 @@ class UserManager:
         conn.close()
         return affected > 0
 
+# %% [markdown]
+# ## delete_chat_session(self, session_id: str) -> bool
+
+    # %%
     def delete_chat_session(self, session_id: str) -> bool:
         """删除会话（同时级联删除 qa_history 中的相关记录）"""
         conn = sqlite3.connect(self.db_path)
@@ -675,6 +778,10 @@ class UserManager:
         conn.close()
         return affected > 0
 
+# %% [markdown]
+# ## set_active_chat_session(self, user_id: int, session_id: str)
+
+    # %%
     def set_active_chat_session(self, user_id: int, session_id: str):
         """设置当前活动会话（将用户其他会话的 is_active 置0，本会话置1）"""
         conn = sqlite3.connect(self.db_path)
@@ -689,6 +796,10 @@ class UserManager:
         conn.commit()
         conn.close()
 
+# %% [markdown]
+# ## get_active_chat_session(self, user_id: int) -> Optional[str]
+
+    # %%
     def get_active_chat_session(self, user_id: int) -> Optional[str]:
         """获取当前用户的最新活动会话，没有则自动迁移旧数据或创建默认会话"""
         conn = sqlite3.connect(self.db_path)
@@ -742,6 +853,10 @@ class UserManager:
         # 完全没有数据，创建全新默认会话
         return self.create_chat_session(user_id, "默认对话")
 
+# %% [markdown]
+# ## _create_chat_session_with_id(self, user_id: int, session_id: str, name: str)
+
+    # %%
     def _create_chat_session_with_id(self, user_id: int, session_id: str, name: str):
         """使用指定的 session_id 创建会话（用于迁移旧数据）"""
         conn = sqlite3.connect(self.db_path)
@@ -753,6 +868,59 @@ class UserManager:
         conn.commit()
         conn.close()
 
+# %% [markdown]
+# ## delete_user(self, target_username: str, admin_username: str) -> bool
+
+    # %%
+    def delete_user(self, target_username: str, admin_username: str) -> bool:
+        """
+        删除指定用户（管理员操作）。
+        1. 删除该用户的所有会话（chat_sessions）及其问答历史（通过外键级联处理，但为保险手动删除）
+        2. 删除该用户的登录会话（sessions）
+        3. 删除用户本身
+        4. 记录审计日志
+        """
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # 先获取用户ID，用于后续删除
+            cursor.execute("SELECT id FROM users WHERE username = ?", (target_username,))
+            row = cursor.fetchone()
+            if not row:
+                conn.close()
+                log.warning(f"尝试删除不存在的用户: {target_username}")
+                return False
+            
+            user_id = row
+            
+            # 1. 删除该用户的所有问答会话（chat_sessions 会级联删除 qa_history，但显式删除更可靠）
+            cursor.execute("DELETE FROM qa_history WHERE session_id IN (SELECT session_id FROM chat_sessions WHERE user_id = ?)", (user_id,))
+            cursor.execute("DELETE FROM chat_sessions WHERE user_id = ?", (user_id,))
+            
+            # 2. 删除登录会话
+            cursor.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+            
+            # 3. 删除用户
+            cursor.execute("DELETE FROM users WHERE id = ?", (user_id,))
+            
+            conn.commit()
+            conn.close()
+            
+            # 4. 记录审计日志
+            admin_user = self._get_user_by_username(admin_username)
+            if admin_user:
+                self.log_audit(
+                    admin_user["id"],
+                    "DELETE_USER",
+                    details=f"管理员删除了用户 [{target_username}] (ID: {user_id})",
+                    ip_address="",
+                )
+            log.info(f"管理员 {admin_username} 删除了用户 {target_username}")
+            return True
+        except Exception as e:
+            log.error(f"删除用户失败: {e}")
+            return False
 
 # %% [markdown]
 # # 全局实例化
