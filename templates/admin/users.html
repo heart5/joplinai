@@ -1,794 +1,175 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>用户管理 - Joplin AI 知识问答</title>
-    <!-- 继承主站样式和Bootstrap -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-    <style>
-        .admin-container { padding: 20px; max-width: 1200px; margin: 0 auto; }
-        .page-title { margin-bottom: 30px; border-bottom: 2px solid #eee; padding-bottom: 10px; }
-        .user-table { background: white; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); overflow: hidden; }
-        .table th { background-color: #f8f9fa; border-top: none; }
-        .badge-admin { background-color: #dc3545; }
-        .badge-colleague { background-color: #6c757d; }
-        .badge-active { background-color: #28a745; }
-        .badge-inactive { background-color: #ffc107; color: #212529; }
-        .action-buttons .btn { margin-right: 5px; margin-bottom: 5px; }
-        .modal-footer .btn { min-width: 80px; }
-        #createUserModal input { margin-bottom: 10px; }
-    </style>
-</head>
-<body>
-    <!-- 导航栏 (与主站一致) -->
-    <nav class="navbar navbar-light bg-light border-bottom">
-        <div class="container-fluid">
-            <a class="navbar-brand" href="{{ url_for('index') }}">Joplin AI 问答助手</a>
-            <div class="user-info">
-                <span>欢迎，{{ user.display_name }} (管理员) · </span>
-                <a href="{{ url_for('index') }}">返回问答</a>
-                <span> · </span>
-                <a href="{{ url_for('logout') }}">退出登录</a>
-            </div>
-        </div>
-    </nav>
+{% extends "admin/layout.html" %}
+{% block title %}用户管理 - 知识库管理后台{% endblock %}
 
-    <!-- 主内容区 -->
-    <div class="admin-container">
-        <div class="page-title d-flex justify-content-between align-items-center">
-            <h2>👥 用户管理</h2>
-            <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createUserModal">
-                <i class="bi bi-person-plus"></i> 创建新用户
-            </button>
-        </div>
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h2>👥 用户管理</h2>
+    <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createUserModal">
+        <i class="bi bi-person-plus"></i> 创建新用户
+    </button>
+</div>
 
-        <!-- 用户列表表格 -->
-        <div class="user-table">
-            <table class="table table-hover mb-0">
-                <thead>
-                    <tr>
-                        <th width=\"5%\">ID</th>
-                        <th width=\"15%\">用户名</th>
-                        <th width=\"20%\">显示名称</th>
-                        <th width=\"10%\">角色</th>
-                        <th width=\"10%\">状态</th>
-                        <th width=\"20%\">最后登录</th>
-                        <th width=\"20%\">操作</th>
-                    </tr>
-                </thead>
-                <tbody id="usersTableBody">
-                    <!-- 动态加载 -->
-                    <tr>
-                        <td colspan="7" class="text-center py-5">
-                            <div class="spinner-border text-primary" role="status">
-                                <span class="visually-hidden">加载中...</span>
-                            </div>
-                            <p class="mt-2 text-muted">正在加载用户列表...</p>
-                        </td>
-                    </tr>
-                </tbody>
-            </table>
-        </div>
+<!-- 用户列表表格 -->
+<table class="table table-hover">
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>用户名</th>
+            <th>显示名称</th>
+            <th>角色</th>
+            <th>状态</th>
+            <th>最后登录</th>
+            <th>操作</th>
+        </tr>
+    </thead>
+    <tbody id="usersTableBody">
+        <!-- 由 JS 动态渲染 -->
+        <tr>
+            <td colspan="7" class="text-center py-5">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">加载中...</span>
+                </div>
+                <p class="mt-2 text-muted">正在加载用户列表...</p>
+            </td>
+        </tr>
+    </tbody>
+</table>
 
-        <!-- 系统提示区 -->
-        <div class="alert alert-info mt-4">
-            <small>
-                <strong>提示：</strong>
-                <ul class="mb-0 ps-3">
-                    <li>重置密码后，新密码将立即生效，请妥善告知用户。</li>
-                    <li>禁用用户后，该用户将无法登录，但其历史记录会保留。</li>
-                    <li>将普通用户提升为管理员需谨慎，管理员拥有全部权限。</li>
-                </ul>
-            </small>
-        </div>
-    </div>
+<!-- 系统提示区 -->
+<div class="alert alert-info mt-4">
+    <small>
+        <strong>提示：</strong>
+        <ul class="mb-0 ps-3">
+            <li>重置密码后，新密码将立即生效，请妥善告知用户。</li>
+            <li>禁用用户后，该用户将无法登录，但其历史记录会保留。</li>
+            <li>将普通用户提升为管理员需谨慎，管理员拥有全部权限。</li>
+        </ul>
+    </small>
+</div>
 
-    <!-- 模态框：创建新用户（增强版） -->
-    <div class="modal fade" id="createUserModal" tabindex="-1" aria-labelledby="createUserModalLabel" aria-hidden="true">
-        <div class="modal-dialog modal-lg">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="createUserModalLabel">创建新用户</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <div class="modal-body">
-                    <form id="createUserForm">
-                        <!-- 基础信息 -->
-                        <div class="row mb-3">
-                            <div class="col-md-6">
-                                <label for="createUsername" class="form-label">用户名 *</label>
-                                <input type="text" class="form-control" id="createUsername" name="username" placeholder="英文/数字，用于登录" required>
-                            </div>
-                            <div class="col-md-6">
-                                <label for="createPassword" class="form-label">初始密码 *</label>
-                                <input type="password" class="form-control" id="createPassword" name="password" placeholder="至少6位字符" minlength="6" required>
-                            </div>
-                        </div>
-                        
-                        <div class="mb-3">
-                            <label for="createDisplayName" class="form-label">显示名称 *</label>
-                            <input type="text" class="form-control" id="createDisplayName" name="display_name" placeholder="中文昵称，用于界面显示" required>
-                        </div>
-                        
-                        <!-- 权限设置（复用编辑界面的布局） -->
-                        <div class="mb-3">
-                            <label for="createRole" class="form-label">用户角色 *</label>
-                            <select class="form-select" id="createRole" name="role" onchange="toggleCreateNotebookSection()">
-                                <option value="team_member" selected>团队成员（需指定授权笔记本）</option>
-                                <option value="team_leader">团队领导（需指定授权笔记本）</option>
-                                <option value="admin">管理员（可访问所有笔记）</option>
-                            </select>
-                            <div class="form-text">
-                                <small>• 管理员：无限制访问所有笔记。<br>• 团队领导/成员：只能访问“授权的笔记本”和“自己创建的笔记”。</small>
-                            </div>
-                        </div>
-                        
-                        <!-- 笔记本授权区域（默认隐藏，当角色为非管理员时显示） -->
-                        <div class="mb-3" id="createNotebookAuthSection" style="display: none;">
-                            <label for="createAllowedNotebooks" class="form-label">授权笔记本</label>
-                            <div class="alert alert-info py-2">
-                                <small><i class="bi bi-info-circle"></i> 按住 Ctrl (Windows/Linux) 或 Command (Mac) 键可多选。</small>
-                            </div>
-                            
-                            <select class="form-select" id="createAllowedNotebooks" name="allowed_notebooks" multiple size="8" style="height: auto;" onchange="updateCreateSelectedCount()">
-                                <!-- 选项将通过JavaScript动态加载（复用已加载的 availableNotebooks 列表） -->
-                            </select>
-                            
-                            <div class="mt-2">
-                                <button type="button" class="btn btn-sm btn-outline-secondary me-2" onclick="selectAllCreateNotebooks()">全选</button>
-                                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="clearCreateNotebookSelection()">清空</button>
-                                <span class="ms-3 text-muted" id="createSelectedCount">已选择 0 个笔记本</span>
-                            </div>
-                            
-                            <!-- 快速筛选 -->
-                            <div class="mt-3">
-                                <input type="text" class="form-control form-control-sm" id="createNotebookFilter" placeholder="输入关键词筛选笔记本..." onkeyup="filterCreateNotebooks()">
-                            </div>
-                        </div>
-                        
-                    </form>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
-                    <button type="button" class="btn btn-primary" onclick="submitCreateUserEnhanced()">创建用户</button>
-                </div>
-            </div>
-        </div>
-    </div>
+<!-- 包含创建用户模态框和删除确认模态框 -->
+{% include "admin/_create_user_modal.html" %}
+{% include "admin/_delete_confirm_modal.html" %}
+{% endblock %}
 
-    <!-- 模态框：重置密码 -->
-    <div class="modal fade" id="resetPasswordModal" tabindex="-1">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">重置密码</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body">
-                    <p>将为用户 <strong id="resetPwdUsername">-</strong> 设置新密码。</p>
-                    <input type="password" class="form-control" id="newPasswordInput" placeholder="输入新密码（至少6位）" minlength="6">
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
-                    <button type="button" class="btn btn-danger" onclick="confirmResetPassword()">确定重置</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- 模态框：编辑显示名 -->
-    <div class="modal fade" id="editDisplayNameModal" tabindex="-1">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">修改显示名称</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body">
-                    <p>修改用户 <strong id="editDnUsername">-</strong> 的显示名称。</p>
-                    <input type="text" class="form-control" id="newDisplayNameInput" placeholder="输入新的显示名称">
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
-                    <button type="button" class="btn btn-primary" onclick="confirmUpdateDisplayName()">保存</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- templates/admin/users.html 中的编辑模态框部分 -->
-    <div class="modal fade" id="editUserModal" tabindex="-1">
-        <div class="modal-dialog modal-lg">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">编辑用户权限</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body">
-                    <form id="editUserForm">
-                        <input type="hidden" id="editUsername" name="username">
-                        
-                        <div class="mb-3">
-                            <label class="form-label">显示名称</label>
-                            <input type="text" class="form-control" id="editDisplayName" required>
-                        </div>
-                        
-                        <div class="mb-3">
-                            <label class="form-label">用户角色</label>
-                            <select class="form-select" id="editRole" name="role">
-                                <option value="admin">管理员（可访问所有笔记）</option>
-                                <option value="team_leader">团队领导（需指定授权笔记本）</option>
-                                <option value="team_member">团队成员（需指定授权笔记本）</option>
-                            </select>
-                            <div class="form-text">
-                                • 管理员：无限制访问<br>
-                                • 团队领导/成员：只能访问授权的笔记本和个人笔记
-                            </div>
-                        </div>
-                        
-                        <!-- 笔记本授权区域 -->
-                        <div class="mb-3" id="notebookAuthSection">
-                            <label class="form-label">授权笔记本</label>
-                            <div class="alert alert-info">
-                                <small>按住 Ctrl/Cmd 键可多选，Shift 键可连续选择</small>
-                            </div>
-                            
-                            <!-- 笔记本选择框 -->
-                            <select class="form-select" id="editAllowedNotebooks" name="allowed_notebooks" 
-                                    multiple size="8" style="height: auto;">
-                                <!-- 通过JavaScript动态加载 -->
-                            </select>
-                            
-                            <div class="mt-2">
-                                <button type="button" class="btn btn-sm btn-outline-secondary" 
-                                        onclick="selectAllNotebooks()">全选</button>
-                                <button type="button" class="btn btn-sm btn-outline-secondary" 
-                                        onclick="clearNotebookSelection()">清空</button>
-                                <span class="ms-3 text-muted" id="selectedCount">已选择 0 个笔记本</span>
-                            </div>
-                            
-                            <!-- 快速筛选 -->
-                            <div class="mt-3">
-                                <input type="text" class="form-control form-control-sm" 
-                                       placeholder="输入关键词筛选笔记本..." 
-                                       id="notebookFilter" onkeyup="filterNotebooks()">
-                            </div>
-                        </div>
-                        
-                    </form>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
-                    <button type="button" class="btn btn-primary" onclick="saveUserChanges()">保存更改</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- 引入 Bootstrap JS 和自定义逻辑 -->
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
-    <script>
-        // 全局变量，存储当前操作的目标用户
-        let currentTargetUsername = '';
-        let currentTargetDisplayName = '';
-        // 静态文件或模板内嵌：admin_users.js
-        let availableNotebooks = [];
-
-        // 页面加载完成后，获取用户列表
-        document.addEventListener('DOMContentLoaded', function() {
-            loadUsers();
-            loadAvailableNotebooks();
-        });
-        // 页面加载完成后初始化
-        // document.addEventListener('DOMContentLoaded', function() {
-        //     loadAvailableNotebooks();
-        // });
-
-
-        // 加载用户列表
-        async function loadUsers() {
-            try {
-                const resp = await fetch('/api/admin/users');
-                const result = await resp.json();
-                if (result.success) {
-                    renderUsersTable(result.users);
-                } else {
-                    showToast('加载失败: ' + (result.error || '未知错误'), 'danger');
-                }
-            } catch (error) {
-                console.error('加载用户列表失败:', error);
-                showToast('网络错误，请刷新重试', 'danger');
+{% block extra_scripts %}
+<script>
+    // 1. 定义 loadUsers 函数（获取用户列表并渲染）
+    async function loadUsers() {
+        const tbody = document.getElementById('usersTableBody');
+        try {
+            const resp = await fetch('/api/users');
+            if (!resp.ok) {
+                throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
             }
-        }
-
-        // 渲染表格
-        function renderUsersTable(users) {
-            const tbody = document.getElementById('usersTableBody');
-            if (users.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="7" class="text-center py-5 text-muted">暂无用户数据</td></tr>`;
-                return;
-            }
-            let html = '';
-            users.forEach(u => {
-                const lastLogin = u.last_login ? new Date(u.last_login).toLocaleString('zh-CN') : '从未登录';
-                html += `
+            const data = await resp.json();
+            // 调用渲染函数（你需要已经定义 renderUsersTable）
+            renderUsersTable(data.users || []);
+        } catch (error) {
+            console.error('加载用户列表失败:', error);
+            // 显示错误提示，替代无限旋转
+            tbody.innerHTML = `
                 <tr>
-                    <td>${u.id}</td>
-                    <td><code>${escapeHtml(u.username)}</code></td>
-                    <td>${escapeHtml(u.display_name)}</td>
-                    <td><span class="badge rounded-pill ${u.role === 'admin' ? 'badge-admin' : 'badge-colleague'}">${u.role === 'admin' ? '管理员' : '同事'}</span></td>
-                    <td><span class="badge rounded-pill ${u.is_active ? 'badge-active' : 'badge-inactive'}">${u.is_active ? '活跃' : '已禁用'}</span></td>
-                    <td><small class="text-muted">${lastLogin}</small></td>
-                    <td class="action-buttons">
-                        ${u.username !== '{{ user.username }}' ? `
-                        <button class="btn btn-sm btn-outline-warning" onclick="showResetPasswordModal('${u.username}')">重置密码</button>
-                        <button class="btn btn-sm btn-outline-secondary" onclick="showEditDisplayNameModal('${u.username}', '${escapeHtml(u.display_name)}')">改显示名</button>
-                        <!-- 新增：编辑权限按钮 -->
-                        <button class="btn btn-sm btn-outline-info" onclick="openEditModal('${u.username}')">编辑权限</button>
-
-                        <button class="btn btn-sm btn-outline-${u.role === 'admin' ? 'secondary' : 'success'}" onclick="toggleRole('${u.username}', '${u.role}')">${u.role === 'admin' ? '降为同事' : '升为管理员'}</button>
-                        <button class="btn btn-sm btn-outline-${u.is_active ? 'danger' : 'success'}" onclick="toggleActive('${u.username}', ${u.is_active})">${u.is_active ? '禁用' : '启用'}</button>
-                        ` : `<small class="text-muted">(当前用户)</small>`}
+                    <td colspan="7" class="text-center py-5 text-danger">
+                        <i class="bi bi-exclamation-triangle-fill"></i>
+                        加载失败：${error.message}
+                        <br>
+                        <button class="btn btn-sm btn-outline-primary mt-2" onclick="loadUsers()">重试</button>
                     </td>
                 </tr>
-                `;
-            });
-            tbody.innerHTML = html;
+            `;
         }
+    }
 
-        // === 操作函数 ===
-        function showResetPasswordModal(username) {
-            currentTargetUsername = username;
-            document.getElementById('resetPwdUsername').textContent = username;
-            const modal = new bootstrap.Modal(document.getElementById('resetPasswordModal'));
-            modal.show();
-        }
+    // 2. 页面加载完成后立即调用 loadUsers
+    document.addEventListener('DOMContentLoaded', loadUsers);
 
-        async function confirmResetPassword() {
-            const newPassword = document.getElementById('newPasswordInput').value.trim();
-            if (newPassword.length < 6) {
-                alert('密码长度至少6位');
-                return;
-            }
-            try {
-                const resp = await fetch('/api/admin/user/reset_password', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({username: currentTargetUsername, new_password: newPassword})
-                });
-                const result = await resp.json();
-                if (result.success) {
-                    showToast('密码重置成功', 'success');
-                    bootstrap.Modal.getInstance(document.getElementById('resetPasswordModal')).hide();
-                    document.getElementById('newPasswordInput').value = '';
-                } else {
-                    showToast('操作失败: ' + result.error, 'danger');
-                }
-            } catch (error) {
-                showToast('网络错误', 'danger');
-            }
-        }
+    // ===== 覆盖父模板中的 renderUsersTable 函数 =====
+    // 该函数在 admin.js 中定义（如果存在）或在此内联定义
+    // 如果 admin.js 中已有该函数，此处会覆盖
 
-        function showEditDisplayNameModal(username, currentName) {
-            currentTargetUsername = username;
-            currentTargetDisplayName = currentName;
-            document.getElementById('editDnUsername').textContent = username;
-            document.getElementById('newDisplayNameInput').value = currentName;
-            const modal = new bootstrap.Modal(document.getElementById('editDisplayNameModal'));
-            modal.show();
+    // 用户列表渲染函数（改版）
+    function renderUsersTable(users) {
+        const tbody = document.getElementById('usersTableBody');
+        if (!users.length) {
+            tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">暂无用户数据</td></tr>';
+            return;
         }
+        let html = '';
+        for (const u of users) {
+            const statusBadge = u.is_active 
+                ? '<span class="badge bg-success">活跃</span>' 
+                : '<span class="badge bg-secondary">已禁用</span>';
+            const lastLogin = u.last_login ? new Date(u.last_login).toLocaleString('zh-CN') : '从未登录';
+            // 转义显示名称和用户名（防止XSS）
+            const displayName = escapeHtml(u.display_name || '');
+            const username = escapeHtml(u.username);
+            html += `<tr>
+                <td>${u.id}</td>
+                <td><code>${username}</code></td>
+                <td>${displayName}</td>
+                <td>${u.role}</td>
+                <td>${statusBadge}</td>
+                <td><small class="text-muted">${lastLogin}</small></td>
+                <td>
+                    <a href="/admin/users/${encodeURIComponent(username)}/edit" class="btn btn-sm btn-outline-primary" title="编辑用户权限和笔记本授权">编辑</a>
+                    <a href="/admin/users/${encodeURIComponent(username)}/history" class="btn btn-sm btn-outline-info" title="查看该用户所有对话历史">历史</a>
+                    <button class="btn btn-sm btn-outline-danger" onclick="showDeleteConfirmModal('${username}', '确定要永久删除用户 ${username} 吗？此操作不可撤销。')">删除</button>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="toggleUserActive('${username}', ${!u.is_active})">
+                        ${u.is_active ? '禁用' : '启用'}
+                    </button>
+                </td>
+            </tr>`;
+        }
+        tbody.innerHTML = html;
+    }
 
-        async function confirmUpdateDisplayName() {
-            const newName = document.getElementById('newDisplayNameInput').value.trim();
-            if (!newName) {
-                alert('显示名称不能为空');
-                return;
-            }
-            try {
-                const resp = await fetch('/api/admin/user/update_display_name', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({username: currentTargetUsername, new_display_name: newName})
-                });
-                const result = await resp.json();
-                if (result.success) {
-                    showToast('显示名称已更新', 'success');
-                    bootstrap.Modal.getInstance(document.getElementById('editDisplayNameModal')).hide();
-                    loadUsers(); // 刷新列表
-                } else {
-                    showToast('操作失败: ' + result.error, 'danger');
-                }
-            } catch (error) {
-                showToast('网络错误', 'danger');
-            }
-        }
+    // ===== 其他辅助函数（如果 admin.js 未定义，则在此定义） =====
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
 
-        async function toggleRole(username, currentRole) {
-            const newRole = currentRole === 'admin' ? 'colleague' : 'admin';
-            if (!confirm(`确定要将用户 ${username} 的角色改为 ${newRole === 'admin' ? '管理员' : '同事'} 吗？`)) {
-                return;
-            }
-            try {
-                const resp = await fetch('/api/admin/user/update_role', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({username: username, new_role: newRole})
-                });
-                const result = await resp.json();
-                if (result.success) {
-                    showToast('用户角色已更新', 'success');
-                    loadUsers();
-                } else {
-                    showToast('操作失败: ' + result.error, 'danger');
-                }
-            } catch (error) {
-                showToast('网络错误', 'danger');
-            }
+    // 切换用户启用/禁用（复用 admin.js 中的函数，但此处确保存在）
+    async function toggleUserActive(username, newState) {
+        if (typeof window.toggleUserActive === 'function') {
+            // 如果 admin.js 已定义，则直接调用
+            window.toggleUserActive(username, newState);
+            return;
         }
-
-        async function toggleActive(username, currentlyActive) {
-            const newState = !currentlyActive;
-            const action = newState ? '启用' : '禁用';
-            if (!confirm(`确定要${action}用户 ${username} 吗？`)) {
-                return;
-            }
-            try {
-                const resp = await fetch('/api/admin/user/toggle_active', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({username: username, is_active: newState})
-                });
-                const result = await resp.json();
-                if (result.success) {
-                    showToast(`用户已${action}`, 'success');
-                    loadUsers();
-                } else {
-                    showToast('操作失败: ' + result.error, 'danger');
-                }
-            } catch (error) {
-                showToast('网络错误', 'danger');
-            }
-        }
-
-        // ====== 新增：增强版创建用户相关函数 ======
-        
-        // 根据创建表单的角色选择，显示/隐藏笔记本区域
-        function toggleCreateNotebookSection() {
-            const roleSelect = document.getElementById('createRole');
-            const authSection = document.getElementById('createNotebookAuthSection');
-            
-            if (roleSelect.value === 'admin') {
-                authSection.style.display = 'none';
-            } else {
-                authSection.style.display = 'block';
-                // 如果笔记本选项为空，则动态生成（复用全局的 availableNotebooks）
-                populateCreateNotebookOptions();
-            }
-        }
-        
-        // 为创建表单的笔记本选择框动态生成选项
-        function populateCreateNotebookOptions() {
-            const select = document.getElementById('createAllowedNotebooks');
-            // 避免重复生成
-            if (select.options.length > 0 || availableNotebooks.length === 0) {
-                return;
-            }
-            select.innerHTML = '';
-            availableNotebooks.forEach(notebook => {
-                const option = document.createElement('option');
-                option.value = notebook;
-                option.textContent = notebook;
-                select.appendChild(option);
-            });
-            updateCreateSelectedCount();
-        }
-        
-        // 更新创建表单的选中计数
-        function updateCreateSelectedCount() {
-            const select = document.getElementById('createAllowedNotebooks');
-            const selectedCount = Array.from(select.selectedOptions).length;
-            document.getElementById('createSelectedCount').textContent = `已选择 ${selectedCount} 个笔记本`;
-        }
-        
-        // 创建表单的全选/清空/筛选函数
-        function selectAllCreateNotebooks() {
-            const select = document.getElementById('createAllowedNotebooks');
-            Array.from(select.options).forEach(option => option.selected = true);
-            updateCreateSelectedCount();
-        }
-        function clearCreateNotebookSelection() {
-            const select = document.getElementById('createAllowedNotebooks');
-            Array.from(select.options).forEach(option => option.selected = false);
-            updateCreateSelectedCount();
-        }
-        function filterCreateNotebooks() {
-            const filterText = document.getElementById('createNotebookFilter').value.toLowerCase();
-            const select = document.getElementById('createAllowedNotebooks');
-            Array.from(select.options).forEach(option => {
-                const isMatch = option.text.toLowerCase().includes(filterText);
-                option.style.display = isMatch ? '' : 'none';
-            });
-        }
-        
-        // 增强版的创建用户提交函数
-        async function submitCreateUserEnhanced() {
-            const form = document.getElementById('createUserForm');
-            const formData = new FormData(form);
-            const payload = Object.fromEntries(formData.entries());
-            
-            // 处理笔记本白名单
-            const role = payload.role;
-            if (role === 'admin') {
-                payload.allowed_notebooks = [];
-            } else {
-                const notebookSelect = document.getElementById('createAllowedNotebooks');
-                payload.allowed_notebooks = Array.from(notebookSelect.selectedOptions).map(opt => opt.value);
-            }
-            
-            console.log('[DEBUG] 创建用户提交数据:', payload);
-            
-            // 前端验证
-            if (!payload.username || !payload.password || !payload.display_name) {
-                showToast('请填写所有必填字段（用户名、密码、显示名称）', 'warning');
-                return;
-            }
-            if (payload.password.length < 6) {
-                showToast('密码长度至少为6位', 'warning');
-                return;
-            }
-            
-            try {
-                const response = await fetch('/api/admin/user/create', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify(payload)
-                });
-                
-                const result = await response.json();
-                if (result.success) {
-                    showToast('用户创建成功', 'success');
-                    // 关闭模态框并重置表单
-                    const modal = bootstrap.Modal.getInstance(document.getElementById('createUserModal'));
-                    modal.hide();
-                    form.reset();
-                    // 刷新用户列表
-                    loadUsers();
-                } else {
-                    showToast('创建失败: ' + result.error, 'danger');
-                }
-            } catch (error) {
-                console.error('创建用户请求失败:', error);
-                showToast('网络错误，创建失败', 'danger');
-            }
-        }
-        
-        // 当创建模态框显示时，做一些初始化
-        document.getElementById('createUserModal').addEventListener('shown.bs.modal', function () {
-            // 确保笔记本列表已加载
-            if (availableNotebooks.length === 0) {
-                loadAvailableNotebooks().then(() => {
-                    // 根据当前选择的角色决定是否显示笔记本区域
-                    toggleCreateNotebookSection();
-                });
-            } else {
-                toggleCreateNotebookSection();
-            }
-        });
-        // ====== 结束：增强版创建用户相关函数 ======
-
-        // === 工具函数 ===
-        function showToast(message, type = 'info') {
-            // 简单实现，可以用更优雅的Toast组件替换
-            alert(`[${type.toUpperCase()}] ${message}`);
-        }
-
-        function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
-        }
-
-        // 加载可用笔记本列表
-        function loadAvailableNotebooks() {
-            fetch('/api/admin/available-notebooks')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        availableNotebooks = data.notebooks;
-                        populateNotebookSelect();
-                        updateNotebookSectionVisibility();
-                    } else {
-                        showToast('加载笔记本列表失败: ' + data.error, 'danger');
-                    }
-                })
-                .catch(error => {
-                    console.error('加载笔记本列表失败:', error);
-                    showToast('网络错误，请稍后重试', 'danger');
-                });
-        }
-        
-        // 填充笔记本选择框
-        function populateNotebookSelect() {
-            const select = document.getElementById('editAllowedNotebooks');
-            select.innerHTML = '';
-            
-            availableNotebooks.forEach(notebook => {
-                const option = document.createElement('option');
-                option.value = notebook;
-                option.textContent = notebook;
-                select.appendChild(option);
-            });
-            
-            updateSelectedCount();
-        }
-        
-        // 根据角色显示/隐藏笔记本授权区域
-        function updateNotebookSectionVisibility() {
-            const roleSelect = document.getElementById('editRole');
-            const authSection = document.getElementById('notebookAuthSection');
-            
-            function toggleSection() {
-                if (roleSelect.value === 'admin') {
-                    authSection.style.display = 'none';
-                } else {
-                    authSection.style.display = 'block';
-                }
-            }
-            
-            roleSelect.addEventListener('change', toggleSection);
-            toggleSection(); // 初始状态
-        }
-        
-        // 筛选笔记本
-        function filterNotebooks() {
-            const filterText = document.getElementById('notebookFilter').value.toLowerCase();
-            const select = document.getElementById('editAllowedNotebooks');
-            
-            Array.from(select.options).forEach(option => {
-                const matches = option.text.toLowerCase().includes(filterText);
-                option.style.display = matches ? '' : 'none';
-            });
-        }
-        
-        // 全选/清空
-        function selectAllNotebooks() {
-            const select = document.getElementById('editAllowedNotebooks');
-            Array.from(select.options).forEach(option => {
-                option.selected = true;
-            });
-            updateSelectedCount();
-        }
-        
-        function clearNotebookSelection() {
-            const select = document.getElementById('editAllowedNotebooks');
-            Array.from(select.options).forEach(option => {
-                option.selected = false;
-            });
-            updateSelectedCount();
-        }
-        
-        // 更新选中计数
-        function updateSelectedCount() {
-            const select = document.getElementById('editAllowedNotebooks');
-            const selected = Array.from(select.selectedOptions).length;
-            document.getElementById('selectedCount').textContent = `已选择 ${selected} 个笔记本`;
-        }
-
-        // 编辑权限
-        async function openEditModal(username) {
-            currentTargetUsername = username; // 利用已有的全局变量
-            console.log(`[DEBUG] 打开编辑模态框，用户: ${username}`);
-        
-            // 1. 确保笔记本列表已加载
-            if (availableNotebooks.length === 0) {
-                await loadAvailableNotebooks();
-            }
-        
-            // 2. 加载该用户的详细信息
-            try {
-                const response = await fetch(`/api/admin/user/${username}`);
-                const data = await response.json();
-                
-                if (!data.success) {
-                    showToast('获取用户信息失败: ' + data.error, 'danger');
-                    return;
-                }
-                
-                const user = data.user;
-                
-                // 3. 填充表单数据
-                document.getElementById('editUsername').value = user.username;
-                document.getElementById('editDisplayName').value = user.display_name;
-                document.getElementById('editRole').value = user.role;
-                // document.getElementById('editIsActive').checked = user.is_active;
-                
-                // 4. 动态生成笔记本选择框的选项（如果选项为空）
-                const notebookSelect = document.getElementById('editAllowedNotebooks');
-                if (notebookSelect.options.length === 0 && availableNotebooks.length > 0) {
-                    notebookSelect.innerHTML = '';
-                    availableNotebooks.forEach(notebook => {
-                        const option = document.createElement('option');
-                        option.value = notebook;
-                        option.textContent = notebook;
-                        notebookSelect.appendChild(option);
-                    });
-                }
-                
-                // 5. 设置已选中的笔记本（根据用户当前的白名单）
-                const userNotebooks = user.allowed_notebooks || [];
-                Array.from(notebookSelect.options).forEach(option => {
-                    option.selected = userNotebooks.includes(option.value);
-                });
-                
-                // 6. 更新选中计数
-                updateSelectedCount();
-                // 根据角色显示/隐藏笔记本区域
-                toggleNotebookSectionByRole();
-                
-                // 7. 显示模态框
-                const editModalEl = document.getElementById('editUserModal');
-                const editModal = new bootstrap.Modal(editModalEl);
-                editModal.show();
-                
-            } catch (error) {
-                console.error('打开编辑模态框失败:', error);
-                showToast('加载用户数据失败: ' + error.message, 'danger');
-            }
-        }
-
-        // 新增：角色切换时控制笔记本区域的显示
-        function toggleNotebookSectionByRole() {
-            const roleSelect = document.getElementById('editRole');
-            const authSection = document.getElementById('notebookAuthSection');
-            
-            // 如果角色是 admin，隐藏笔记本授权区域；否则显示
-            if (roleSelect.value === 'admin') {
-                authSection.style.display = 'none';
-            } else {
-                authSection.style.display = 'block';
-            }
-        }
-        
-        // 确保角色选择框的变化能触发显示切换
-        document.addEventListener('DOMContentLoaded', function() {
-            const roleSelect = document.getElementById('editRole');
-            if (roleSelect) {
-                roleSelect.addEventListener('change', toggleNotebookSectionByRole);
-            }
-        });
-
-        // 保存用户更改
-        function saveUserChanges() {
-            const formData = {
-                username: document.getElementById('editUsername').value,
-                display_name: document.getElementById('editDisplayName').value,
-                role: document.getElementById('editRole').value,
-                // is_active: document.getElementById('editIsActive').checked
-            };
-            
-            // 获取选中的笔记本
-            const select = document.getElementById('editAllowedNotebooks');
-            const selectedNotebooks = Array.from(select.selectedOptions).map(opt => opt.value);
-            formData.allowed_notebooks = selectedNotebooks;
-            
-            fetch('/api/admin/user/update', {
+        // 内联定义（与 admin.js 一致）
+        const action = newState ? '启用' : '禁用';
+        if (!confirm(`确定要${action}用户 ${username} 吗？`)) return;
+        try {
+            const resp = await fetch('/api/admin/user/toggle_active', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(formData)
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    showToast('用户权限更新成功', 'success');
-                    location.reload(); // 刷新页面
-                } else {
-                    showToast('更新失败: ' + data.error, 'danger');
-                }
+                body: JSON.stringify({username, is_active: newState})
             });
+            const result = await resp.json();
+            if (result.success) {
+                showToast(`用户已${action}`, 'success');
+                loadUsers(); // 重新加载列表
+            } else {
+                showToast('操作失败: ' + result.error, 'danger');
+            }
+        } catch (e) {
+            showToast('网络错误', 'danger');
         }
-        
-    </script>
-</body>
-</html>
+    }
+
+    // showToast 函数（如果 admin.js 中已有，则忽略）
+    if (typeof showToast !== 'function') {
+        function showToast(message, type = 'success') {
+            const toast = document.createElement('div');
+            toast.className = `toast align-items-center text-bg-${type} border-0 position-fixed bottom-0 end-0 m-3`;
+            toast.innerHTML = `<div class="d-flex"><div class="toast-body">${message}</div><button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button></div>`;
+            document.body.appendChild(toast);
+            const bsToast = new bootstrap.Toast(toast);
+            bsToast.show();
+            setTimeout(() => toast.remove(), 3000);
+        }
+    }
+</script>
+{% endblock %}
