@@ -27,41 +27,72 @@
             <a href="{{ url_for('logout') }}">退出登录</a>
         </div>
 
-        <!-- 提问表单 -->
-        <form id="askForm">
-            <textarea id="questionInput" rows="4" placeholder="请输入您的问题，例如：总结我本周的工作..."></textarea>
-            <div style="overflow: hidden;">
-                <label style="float:left; margin-top:12px;">
-                    <input type="checkbox" id="useHistorySwitch" checked> 使用对话历史
-                </label>
-                <button type="submit" id="submitBtn">发送提问</button>
-            </div>
-        </form>
-        <div id="loadingIndicator">
-            <div class="spinner"></div>
-            <p>正在检索知识库并生成答案，请稍候...</p>
-        </div>
-
-        <!-- 对话历史 -->
-        <div id="chatHistory">
-            <div class="bot-message">
-                <strong>助手：</strong> 您好！我可以基于您的Joplin笔记库回答问题。请在上方输入您的问题。
-            </div>
-        </div>
-
-        <!-- 调试信息 -->
-        <div class="debug-panel">
-            <div class="debug-toggle" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none';">
-                🔍 <strong>点击查看答案来源与详情</strong>
-            </div>
-            <div style="display:none;">
-                <h4>参考笔记</h4>
-                <ul id="sourcesList">
-                    <li><em>等待回答...</em></li>
+        <div class="row">
+            <!-- 会话列表侧边栏 -->
+            <div class="col-md-2 sidebar">
+                <h5>对话列表</h5>
+                <button id="newSessionBtn" class="btn btn-sm btn-success w-100 mb-2">＋ 新建对话</button>
+                <ul id="sessionList" class="list-group">
+                    {% for s in chat_sessions %}
+                    <li class="list-group-item session-item {{ 'active' if s.session_id == active_session }}"
+                        data-session-id="{{ s.session_id }}">
+                        <span class="session-name">{{ s.name }}</span>
+                        <!-- 新增消息数量徽标（如果 count>0 显示数字，否则不显示或显示0） -->
+                        {% if s.message_count is defined and s.message_count > 0 %}
+                        <span class="badge bg-secondary rounded-pill message-count">{{ s.message_count }}</span>
+                        {% else %}
+                        <span class="badge bg-light text-muted rounded-pill message-count">0</span>
+                        {% endif %}
+                        <div class="session-actions">
+                            <button class="btn btn-sm btn-outline-secondary rename-btn" title="重命名">✏️</button>
+                            <button class="btn btn-sm btn-outline-danger delete-btn" title="删除">🗑️</button>
+                        </div>
+                    </li>
+                    {% endfor %}
                 </ul>
             </div>
-        </div>
-    </div>
+            <!-- 主聊天区域 -->
+            <div class="col-md-10 main-chat">
+                <!-- 现有 chatHistory 和提问表单 -->
+                <!-- 提问表单 -->
+                <form id="askForm">
+                    <textarea id="questionInput" rows="4" placeholder="请输入您的问题，例如：总结我本周的工作..."></textarea>
+                    <div style="overflow: hidden;">
+                        <label style="float:left; margin-top:12px;">
+                            <input type="checkbox" id="useHistorySwitch" checked> 使用对话历史
+                        </label>
+                        <button type="submit" id="submitBtn">发送提问</button>
+                    </div>
+                </form>
+                <div id="loadingIndicator">
+                    <div class="spinner"></div>
+                    <p>正在检索知识库并生成答案，请稍候...</p>
+                </div>
+        
+                <!-- 对话历史 -->
+                <div id="chatHistory">
+                    <div class="bot-message">
+                        <strong>助手：</strong> 您好！我可以基于您的Joplin笔记库回答问题。请在上方输入您的问题。
+                    </div>
+                </div>
+        
+                <!-- 调试信息 -->
+                <div class="debug-panel">
+                    <div class="debug-toggle" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none';">
+                        🔍 <strong>点击查看答案来源与详情</strong>
+                    </div>
+                    <div style="display:none;">
+                        <h4>参考笔记</h4>
+                        <ul id="sourcesList">
+                            <li><em>等待回答...</em></li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+        </div> <!-- end for row -->
+    </div> <!-- end for container -->
+
     <!-- 外部自定义 JavaScript -->
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 </body>
