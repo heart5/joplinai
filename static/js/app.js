@@ -65,6 +65,10 @@ function escapeHtml(text) {
 // ===== 工具函数：格式化时间 =====
 function formatMessageTime(date) {
     if (!(date instanceof Date) || isNaN(date.getTime())) return '';
+    // ★★★ 关键修复：如果日期字符串不包含时区信息，则视为 UTC 时间 ★★★
+    if (typeof date === 'string' && !date.endsWith('Z') && !date.includes('+') && !date.includes('-')) {
+        date = date + 'Z';  // 添加 UTC 标记
+    }
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const yesterday = new Date(today.getTime() - 86400000);
@@ -286,8 +290,13 @@ window.loadSessionHistory = async function(sessionId) {
         const item = records[i];
         const question = item.question || '';
         const answer = item.answer || '';
-        // ★★★ 使用 created_at 字段 ★★★
-        const createdAt = item.created_at ? new Date(item.created_at) : new Date();
+        // 将 item.created_at 标准化为带时区标记的字符串
+        const normalizedTime = item.created_at
+            ? (item.created_at.endsWith('Z') || item.created_at.includes('+')
+                ? item.created_at
+                : item.created_at + 'Z')
+            : null;
+        const createdAt = normalizedTime ? new Date(normalizedTime) : new Date();
         let sources = [];
         if (item.metadata && Array.isArray(item.metadata.sources)) {
             sources = item.metadata.sources;
