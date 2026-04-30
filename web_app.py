@@ -45,7 +45,7 @@ try:
         getnote,
     )
     from func.logme import log
-    from user_manager import USER_MANAGER
+    from user_manager import USER_DB_PATH, USER_MANAGER
 except ImportError:
     # 简易回退
     USER_MANAGER = None
@@ -117,8 +117,16 @@ def admin_required(f):
 @app.route("/")
 @login_required
 def index():
-    """主问答页面"""
-    return render_template("index.html", user=session["user"])
+    sessions = USER_MANAGER.get_user_chat_sessions(session["user"]["id"])
+    active_session = USER_MANAGER.get_active_chat_session(session["user"]["id"])
+    # 将会话ID存入session以便其他api使用
+    session["active_session"] = active_session
+    return render_template(
+        "index.html",
+        user=session["user"],
+        chat_sessions=sessions,
+        active_session=active_session,
+    )
 
 
 # %% [markdown]
@@ -171,7 +179,6 @@ def logout():
 @app.route("/api/ask", methods=["POST"])
 @login_required
 def api_ask():
-    """提问接口 - 将请求转发给底层QA API，并附加用户身份"""
     data = request.get_json()
     question = data.get("question", "").strip()
     use_history = data.get("use_history", True)
@@ -179,29 +186,36 @@ def api_ask():
     if not question:
         return jsonify({"error": "问题不能为空"}), 400
 
-    # 获取当前用户完整信息（包含笔记本白名单）
-    current_user = session["user"]
-    user_details = USER_MANAGER.get_user_with_notebooks(current_user["username"])
+    # 获取当前选中的会话ID（前端可通过请求传入，默认用活动会话）
+    session_id = data.get("session_id") or session.get("active_session")
+    if not session_id:
+        # 自动获取或创建
+        session_id = USER_MANAGER.get_active_chat_session(session["user"]["id"])
+    # 确保该会话属于当前用户
+    user_sessions = [
+        s["session_id"]
+        for s in USER_MANAGER.get_user_chat_sessions(session["user"]["id"])
+    ]
+    if session_id not in user_sessions:
+        return jsonify({"error": "会话不存在"}), 404
 
-    if not user_details:
-        return jsonify({"success": False, "error": "用户信息获取失败"}), 500
-
-    # 准备转发给QA API的请求体
+    # 构建转发给 QA API 的请求
     qa_request_payload = {
         "question": question,
         "use_history": use_history,
-        "session_id": f"web_{session['user']['username']}",  # 会话标识
-        "config_overrides": {
-            # 可以在这里覆盖配置，例如调整检索数量
-        },
-        "user_identity": {  # 核心：传递用户身份用于权限过滤
+        "session_id": session_id,  # 使用用户选择的会话ID
+        "config_overrides": {},
+        "user_identity": {
             "username": session["user"]["username"],
             "display_name": session["user"]["display_name"],
             "role": session["user"]["role"],
-            "allowed_notebooks": user_details["allowed_notebooks"],  # 笔记本白名单
+            "allowed_notebooks": USER_MANAGER.get_user_with_notebooks(
+                session["user"]["username"]
+            ).get("allowed_notebooks", ""),  # 关键！
         },
     }
 
+    # ... 后续代码保持不变，只是 session_id 不再是固定的 f"web_{username}"
     headers = {
         "Content-Type": "application/json",
         "X-API-Key": QA_API_KEY,  # 内部API调用的密钥
@@ -212,7 +226,7 @@ def api_ask():
             f"{QA_API_URL}/ask",
             json=qa_request_payload,
             headers=headers,
-            timeout=60,  # 长超时
+            timeout=90,  # 长超时
         )
         response.raise_for_status()
         result = response.json()
@@ -229,7 +243,7 @@ def api_ask():
         try:
             USER_MANAGER.save_qa_history(
                 user_id=session["user"]["id"],
-                session_id=f"web_{session['user']['username']}",
+                session_id=session_id,
                 question=question,
                 answer=result.get("answer", ""),
                 metadata={
@@ -261,6 +275,12 @@ def api_ask():
 def api_get_history():
     """获取当前登录用户的持久化问答历史"""
     try:
+        session_id = request.args.get("session_id")
+        if not session_id:
+            # 默认获取当前活动会话
+            session_id = USER_MANAGER.get_active_chat_session(session["user"]["id"])
+            if not session_id:
+                return jsonify({"success": False, "history": []})
         limit = request.args.get("limit", default=20, type=int)
         offset = request.args.get("offset", default=0, type=int)
 
@@ -268,6 +288,7 @@ def api_get_history():
             user_id=session["user"]["id"],
             limit=min(limit, 100),  # 防止一次请求过多
             offset=offset,
+            session_id=session_id,  # ✅ 传入
         )
 
         return jsonify(
@@ -289,6 +310,120 @@ def list_users():
     """管理员：获取用户列表"""
     users = USER_MANAGER.get_all_users()
     return jsonify({"users": users})
+
+
+# %% [markdown]
+# ## 会话管理
+
+# %% [markdown]
+# ### chat_sessions_api()
+
+# %%
+@app.route("/api/chat_sessions", methods=["GET", "POST"])
+@login_required
+def chat_sessions_api():
+    if request.method == "POST":
+        data = request.get_json()
+        name = data.get("name", "新对话")
+        session_id = USER_MANAGER.create_chat_session(session["user"]["id"], name)
+        # 自动设置为活动会话
+        USER_MANAGER.set_active_chat_session(session["user"]["id"], session_id)
+        return jsonify({"success": True, "session_id": session_id, "name": name})
+    else:  # GET
+        sessions = USER_MANAGER.get_user_chat_sessions(session["user"]["id"])
+        return jsonify({"success": True, "sessions": sessions})
+
+
+# %% [markdown]
+# ### chat_session_detail(session_id)
+
+# %%
+@app.route("/api/chat_sessions/<session_id>", methods=["PUT", "DELETE"])
+@login_required
+def chat_session_detail(session_id):
+    # 验证所有权（可选）
+    user_sessions = [
+        s["session_id"]
+        for s in USER_MANAGER.get_user_chat_sessions(session["user"]["id"])
+    ]
+    if session_id not in user_sessions:
+        return jsonify({"error": "无权操作"}), 403
+
+    if request.method == "PUT":  # 重命名
+        data = request.get_json()
+        new_name = data.get("name")
+        if not new_name:
+            return jsonify({"error": "名称不能为空"}), 400
+        USER_MANAGER.rename_chat_session(session_id, new_name)
+        return jsonify({"success": True})
+    elif request.method == "DELETE":
+        USER_MANAGER.delete_chat_session(session_id)
+        # 如果删除的是当前活动会话，自动切换到最近一个会话
+        if session.get("active_session") == session_id:
+            new_active = USER_MANAGER.get_active_chat_session(session["user"]["id"])
+            # 前端刷新时会自动获取
+        return jsonify({"success": True})
+
+
+# %% [markdown]
+# ### activate_chat_session(session_id)
+
+# %%
+@app.route("/api/chat_sessions/<session_id>/activate", methods=["POST"])
+@login_required
+def activate_chat_session(session_id):
+    user_sessions = [
+        s["session_id"]
+        for s in USER_MANAGER.get_user_chat_sessions(session["user"]["id"])
+    ]
+    if session_id not in user_sessions:
+        return jsonify({"error": "无权操作"}), 403
+    USER_MANAGER.set_active_chat_session(session["user"]["id"], session_id)
+    # 同时尝试从数据库恢复该会话的历史到 QA API 内存
+    restore_history_for_session(session_id)  # 见下文
+    return jsonify({"success": True, "session_id": session_id})
+
+
+# %% [markdown]
+# ### restore_history_for_session(session_id: str)
+
+# %%
+# web_app.py 中添加
+def restore_history_for_session(session_id: str):
+    """从 qa_history 数据库加载该会话的历史记录，并恢复到 QA API 内存"""
+    try:
+        import sqlite3
+
+        # 从数据库获取历史（最新50条）
+        conn = sqlite3.connect(USER_DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT question, answer, created_at FROM qa_history WHERE session_id = ? ORDER BY created_at ASC",
+            (session_id,),
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        if not rows:
+            return
+        history = []
+        for row in rows:
+            entry = {
+                "timestamp": row["created_at"],
+                "question": row["question"],
+                "answer": row["answer"],
+                "metadata": {},  # 可以根据需要从原metadata提取
+            }
+            history.append(entry)
+        # 调用 QA API 的 restroe 端点
+        requests.post(
+            f"{QA_API_URL}/restore_history",
+            json={"session_id": session_id, "history": history},
+            headers={"X-API-Key": QA_API_KEY},
+            timeout=10,
+        )
+    except Exception as e:
+        log.warning(f"恢复会话历史失败: {e}")
 
 
 # %% [markdown]
