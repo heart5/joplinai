@@ -477,6 +477,49 @@ def api_get_user_details(username):
 
 
 # %% [markdown]
+# ### api_admin_delete_user()
+
+# %%
+@app.route("/api/admin/user/delete", methods=["POST"])
+@login_required
+@admin_required
+def api_admin_delete_user():
+    """API: 管理员删除用户（物理删除）"""
+    data = request.get_json()
+    target_username = data.get("username")
+
+    if not target_username:
+        return jsonify({"success": False, "error": "用户名不能为空"}), 400
+
+    # 禁止删除自己
+    if target_username == session["user"]["username"]:
+        return jsonify({"success": False, "error": "不能删除自己的账户"}), 403
+
+    # 可选：防止删除最后一个管理员（根据业务需求决定）
+    # 这里简单检查用户角色，如果是管理员且是最后一个，则阻止
+    target_user = USER_MANAGER._get_user_by_username(target_username)
+    if target_user and target_user["role"] == "admin":
+        # 检查是否还有其他管理员
+        all_users = USER_MANAGER.get_all_users()
+        admin_count = sum(1 for u in all_users if u["role"] == "admin")
+        if admin_count <= 1:
+            return jsonify(
+                {
+                    "success": False,
+                    "error": "至少需要保留一名管理员，无法删除最后一个管理员",
+                }
+            ), 403
+
+    success = USER_MANAGER.delete_user(
+        target_username, admin_username=session["user"]["username"]
+    )
+    if success:
+        return jsonify({"success": True, "message": "用户已删除"})
+    else:
+        return jsonify({"success": False, "error": "用户不存在或操作失败"}), 400
+
+
+# %% [markdown]
 # ### api_update_user_permissions()
 
 # %%
@@ -699,6 +742,70 @@ def api_admin_create_user():
         return jsonify({"success": True, "message": "用户创建成功"})
     else:
         return jsonify({"success": False, "error": "用户名已存在或创建失败"}), 400
+
+
+# %% [markdown]
+# ### admin_user_edit(username)
+
+# %%
+@app.route("/admin/users/<username>/edit", methods=["GET"])
+@login_required
+@admin_required
+def admin_user_edit(username):
+    """用户编辑独立页面"""
+    user = USER_MANAGER.get_user_with_notebooks(username)
+    if not user:
+        abort(404)
+    # 获取可用笔记本列表
+    try:
+        split_ptn = re.compile(r"[,，]")
+        available_notebooks = [
+            title.strip()
+            for title in split_ptn.split(
+                getinivaluefromcloud("joplinai", "shared_notebook_titles")
+            )
+        ]
+    except:
+        available_notebooks = []
+    return render_template(
+        "admin/user_edit.html", user=user, available_notebooks=available_notebooks
+    )
+
+
+# %% [markdown]
+# ### admin_user_history(username)
+
+# %%
+@app.route("/admin/users/<username>/history")
+@login_required
+@admin_required
+def admin_user_history(username):
+    """用户对话历史列表页面"""
+    user = USER_MANAGER._get_user_by_username(username)
+    if not user:
+        abort(404)
+    sessions = USER_MANAGER.get_user_chat_sessions(user["id"])
+    return render_template("admin/user_history.html", user=user, sessions=sessions)
+
+
+# %% [markdown]
+# ### api_admin_user_session_history(username, session_id)
+
+# %%
+@app.route("/api/admin/user/<username>/session/<session_id>/history")
+@login_required
+@admin_required
+def api_admin_user_session_history(username, session_id):
+    """获取指定用户某会话的详细问答历史"""
+    user = USER_MANAGER._get_user_by_username(username)
+    if not user:
+        return jsonify({"success": False, "error": "用户不存在"}), 404
+    limit = request.args.get("limit", 50, type=int)
+    offset = request.args.get("offset", 0, type=int)
+    history = USER_MANAGER.get_qa_history(
+        user_id=user["id"], session_id=session_id, limit=limit, offset=offset
+    )
+    return jsonify({"success": True, "history": history})
 
 
 # %% [markdown]
