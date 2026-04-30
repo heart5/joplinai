@@ -111,6 +111,19 @@ class UserManager:
             )
         """)
 
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS chat_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                session_id TEXT NOT NULL UNIQUE,
+                name TEXT DEFAULT '新对话',
+                is_active INTEGER DEFAULT 0,       -- 0否1是，标记当前活动会话
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+            )
+        """)
+
         conn.commit()
         conn.close()
         log.info(f"用户数据库初始化完成: {self.db_path}")
@@ -291,28 +304,38 @@ class UserManager:
         conn.commit()
         conn.close()
 
-    def get_qa_history(self, user_id: int, limit: int = 50, offset: int = 0):
-        """获取指定用户的问答历史，按时间倒序排列（最新的在前）"""
+    def get_qa_history(
+        self,
+        user_id: int,
+        limit: int = 50,
+        offset: int = 0,
+        session_id: Optional[str] = None,
+    ):
         conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row  # 返回字典形式的行
+        conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
-        cursor.execute(
-            """
-            SELECT session_id, question, answer, metadata, created_at
-            FROM qa_history
-            WHERE user_id = ?
-            ORDER BY created_at DESC
-            LIMIT ? OFFSET ?
-        """,
-            (user_id, limit, offset),
-        )
+
+        if session_id:
+            cursor.execute(
+                """SELECT session_id, question, answer, metadata, created_at
+                FROM qa_history
+                WHERE session_id = ?
+                ORDER BY created_at DESC LIMIT ? OFFSET ?""",
+                (session_id, limit, offset),
+            )
+        else:
+            cursor.execute(
+                """SELECT session_id, question, answer, metadata, created_at
+                FROM qa_history
+                WHERE user_id = ?
+                ORDER BY created_at DESC LIMIT ? OFFSET ?""",
+                (user_id, limit, offset),
+            )
         rows = cursor.fetchall()
         conn.close()
-
         history = []
         for row in rows:
             item = dict(row)
-            # 将metadata JSON字符串解析回字典
             if item["metadata"]:
                 try:
                     item["metadata"] = json.loads(item["metadata"])
@@ -593,6 +616,142 @@ class UserManager:
         )
 
         return user
+
+    def create_chat_session(self, user_id: int, name: str = "新对话") -> str:
+        """创建新的问答会话，返回 session_id"""
+        session_id = f"chat_{user_id}_{secrets.token_urlsafe(16)}"
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO chat_sessions (user_id, session_id, name) VALUES (?, ?, ?)",
+            (user_id, session_id, name),
+        )
+        conn.commit()
+        conn.close()
+        return session_id
+
+    def get_user_chat_sessions(self, user_id: int) -> List[Dict]:
+        """获取用户所有问答会话，按更新时间倒序，并附带消息数量"""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        # 联查 qa_history 表获取消息数量（基于 session_id）
+        cursor.execute(
+            """SELECT cs.session_id, cs.name, cs.created_at, cs.updated_at,
+                      COUNT(qh.id) AS message_count
+               FROM chat_sessions cs
+               LEFT JOIN qa_history qh ON cs.session_id = qh.session_id
+               WHERE cs.user_id = ?
+               GROUP BY cs.session_id
+               ORDER BY cs.updated_at DESC""",
+            (user_id,),
+        )
+        rows = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        return rows
+
+    def rename_chat_session(self, session_id: str, new_name: str) -> bool:
+        """重命名会话"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE chat_sessions SET name = ?, updated_at = ? WHERE session_id = ?",
+            (new_name, datetime.now(), session_id),
+        )
+        affected = cursor.rowcount
+        conn.commit()
+        conn.close()
+        return affected > 0
+
+    def delete_chat_session(self, session_id: str) -> bool:
+        """删除会话（同时级联删除 qa_history 中的相关记录）"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        # 先删问答历史（外键 ON DELETE CASCADE 已设置）
+        cursor.execute("DELETE FROM chat_sessions WHERE session_id = ?", (session_id,))
+        affected = cursor.rowcount
+        conn.commit()
+        conn.close()
+        return affected > 0
+
+    def set_active_chat_session(self, user_id: int, session_id: str):
+        """设置当前活动会话（将用户其他会话的 is_active 置0，本会话置1）"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE chat_sessions SET is_active = 0 WHERE user_id = ?", (user_id,)
+        )
+        cursor.execute(
+            "UPDATE chat_sessions SET is_active = 1, updated_at = ? WHERE session_id = ?",
+            (datetime.now(), session_id),
+        )
+        conn.commit()
+        conn.close()
+
+    def get_active_chat_session(self, user_id: int) -> Optional[str]:
+        """获取当前用户的最新活动会话，没有则自动迁移旧数据或创建默认会话"""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        # 先查活动会话
+        cursor.execute(
+            "SELECT session_id FROM chat_sessions WHERE user_id = ? AND is_active = 1",
+            (user_id,),
+        )
+        row = cursor.fetchone()
+        if row:
+            conn.close()
+            return row["session_id"]
+
+        # 查最近更新的会话
+        cursor.execute(
+            "SELECT session_id FROM chat_sessions WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1",
+            (user_id,),
+        )
+        row = cursor.fetchone()
+        if row:
+            conn.close()
+            return row["session_id"]
+
+        conn.close()
+
+        # ===== 全新：尝试迁移旧数据 =====
+        # 获取用户的用户名
+        qa_conn = sqlite3.connect(self.db_path)  # 需要将 DB_PATH 导入
+        qa_cursor = qa_conn.cursor()
+        qa_cursor.execute("SELECT username FROM users WHERE id = ?", (user_id,))
+        username = qa_cursor.fetchone()[0]
+        if username:
+            old_session_id = f"web_{username}"
+            # 检查 qa_history 表中是否有旧数据
+            qa_cursor.execute(
+                "SELECT COUNT(*) FROM qa_history WHERE session_id = ?",
+                (old_session_id,),
+            )
+            count = qa_cursor.fetchone()[0]
+
+            if count > 0:
+                # 为旧数据创建对应的 chat_sessions 记录
+                self._create_chat_session_with_id(user_id, old_session_id, "默认对话")
+                self.set_active_chat_session(user_id, old_session_id)
+                return old_session_id
+
+        qa_conn.close()
+        # 完全没有数据，创建全新默认会话
+        return self.create_chat_session(user_id, "默认对话")
+
+    def _create_chat_session_with_id(self, user_id: int, session_id: str, name: str):
+        """使用指定的 session_id 创建会话（用于迁移旧数据）"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT OR IGNORE INTO chat_sessions (user_id, session_id, name) VALUES (?, ?, ?)",
+            (user_id, session_id, name),
+        )
+        conn.commit()
+        conn.close()
 
 
 # %% [markdown]
