@@ -1,0 +1,106 @@
+{% extends "admin/layout.html" %}
+{% block title %}对话历史 - {{ user.display_name }}{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h4>📋 {{ user.display_name }}（{{ user.username }}）的对话历史</h4>
+        <a href="{{ url_for('admin_dashboard') }}" class="btn btn-sm btn-outline-secondary">← 返回用户列表</a>
+    </div>
+    <div class="card-body">
+        {% if sessions %}
+        <div class="list-group" id="sessionHistoryGroup">
+            {% for s in sessions %}
+            <div class="list-group-item list-group-item-action">
+                <div class="d-flex w-100 justify-content-between">
+                    <h6 class="mb-1">{{ s.name }} <small class="text-muted">({{ s.message_count }} 条消息)</small></h6>
+                    <small class="text-muted">{{ s.updated_at or s.created_at }}</small>
+                </div>
+                <a href="#" class="btn btn-sm btn-outline-secondary view-session-btn" data-session-id="{{ s.session_id }}">查看详情</a>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="text-muted">该用户暂无对话记录。</p>
+        {% endif %}
+    </div>
+</div>
+
+<!-- 会话详情模态框 -->
+<div class="modal fade" id="sessionDetailModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">会话详情</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" id="sessionDetailBody" style="max-height: 70vh; overflow-y: auto;">
+        <!-- 动态加载 -->
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    // ===== 简易 Markdown 解析器（从 static/js/app.js 精简提取）=====
+    function simpleMarkdown(text) {
+        if (!text) return '';
+        // HTML 转义防止 XSS
+        let safeText = String(text)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+        // Markdown 转换
+        return safeText
+            .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+            .replace(/\*(.*?)\*/g, '<em>$1</em>')
+            .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+            .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">📷 图片：$1</a>')
+            .replace(/\n\n/g, '</p><p>')
+            .replace(/\n/g, '<br>')
+            .replace(/^/, '<p>')
+            .replace(/$/, '</p>')
+            .replace(/<p><\/p>/g, '');
+    }
+
+    // 绑定“查看详情”按钮
+    document.querySelectorAll('.view-session-btn').forEach(btn => {
+        btn.addEventListener('click', async function(e) {
+            e.preventDefault();
+            const sessionId = this.dataset.sessionId;
+            const user = '{{ user.username }}';
+            try {
+                const resp = await fetch(`/api/admin/user/${encodeURIComponent(user)}/session/${encodeURIComponent(sessionId)}/history?limit=100`);
+                const data = await resp.json();
+                if (data.success) {
+                    let html = '';
+                    for (const item of data.history) {
+                        // 将 item.created_at 标准化为带时区标记的字符串
+                        const normalizedTime = item.created_at
+                            ? (item.created_at.endsWith('Z') || item.created_at.includes('+')
+                                ? item.created_at
+                                : item.created_at + 'Z')
+                            : null;
+                        const createdAt = normalizedTime ? new Date(normalizedTime) : new Date();
+                        html += `<div class="mb-2 p-2 border rounded">
+                            <strong>问:</strong> ${simpleMarkdown(item.question)}
+                            <br>
+                            <strong>答:</strong> ${simpleMarkdown(item.answer)}
+                            <br>
+                            <small class="text-muted">${createdAt}</small>
+                        </div>`;
+                    }
+                    document.getElementById('sessionDetailBody').innerHTML = html;
+                    new bootstrap.Modal(document.getElementById('sessionDetailModal')).show();
+                } else {
+                    document.getElementById('sessionDetailBody').innerHTML = '<div class="alert alert-danger">加载失败</div>';
+                }
+            } catch (e) {
+                document.getElementById('sessionDetailBody').innerHTML = '<div class="alert alert-danger">网络错误</div>';
+            }
+        });
+    });
+</script>
+{% endblock %}
