@@ -477,6 +477,34 @@ def api_health():
 
 
 # %% [markdown]
+# ## api_restore_history()
+
+# %%
+@app.route("/restore_history", methods=["POST"])
+@require_api_key
+def api_restore_history():
+    """将外部提供的对话历史注入到内存中（覆盖该会话的历史）"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "请求体必须为JSON"}), 400
+        session_id = data.get("session_id", "default_session")
+        history = data.get("history", [])
+        if not isinstance(history, list):
+            return jsonify({"error": "history 必须是列表"}), 400
+
+        with _history_lock:
+            _session_histories[session_id] = history
+        log.info(f"会话 [{session_id}] 的历史已从外部恢复，共 {len(history)} 条")
+        return jsonify(
+            {"success": True, "session_id": session_id, "count": len(history)}
+        )
+    except Exception as e:
+        log.error(f"恢复历史失败: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+# %% [markdown]
 # # 主程序配置
 
 # %% [markdown]
