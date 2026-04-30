@@ -1,0 +1,67 @@
+<!-- 模态框：创建新用户（增强版） -->
+<div class="modal fade" id="createUserModal" tabindex="-1" aria-labelledby="createUserModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="createUserModalLabel">创建新用户</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form id="createUserForm">
+                    <!-- 基础信息 -->
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="createUsername" class="form-label">用户名 *</label>
+                            <input type="text" class="form-control" id="createUsername" name="username" placeholder="英文/数字，用于登录" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="createPassword" class="form-label">初始密码 *</label>
+                            <input type="password" class="form-control" id="createPassword" name="password" placeholder="至少6位字符" minlength="6" required>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="createDisplayName" class="form-label">显示名称 *</label>
+                        <input type="text" class="form-control" id="createDisplayName" name="display_name" placeholder="中文昵称，用于界面显示" required>
+                    </div>
+
+                    <!-- 权限设置 -->
+                    <div class="mb-3">
+                        <label for="createRole" class="form-label">用户角色 *</label>
+                        <select class="form-select" id="createRole" name="role" onchange="toggleCreateNotebookSection()">
+                            <option value="team_member" selected>团队成员（需指定授权笔记本）</option>
+                            <option value="team_leader">团队领导（需指定授权笔记本）</option>
+                            <option value="admin">管理员（可访问所有笔记）</option>
+                        </select>
+                        <div class="form-text">
+                            <small>• 管理员：无限制访问所有笔记。<br>• 团队领导/成员：只能访问“授权的笔记本”和“自己创建的笔记”。</small>
+                        </div>
+                    </div>
+
+                    <!-- 笔记本授权区域（默认隐藏，当角色为非管理员时显示） -->
+                    <div class="mb-3" id="createNotebookAuthSection" style="display: none;">
+                        <label for="createAllowedNotebooks" class="form-label">授权笔记本</label>
+                        <div class="alert alert-info py-2">
+                            <small><i class="bi bi-info-circle"></i> 按住 Ctrl (Windows/Linux) 或 Command (Mac) 键可多选。</small>
+                        </div>
+                        <select class="form-select" id="createAllowedNotebooks" name="allowed_notebooks" multiple size="8" style="height: auto;" onchange="updateCreateSelectedCount()">
+                            <!-- 选项将通过JavaScript动态加载 -->
+                        </select>
+                        <div class="mt-2">
+                            <button type="button" class="btn btn-sm btn-outline-secondary me-2" onclick="selectAllCreateNotebooks()">全选</button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="clearCreateNotebookSelection()">清空</button>
+                            <span class="ms-3 text-muted" id="createSelectedCount">已选择 0 个笔记本</span>
+                        </div>
+                        <!-- 快速筛选 -->
+                        <div class="mt-3">
+                            <input type="text" class="form-control form-control-sm" id="createNotebookFilter" placeholder="输入关键词筛选笔记本..." onkeyup="filterCreateNotebooks()">
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-primary" onclick="submitCreateUserEnhanced()">创建用户</button>
+            </div>
+        </div>
+    </div>
+</div>
