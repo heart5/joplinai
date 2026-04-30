@@ -1,0 +1,13 @@
+/* 管理后台专属样式 */
+body {
+    background-color: #f5f7fa;
+}
+.card {
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+.table th {
+    background-color: #343a40;
+    color: white;
+}
+#sessionDetailBody p { margin-bottom: 0.5rem; }
+#sessionDetailBody a { color: #0d6efd; }
