@@ -54,14 +54,30 @@
             .replace(/>/g, '&gt;');
         // Markdown 转换
         return safeText
+            .replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code class="language-$1">$2</code></pre>')
+            .replace(/`([^`]+)`/g, '<code>$1</code>')
+            // 引用块
+            .replace(/^> (.*$)/gm, '<blockquote>$1</blockquote>')
+            // 标题（从大到小，避免混淆）
+            .replace(/^##### (.*$)/gm, '<h5>$1</h5>')
+            .replace(/^#### (.*$)/gm, '<h4>$1</h4>')
+            .replace(/^### (.*$)/gm, '<h3>$1</h3>')
+            .replace(/^## (.*$)/gm, '<h2>$1</h2>')
+            .replace(/^# (.*$)/gm, '<h1>$1</h1>')
+            // 加粗和斜体
             .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
             .replace(/\*(.*?)\*/g, '<em>$1</em>')
+            // 链接（确保URL完整）
             .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+            // 图片（替换为链接）
             .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">📷 图片：$1</a>')
-            .replace(/\n\n/g, '</p><p>')
-            .replace(/\n/g, '<br>')
+            // 换行处理（注意顺序）
+            .replace(/\n\n/g, '</p><p>')   // 段落
+            .replace(/\n/g, '<br>')         // 普通换行
+            // 包裹段落（避免重复包裹）
             .replace(/^/, '<p>')
             .replace(/$/, '</p>')
+            // 清理空段落
             .replace(/<p><\/p>/g, '');
     }
 
