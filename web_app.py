@@ -22,6 +22,7 @@
 # %%
 import json
 import logging
+import os
 import re
 from functools import wraps
 from pathlib import Path
@@ -64,7 +65,15 @@ with pathmagic.context():
 
 # %%
 app = Flask(__name__)
-app.secret_key = "your-secret-key-please-change-in-production"  # 必须更改！
+app.secret_key = (
+    getinivaluefromcloud("joplinai", "flask_secret_key") or os.urandom(32).hex()
+)
+
+# 新增：修复IP地址获取，信任反向代理
+from werkzeug.middleware.proxy_fix import ProxyFix
+
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=2, x_proto=1, x_host=1)
+
 
 # 配置
 QA_API_SERVER = getinivaluefromcloud("joplinai", f"joplinai_qa_server_{getdeviceid()}")
@@ -231,11 +240,19 @@ def api_ask():
         response.raise_for_status()
         result = response.json()
 
-        # 记录审计日志（可脱敏）
+        # 获取来源笔记数（优先使用 sources 列表，兼容旧结构）
+        metadata = result.get("metadata", {})
+        sources_notes = metadata.get("sources", [])
+        relevant_chunks = metadata.get("relevant_chunks", [])
+        is_based = metadata.get("is_based_on_notes", False)
+        # 记录更详细的审计日志
         USER_MANAGER.log_audit(
             session["user"]["id"],
             "ASK_QUESTION",
-            details=f"问题长度: {len(question)}, 来源笔记数: {len(result.get('relevant_notes', []))}",
+            details=f"问题长度: {len(question)}, "
+            f"来源笔记数: {len(sources_notes)}, "
+            f"相关块数: {len(relevant_chunks)}, "
+            f"基于笔记: {is_based}",
             ip_address=request.remote_addr,
         )
 
@@ -262,6 +279,13 @@ def api_ask():
 
         return jsonify(result)
     except requests.exceptions.RequestException as e:
+        # 记录失败审计
+        USER_MANAGER.log_audit(
+            session["user"]["id"],
+            "ASK_QUESTION_FAILED",
+            details=f"问题长度: {len(question)}, 错误: {str(e)[:100]}",
+            ip_address=request.remote_addr,
+        )
         log.error(f"调用QA API失败: {e}")
         return jsonify({"error": "问答服务暂时不可用", "details": str(e)}), 502
 
@@ -540,17 +564,6 @@ def api_update_user_permissions():
     if data["role"] not in valid_roles:
         return jsonify({"success": False, "error": f"无效角色: {data['role']}"}), 400
 
-    # # 更新用户信息
-    # success = USER_MANAGER.update_user(
-    #     username=data["username"],
-    #     display_name=data["display_name"],
-    #     role=data["role"],
-    #     is_active=data.get("is_active", True),
-    # )
-
-    # if not success:
-    #     return jsonify({"success": False, "error": "更新用户基本信息失败"}), 500
-
     # 更新笔记本白名单（非管理员角色）
     if data["role"] != "admin":
         allowed_notebooks = data.get("allowed_notebooks", [])
@@ -562,6 +575,16 @@ def api_update_user_permissions():
 
         if not success:
             return jsonify({"success": False, "error": "更新笔记本白名单失败"}), 500
+
+    USER_MANAGER.log_audit(
+        session["user"]["id"],
+        "UPDATE_USER",
+        details=f"更新用户: {data['username']}, "
+        f"角色: {data['role']}, "
+        f"活跃: {data.get('is_active')}, "
+        f"授权笔记本数: {len(data.get('allowed_notebooks', []))}",
+        ip_address=request.remote_addr,
+    )
 
     log.info(f"管理员更新用户权限: {data['username']} -> 角色: {data['role']}")
     return jsonify({"success": True, "message": "用户权限更新成功"})
@@ -627,6 +650,12 @@ def api_admin_reset_password():
         target_username, new_password, admin_username=session["user"]["username"]
     )
     if success:
+        USER_MANAGER.log_audit(
+            session["user"]["id"],
+            "RESET_PASSWORD",
+            details=f"重置用户 {data['username']} 的密码",
+            ip_address=request.remote_addr,
+        )
         return jsonify({"success": True, "message": "密码重置成功"})
     else:
         return jsonify({"success": False, "error": "用户不存在或操作失败"}), 400
@@ -806,6 +835,128 @@ def api_admin_user_session_history(username, session_id):
         user_id=user["id"], session_id=session_id, limit=limit, offset=offset
     )
     return jsonify({"success": True, "history": history})
+
+
+# %% [markdown]
+# ## 审计相关路由
+
+# %%
+@app.route("/admin/audit")
+@login_required
+@admin_required
+def admin_audit_page():
+    """审计日志页面"""
+    return render_template("admin/audit_log.html")
+
+
+@app.route("/api/admin/audit/logs")
+@login_required
+@admin_required
+def api_admin_audit_logs():
+    """审计日志数据API（分页+筛选）"""
+    page = request.args.get("page", 1, type=int)
+    per_page = request.args.get("per_page", 20, type=int)
+    username = request.args.get("username", None)
+    action = request.args.get("action", None)
+    start_date = request.args.get("start_date", None)
+    end_date = request.args.get("end_date", None)
+
+    result = USER_MANAGER.get_audit_logs(
+        page=page,
+        per_page=per_page,
+        username=username,
+        action=action,
+        start_date=start_date,
+        end_date=end_date,
+    )
+
+    return jsonify({"success": True, **result})
+
+
+@app.route("/api/admin/audit/actions")
+@login_required
+@admin_required
+def api_admin_audit_actions():
+    """获取所有操作类型（用于下拉框）"""
+    actions = USER_MANAGER.get_audit_actions()
+    return jsonify({"success": True, "actions": actions})
+
+
+@app.route("/api/admin/audit/clear", methods=["POST"])
+@login_required
+@admin_required
+def api_admin_audit_clear():
+    """清理指定天数前的审计日志"""
+    data = request.get_json()
+    before_days = data.get("before_days", 90)  # 默认清理90天前
+
+    if before_days < 7:
+        return jsonify({"success": False, "error": "保留天数不能少于7天"}), 400
+
+    deleted = USER_MANAGER.clear_audit_logs(before_days)
+
+    # 记录审计日志（本次清理操作本身也要记录）
+    USER_MANAGER.log_audit(
+        session["user"]["id"],
+        "CLEAR_AUDIT_LOGS",
+        details=f"清理了 {deleted} 条 {before_days} 天前的审计日志",
+        ip_address=request.remote_addr,
+    )
+
+    return jsonify(
+        {"success": True, "deleted": deleted, "message": f"已清理 {deleted} 条日志"}
+    )
+
+
+@app.route("/api/admin/audit/export")
+@login_required
+@admin_required
+def api_admin_audit_export():
+    """导出审计日志为CSV"""
+    # 获取所有符合条件的日志（不分页）
+    result = USER_MANAGER.get_audit_logs(
+        page=1,
+        per_page=100000,  # 大数量，实际建议限制导出范围
+        username=request.args.get("username"),
+        action=request.args.get("action"),
+        start_date=request.args.get("start_date"),
+        end_date=request.args.get("end_date"),
+    )
+
+    if not result["logs"]:
+        return jsonify({"success": False, "error": "没有可导出的记录"}), 400
+
+    # 生成CSV
+    import csv
+    import io
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["ID", "时间", "用户名", "显示名", "操作类型", "详情", "IP地址"])
+
+    for log in result["logs"]:
+        writer.writerow(
+            [
+                log["id"],
+                log["timestamp"],
+                log["username"],
+                log["display_name"],
+                log["action"],
+                log["details"] or "",
+                log["ip_address"] or "",
+            ]
+        )
+
+    csv_content = output.getvalue()
+    output.close()
+
+    from flask import Response
+
+    return Response(
+        csv_content,
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment;filename=audit_logs.csv"},
+    )
 
 
 # %% [markdown]
