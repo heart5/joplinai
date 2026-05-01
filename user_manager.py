@@ -923,6 +923,135 @@ class UserManager:
             return False
 
 # %% [markdown]
+# ## 审计相关功能函数
+
+    # %%
+    def get_audit_logs(
+        self,
+        page: int = 1,
+        per_page: int = 20,
+        username: Optional[str] = None,
+        action: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> Dict:
+        """
+        分页查询审计日志（管理员功能）
+        Args:
+            page: 页码（从1开始）
+            per_page: 每页条数
+            username: 按用户名筛选（模糊匹配）
+            action: 按操作类型筛选
+            start_date: 起始日期（YYYY-MM-DD）
+            end_date: 结束日期（YYYY-MM-DD）
+        Returns:
+            {"total": 总数, "logs": 日志列表, "page": 当前页码, "per_page": 每页条数}
+        """
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+    
+        # 构建查询条件
+        conditions = []
+        params = []
+    
+        if username:
+            # 通过子查询关联用户名（audit_log.user_id -> users.username）
+            conditions.append("a.user_id IN (SELECT id FROM users WHERE username LIKE ?)")
+            params.append(f"%{username}%")
+    
+        if action:
+            conditions.append("a.action = ?")
+            params.append(action)
+    
+        if start_date:
+            conditions.append("a.timestamp >= ?")
+            params.append(start_date)
+    
+        if end_date:
+            # 包含end_date当天
+            conditions.append("a.timestamp <= ?")
+            params.append(f"{end_date} 23:59:59")
+    
+        where_clause = " AND ".join(conditions) if conditions else "1=1"
+    
+        # 查询总数
+        cursor.execute(
+            f"""
+            SELECT COUNT(*) as total
+            FROM audit_log a
+            WHERE {where_clause}
+            """,
+            params,
+        )
+        total = cursor.fetchone()["total"]
+    
+        # 查询当前页数据
+        offset = (page - 1) * per_page
+        cursor.execute(
+            f"""
+            SELECT
+                a.id,
+                a.user_id,
+                COALESCE(u.username, '(已删除用户)') as username,
+                COALESCE(u.display_name, '未知') as display_name,
+                a.action,
+                a.details,
+                a.ip_address,
+                a.timestamp
+            FROM audit_log a
+            LEFT JOIN users u ON a.user_id = u.id
+            WHERE {where_clause}
+            ORDER BY a.timestamp DESC
+            LIMIT ? OFFSET ?
+            """,
+            params + [per_page, offset],
+        )
+        rows = cursor.fetchall()
+        conn.close()
+    
+        return {
+            "total": total,
+            "logs": [dict(row) for row in rows],
+            "page": page,
+            "per_page": per_page,
+            "total_pages": max(1, (total + per_page - 1) // per_page),
+        }
+    
+    
+    def clear_audit_logs(self, before_days: int = 90) -> int:
+        """
+        清理指定天数之前的审计日志
+        Args:
+            before_days: 保留最近N天的日志，之前的将被删除
+        Returns:
+            删除的记录数
+        """
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cutoff = datetime.now() - timedelta(days=before_days)
+        cursor.execute(
+            "DELETE FROM audit_log WHERE timestamp < ?",
+            (cutoff.strftime("%Y-%m-%d %H:%M:%S"),),
+        )
+        deleted = cursor.rowcount
+        conn.commit()
+        conn.close()
+        log.info(f"清理了 {deleted} 条 {before_days} 天前的审计日志")
+        return deleted
+    
+    
+    def get_audit_actions(self) -> List[str]:
+        """获取所有不同的操作类型（用于筛选下拉框）"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("SELECT DISTINCT action FROM audit_log ORDER BY action")
+        rows = cursor.fetchall()
+        conn.close()
+        return [row[0] for row in rows]
+
+
+# %% [markdown]
 # # 全局实例化
 
 # %%
