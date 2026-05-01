@@ -309,7 +309,7 @@ def api_ask():
             "session_id": session_id,
             "metadata": {
                 "is_based_on_notes": result.get("is_based_on_notes", False),
-                "relevant_notes_count": len(result.get("relevant_notes", [])),
+                "relevant_chunks": result.get("relevant_chunks", []),
                 "sources": result.get("sources", []),
                 "context_length": result.get("context_length", 0),
                 "processing_time": result.get(
