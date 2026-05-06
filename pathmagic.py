@@ -32,7 +32,7 @@ class context:  # noqa: N801
 
     def __enter__(self) -> None:
         syspathlst = [Path(p).resolve() for p in sys.path]
-        for inpath in ["..", ".", "src"]:
+        for inpath in [".", "src"]:
             if Path(inpath).resolve() not in syspathlst:
                 sys.path.append(inpath)
 
