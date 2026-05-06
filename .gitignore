@@ -2,6 +2,8 @@ log/
 data/
 *.ipynb
 !notebooks/*.ipynb
+!/pathmagic.ipynb
+!src/pathmagic.ipynb
 
 # Debug/scratch scripts
 test_qwen.py
