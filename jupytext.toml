@@ -1,0 +1,11 @@
+formats = "ipynb,py:percent"
+
+notebook_mapping = [
+  ["notebooks/config_manager.ipynb", "src/config_manager.py"],
+  ["notebooks/joplinai.ipynb",       "src/joplinai.py"],
+  ["notebooks/queryanswer.ipynb",    "src/queryanswer.py"],
+  ["notebooks/joplin_qa_api.ipynb",  "src/joplin_qa_api.py"],
+  ["notebooks/web_app.ipynb",        "src/web_app.py"],
+  ["notebooks/user_manager.ipynb",   "src/user_manager.py"],
+  ["notebooks/pathmagic.ipynb",      "src/pathmagic.py"],
+]

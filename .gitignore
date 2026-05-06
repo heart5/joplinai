@@ -1,6 +1,7 @@
 log/
 data/
 *.ipynb
+!notebooks/*.ipynb
 
 # Debug/scratch scripts
 test_qwen.py

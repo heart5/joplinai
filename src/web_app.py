@@ -39,26 +39,21 @@ from flask import (
     url_for,
 )
 
-# 导入自定义用户管理器
-try:
-    from func.jpfuncs import (
-        getinivaluefromcloud,
-        getnote,
-    )
-    from func.logme import log
-    from user_manager import USER_DB_PATH, USER_MANAGER
-except ImportError:
-    # 简易回退
-    USER_MANAGER = None
-    print("警告: user_manager 导入失败，将使用占位符")
 import pathmagic
 
 with pathmagic.context():
     from func.datatools import getkeysfromcloud
     from func.first import getdirmain
     from func.getid import getdeviceid, getdevicename, gethostuser
-    from func.jpfuncs import getinivaluefromcloud
+    from func.jpfuncs import getinivaluefromcloud, getnote
     from func.logme import log
+    # 导入自定义用户管理器
+    try:
+        from user_manager import USER_DB_PATH, USER_MANAGER
+    except ImportError:
+        # 简易回退
+        USER_MANAGER = None
+        print("警告: user_manager 导入失败，将使用占位符")
 
 # %% [markdown]
 # # 全局配置
