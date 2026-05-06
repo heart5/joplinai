@@ -12,11 +12,31 @@ All services are Flask apps run directly with `python <file>`. No Docker/contain
 
 | Service | File | Port | Purpose |
 |---------|------|------|---------|
-| Web Portal | `web_app.py` | 127.0.0.1:5001 | User login, Q&A chat UI, admin panel |
-| Q&A API | `joplin_qa_api.py` | dynamic (from config) | Internal HTTP API for vector search + LLM Q&A |
-| Vectorization CLI | `joplinai.py` | — | Chunks Joplin notes, generates embeddings, stores in ChromaDB |
+| Web Portal | `src/web_app.py` | 127.0.0.1:5001 | User login, Q&A chat UI, admin panel |
+| Q&A API | `src/joplin_qa_api.py` | dynamic (from config) | Internal HTTP API for vector search + LLM Q&A |
+| Vectorization CLI | `src/joplinai.py` | — | Chunks Joplin notes, generates embeddings, stores in ChromaDB |
 
-Data flow: Browser → `web_app.py` (Flask sessions) → HTTP (API key auth) → `joplin_qa_api.py` → ChromaDB + Ollama
+Data flow: Browser → `src/web_app.py` (Flask sessions) → HTTP (API key auth) → `src/joplin_qa_api.py` → ChromaDB + Ollama
+
+### Source Layout
+
+```
+src/              # .py source files (jupytext paired with notebooks/)
+├── config_manager.py
+├── joplinai.py
+├── joplin_qa_api.py
+├── queryanswer.py
+├── web_app.py
+├── user_manager.py
+└── pathmagic.py
+notebooks/        # .ipynb files (paired via jupytext.toml)
+aimod/            # AI core modules (embedding, vector DB, cache, etc.)
+func/             # Utility submodule (heart5/func)
+static/           # Frontend assets
+templates/        # Jinja2 templates
+data/             # Runtime data (gitignored)
+log/              # Logs (gitignored)
+```
 
 ### Core Modules (`aimod/`)
 
@@ -35,28 +55,30 @@ Separate git submodule (`heart5/func`). Key modules:
 - `logme.py` — Logging setup
 - `datatools.py` — Content hashing, cloud key retrieval
 
-### User System (`user_manager.py`)
+### User System (`src/user_manager.py`)
 
 SQLite-based (`data/joplinai_users.db`). Three roles: `admin`, `team_leader`, `team_member`. Notebook-level access control via `allowed_notebooks` JSON field.
 
 ## How to Run
 
+All commands run from the project root directory.
+
 ```bash
 # 1. Vectorize notes (CLI, run first to populate ChromaDB)
-python joplinai.py
+python src/joplinai.py
 
 # 2. Start Q&A API middleware (starts on configured port)
-python joplin_qa_api.py
+python src/joplin_qa_api.py
 
 # 3. Start web portal
-python web_app.py
+python src/web_app.py
 ```
 
 ## Key Code Patterns
 
-- **`pathmagic.context()`**: All modules use `with pathmagic.context():` to ensure the project root is on `sys.path` before importing project-local modules. Always wrap project imports in this context manager. Note: the implementation simply does `sys.path.extend(["."])` without restoration — ensure it's only used in top-level module imports, not inside functions that may be called repeatedly.
-- **Jupytext paired notebooks**: Every `.py` file is paired with a `.ipynb` via jupytext (percent format). Edits to the `.py` file are the source of truth. Current jupytext version: 1.19.1.
-- **Cloud config**: Configuration is fetched dynamically via `getinivaluefromcloud()` from an INI stored in a Joplin note. The `ConfigManager` singleton in `config_manager.py` handles hot-reloading (5-minute check interval).
+- **`pathmagic.context()`**: All modules use `with pathmagic.context():` to ensure both the project root and `src/` are on `sys.path` before importing project-local modules. Always wrap project imports in this context manager.
+- **Jupytext paired notebooks**: `.py` files in `src/` are paired with `.ipynb` files in `notebooks/` via `jupytext.toml`. Edits to the `.py` file are the source of truth. Current jupytext version: 1.19.1. To sync: `jupytext --sync jupytext.toml`.
+- **Cloud config**: Configuration is fetched dynamically via `getinivaluefromcloud()` from an INI stored in a Joplin note. The `ConfigManager` singleton in `src/config_manager.py` handles hot-reloading (5-minute check interval).
 - **Inter-service auth**: `web_app.py` calls `joplin_qa_api.py` using an API key from the shared cloud config (`X-API-Key` header).
 - **No tests directory**: No formal test framework. Test-adjacent files are scratchpad notebooks.
 
@@ -71,7 +93,7 @@ python web_app.py
 
 - Branch: `main`
 - Remote: `origin` (GitHub: `heart5/joplinai`)
-- `.gitignore` covers: `log/`, `data/`, `*.ipynb`, `__pycache__/`, debug scripts (`test_qwen.py`), backup files (`*.bak`), oversized favicon copies
+- `.gitignore` covers: `log/`, `data/`, `*.ipynb` (except `notebooks/*.ipynb`), `__pycache__/`, debug scripts (`test_qwen.py`), backup files (`*.bak`), oversized favicon copies
 
 ## Configuration
 

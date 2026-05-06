@@ -28,7 +28,9 @@ import sys
 # %%
 class context:
     def __enter__(self):
-        sys.path.extend(["."])
+        for p in [".", "src"]:
+            if p not in sys.path:
+                sys.path.insert(0, p)
 
     def __exit__(self, *args):
         pass
