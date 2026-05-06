@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code when working in this repository.
 
 ## Project Overview
 
@@ -54,16 +54,29 @@ python web_app.py
 
 ## Key Code Patterns
 
-- **`pathmagic.context()`**: All modules use `with pathmagic.context():` to ensure the project root is on `sys.path` before importing project-local modules. Always wrap project imports in this context manager.
-- **Jupytext paired notebooks**: Every `.py` file is paired with a `.ipynb` via jupytext (percent format). Edits to the `.py` file are the source of truth.
-- **Cloud config**: Configuration is fetched dynamically via `getinivaluefromcloud()` from an INI stored in a Joplin note. The `ConfigManager` singleton in `config_manager.py` handles hot-reloading.
+- **`pathmagic.context()`**: All modules use `with pathmagic.context():` to ensure the project root is on `sys.path` before importing project-local modules. Always wrap project imports in this context manager. Note: the implementation simply does `sys.path.extend(["."])` without restoration — ensure it's only used in top-level module imports, not inside functions that may be called repeatedly.
+- **Jupytext paired notebooks**: Every `.py` file is paired with a `.ipynb` via jupytext (percent format). Edits to the `.py` file are the source of truth. Current jupytext version: 1.19.1.
+- **Cloud config**: Configuration is fetched dynamically via `getinivaluefromcloud()` from an INI stored in a Joplin note. The `ConfigManager` singleton in `config_manager.py` handles hot-reloading (5-minute check interval).
 - **Inter-service auth**: `web_app.py` calls `joplin_qa_api.py` using an API key from the shared cloud config (`X-API-Key` header).
 - **No tests directory**: No formal test framework. Test-adjacent files are scratchpad notebooks.
+
+## Known Issues & Technical Debt
+
+- **`config_manager.py` `_generate_change_summary` bug**: The `old_config` parameter is not used — the function compares `new_config` against itself instead of the previous snapshot. Always returns empty change summary.
+- **`_qa_system_instances` memory leak**: Global dict in `joplin_qa_api.py` accumulates instances per session_id with no eviction policy. Long-running deployments should add TTL-based cleanup.
+- **`static/favicon.ico*`**: 3 domain-specific favicon copies at 3.5MB each. Only the default `favicon.ico` should be tracked; the `_for_*` variants are in `.gitignore`.
+- **`func/` submodule status**: The `func/` directory is a standalone git repo (`heart5/func`) not registered as a proper git submodule. The CLAUDE.md and `.gitignore` reflect this.
+
+## Git
+
+- Branch: `main`
+- Remote: `origin` (GitHub: `heart5/joplinai`)
+- `.gitignore` covers: `log/`, `data/`, `*.ipynb`, `__pycache__/`, debug scripts (`test_qwen.py`), backup files (`*.bak`), oversized favicon copies
 
 ## Configuration
 
 Main config stored in cloud-synced Joplin note (INI format). Local override: `data/joplinai.ini`. Key settings: Joplin API token, Ollama model name, embedding model, ChromaDB path, Q&A prompts, user session settings.
 
-## Dependencies (no requirements.txt)
+## Dependencies (no requirements.txt — install manually)
 
-Core: `flask`, `chromadb`, `ollama`, `requests`, `jinja2`
+Core: `flask`, `chromadb`, `ollama`, `requests`, `jinja2`, `werkzeug`
