@@ -6,7 +6,7 @@
 #       extension: .py
 #       format_name: percent
 #       format_version: '1.3'
-#       jupytext_version: 1.16.7
+#       jupytext_version: 1.19.1
 #   kernelspec:
 #     display_name: Python 3 (ipykernel)
 #     language: python
@@ -35,35 +35,37 @@ from typing import Any, Dict, List, Optional
 
 from flask import Flask, jsonify, request
 
-# 尝试导入项目核心模块
-try:
-    from config_manager import CONFIG_MANAGER
-    from func.datatools import getkeysfromcloud
-    from func.jpfuncs import (
-        getinivaluefromcloud,
-    )
-    from func.logme import log
-    from joplinai import CONFIG as CONFIG_JA
-    from queryanswer import CONFIG as CONFIG_QA
-    from queryanswer import JoplinQASystem, OptimizedJoplinQASystem
-except ImportError as e:
-    # 降级处理：配置基础日志并定义占位类
-    import logging as log_module
+# %%
+import pathmagic
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    )
-    log = logging.getLogger(__name__)
-    log.warning(f"部分模块导入失败，API基础功能可能受限: {e}")
+with pathmagic.context():
+    # 尝试导入项目核心模块
+    try:
+        from config_manager import CONFIG_MANAGER
+        from func.datatools import getkeysfromcloud
+        from func.jpfuncs import getinivaluefromcloud
+        from func.logme import log
+        from joplinai import CONFIG as CONFIG_JA
+        from queryanswer import CONFIG as CONFIG_QA
+        from queryanswer import JoplinQASystem, OptimizedJoplinQASystem
+    except ImportError as e:
+        # 降级处理：配置基础日志并定义占位类
+        import logging as log_module
 
-    # 仅为演示定义占位类，实际使用时请确保queryanswer.py可用
-    class JoplinQASystem:
-        def __init__(self, config):
-            pass
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        )
+        log = logging.getLogger(__name__)
+        log.warning(f"部分模块导入失败，API基础功能可能受限: {e}")
 
-        def ask(self, question):
-            return {"answer": "模块未正确导入", "is_based_on_notes": False}
+        # 仅为演示定义占位类，实际使用时请确保queryanswer.py可用
+        class JoplinQASystem:
+            def __init__(self, config):
+                pass
+
+            def ask(self, question):
+                return {"answer": "模块未正确导入", "is_based_on_notes": False}
 
 # %% [markdown]
 # # 全局配置

@@ -6,7 +6,7 @@
 #       extension: .py
 #       format_name: percent
 #       format_version: '1.3'
-#       jupytext_version: 1.16.7
+#       jupytext_version: 1.19.1
 #   kernelspec:
 #     display_name: Python 3 (ipykernel)
 #     language: python
@@ -27,8 +27,12 @@ import threading
 import time
 from typing import Any, Dict, Optional
 
-from func.jpfuncs import getinivaluefromcloud
-from func.logme import log
+# %%
+import pathmagic
+
+with pathmagic.context():
+    from func.jpfuncs import getinivaluefromcloud
+    from func.logme import log
 
 
 # %% [markdown]
