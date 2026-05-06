@@ -2,6 +2,15 @@ log/
 data/
 *.ipynb
 
+# Debug/scratch scripts
+test_qwen.py
+
+# Backup files
+*.bak
+
+# Oversized static assets (domain-specific favicon copies)
+static/favicon.ico_for_*
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
