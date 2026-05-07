@@ -12,11 +12,11 @@ All services are Flask apps run directly with `python <file>`. No Docker/contain
 
 | Service | File | Port | Purpose |
 |---------|------|------|---------|
-| Web Portal | `src/web_app.py` | 127.0.0.1:5001 | User login, Q&A chat UI, admin panel |
+| Web Portal | `joplin_web_app.py` | 127.0.0.1:5001 | User login, Q&A chat UI, admin panel |
 | Q&A API | `src/joplin_qa_api.py` | dynamic (from config) | Internal HTTP API for vector search + LLM Q&A |
 | Vectorization CLI | `src/joplinai.py` | — | Chunks Joplin notes, generates embeddings, stores in ChromaDB |
 
-Data flow: Browser → `src/web_app.py` (Flask sessions) → HTTP (API key auth) → `src/joplin_qa_api.py` → ChromaDB + Ollama
+Data flow: Browser → `joplin_web_app.py` (Flask sessions) → HTTP (API key auth) → `src/joplin_qa_api.py` → ChromaDB + Ollama
 
 ### Source Layout
 
@@ -26,7 +26,7 @@ src/              # .py source files (jupytext paired with notebooks/)
 ├── joplinai.py
 ├── joplin_qa_api.py
 ├── queryanswer.py
-├── web_app.py
+├── joplin_web_app.py
 ├── user_manager.py
 └── pathmagic.py
 notebooks/        # .ipynb files (paired via jupytext.toml)
@@ -71,7 +71,7 @@ python src/joplinai.py
 python src/joplin_qa_api.py
 
 # 3. Start web portal
-python src/web_app.py
+python joplin_web_app.py
 ```
 
 ## Key Code Patterns
@@ -79,7 +79,7 @@ python src/web_app.py
 - **`pathmagic.context()`**: All modules use `with pathmagic.context():` to ensure both the project root and `src/` are on `sys.path` before importing project-local modules. Always wrap project imports in this context manager.
 - **Jupytext paired notebooks**: `.py` files in `src/` are paired with `.ipynb` files in `notebooks/` via `jupytext.toml`. Edits to the `.py` file are the source of truth. Current jupytext version: 1.19.1. To sync: `jupytext --sync jupytext.toml`.
 - **Cloud config**: Configuration is fetched dynamically via `getinivaluefromcloud()` from an INI stored in a Joplin note. The `ConfigManager` singleton in `src/config_manager.py` handles hot-reloading (5-minute check interval).
-- **Inter-service auth**: `web_app.py` calls `joplin_qa_api.py` using an API key from the shared cloud config (`X-API-Key` header).
+- **Inter-service auth**: `joplin_web_app.py` calls `joplin_qa_api.py` using an API key from the shared cloud config (`X-API-Key` header).
 - **No tests directory**: No formal test framework. Test-adjacent files are scratchpad notebooks.
 
 ## Known Issues & Technical Debt

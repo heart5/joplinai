@@ -5,6 +5,6 @@ notebook_mapping = [
   ["notebooks/joplinai.ipynb",          "joplinai.py"],
   ["notebooks/queryanswer.ipynb",       "src/queryanswer.py"],
   ["notebooks/joplin_qa_api.ipynb",     "joplin_qa_api.py"],
-  ["notebooks/web_app.ipynb",           "web_app.py"],
+  ["notebooks/joplin_web_app.ipynb",    "joplin_web_app.py"],
   ["notebooks/user_manager.ipynb",      "src/user_manager.py"],
 ]
