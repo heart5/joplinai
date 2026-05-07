@@ -98,6 +98,18 @@ python joplin_web_app.py
 
 Main config stored in cloud-synced Joplin note (INI format). Local override: `data/joplinai.ini`. Key settings: Joplin API token, Ollama model name, embedding model, ChromaDB path, Q&A prompts, user session settings.
 
+### Remote Joplin fallback
+
+When local Joplin server is unavailable, `jpfuncs.getapi()` can fall back to a remote Joplin server. Configure in `data/joplinai.ini`:
+
+```ini
+[joplin]
+fallback_url = http://<remote-host>:41184
+fallback_token = <remote-api-token>
+```
+
+This is useful in multi-server deployments for resilience — if one machine's Joplin process is down, joplinai can still function by hitting the other server's Joplin API.
+
 ## Dependencies (no requirements.txt — install manually)
 
 Core: `flask`, `chromadb`, `ollama`, `requests`, `jinja2`, `werkzeug`
