@@ -48,7 +48,7 @@ log/              # Logs (gitignored)
 
 ### Utility Submodule (`func/`)
 
-Separate git submodule (`heart5/func`). Key modules:
+Proper git submodule registered in `.gitmodules` pointing to `heart5/func`. Clone with `git submodule update --init` to fetch. Key modules:
 - `jpfuncs.py` — Joplin API wrapper (CRUD for notes, notebooks, tags)
 - `configpr.py` — INI config reader
 - `first.py` — Project root detection (looks for `rootfile` marker)
@@ -87,7 +87,6 @@ python joplin_web_app.py
 - **`config_manager.py` `_generate_change_summary` bug**: The `old_config` parameter is not used — the function compares `new_config` against itself instead of the previous snapshot. Always returns empty change summary.
 - **`_qa_system_instances` memory leak**: Global dict in `joplin_qa_api.py` accumulates instances per session_id with no eviction policy. Long-running deployments should add TTL-based cleanup.
 - **`static/favicon.ico*`**: 3 domain-specific favicon copies at 3.5MB each. Only the default `favicon.ico` should be tracked; the `_for_*` variants are in `.gitignore`.
-- **`func/` submodule status**: The `func/` directory is a standalone git repo (`heart5/func`) not registered as a proper git submodule. The CLAUDE.md and `.gitignore` reflect this.
 
 ## Git
 
