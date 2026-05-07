@@ -407,7 +407,7 @@ def activate_chat_session(session_id):
 # ### restore_history_for_session(session_id: str)
 
 # %%
-# web_app.py 中添加
+# joplin_web_app.py 中添加
 def restore_history_for_session(session_id: str):
     """从 qa_history 数据库加载该会话的历史记录，并恢复到 QA API 内存"""
     try:
@@ -452,7 +452,7 @@ def restore_history_for_session(session_id: str):
 # ### api_get_available_notebooks()
 
 # %%
-# web_app.py 中添加以下路由
+# joplin_web_app.py 中添加以下路由
 @app.route("/api/admin/available-notebooks", methods=["GET"])
 @login_required
 @admin_required
