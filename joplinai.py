@@ -254,6 +254,21 @@ def process_note_chunks(
             log.warning(f"笔记《{note.title}》拆分不出有效内容块，跳过。")
             return {"success": False, "chunk_stats": {}}
 
+        # 检查 DeepSeek 增强是否完成（启用了但所有块皆未成功增强）
+        deepseek_enabled = config.get("enable_deepseek_summary") or config.get("enable_deepseek_tags")
+        deepseek_missing = False
+        if deepseek_enabled:
+            deepseek_enhanced_flags = [
+                c.get("metadata", {}).get("deepseek_enhanced", False)
+                for c in chunk_dicts
+            ]
+            deepseek_missing = not any(deepseek_enhanced_flags)
+            if deepseek_missing:
+                log.warning(
+                    f"笔记《{note.title}》DeepSeek 增强未完成"
+                    f"（共 {len(chunk_dicts)} 个块全部失败），将在下次运行时重试。"
+                )
+
         # 3. 遍历新分出的每个块，决定是否需要处理
         chunks_to_upsert = []  # 存放需要更新/插入的块信息
         new_chunk_hashes = {}  # 记录本次处理所有新块的 预期块ID -> 内容哈希
@@ -404,6 +419,7 @@ def process_note_chunks(
             # 返回详细的统计字典，而不仅仅是 True
             return {
                 "success": True,
+                "deepseek_missing": deepseek_missing,  # DeepSeek 增强是否缺失
                 "chunk_stats": {
                     "total_chunks": len(chunk_dicts),
                     "upserted": successful_upserts,
@@ -544,12 +560,17 @@ def process_notes_incremental(notebook_title: str, config: Dict):
             last_update_time = last_state.get("update_time")
             last_content_hash = last_state.get("content_hash")
             last_meta_hash = last_state.get("meta_hash")
+            last_deepseek_missing = last_state.get("deepseek_missing", True)
 
             # 如果状态文件是旧的（没有meta_hash字段），则视为需要更新元数据
             needs_meta_update = ("meta_hash" not in last_state)
 
-            # 判断是否需要处理：强制更新 或 更新时间变化 或 内容哈希变化 或 元数据哈希变化
-            if force_update or needs_meta_update or not (
+            # DeepSeek 增强未完成时也需要强制重试
+            deepseek_enabled = config.get("enable_deepseek_summary") or config.get("enable_deepseek_tags")
+            needs_deepseek_retry = deepseek_enabled and last_deepseek_missing
+
+            # 判断是否需要处理：强制更新 或 元数据缺失 或 DeepSeek缺失 或 内容变更
+            if force_update or needs_meta_update or needs_deepseek_retry or not (
                 last_update_time == current_update_time
                 and last_content_hash == current_content_hash
                 and last_meta_hash == current_meta_hash
@@ -557,6 +578,7 @@ def process_notes_incremental(notebook_title: str, config: Dict):
                 log.info(
                     f"笔记《{note.title}》需要更新。"
                     f"原因: force={force_update}, meta_missing={needs_meta_update}, "
+                    f"deepseek_missing={needs_deepseek_retry}, "
                     f"时间变化={last_update_time != current_update_time}, "
                     f"内容变化={last_content_hash != current_content_hash}, "
                     f"元数据变化={last_meta_hash != current_meta_hash}"
@@ -603,6 +625,7 @@ def process_notes_incremental(notebook_title: str, config: Dict):
                         "content_hash": content_hash,
                         "meta_hash": meta_hash,
                         "processed_time": datetime.now().timestamp(),
+                        "deepseek_missing": result_dict.get("deepseek_missing", False),
                     }
                     updated_count += 1
                 else:

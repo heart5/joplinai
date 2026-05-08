@@ -804,11 +804,15 @@ class EmbeddingGenerator:
 
     # %%
     def enhance_by_deepseek_for_summary_tags(self, chunk_content: str, note_tags: str, config: Dict):
-        """DeepSeek 官方模型增强生成小结和标签（和笔记既有标签进行融合）"""
+        """DeepSeek 官方模型增强生成小结和标签（和笔记既有标签进行融合）
+
+        Returns:
+            enhanced_metadata: 增强后的元数据字典，包含 deepseek_enhanced 标记
+        """
 
         # log.info(get_cache_manager().get_stats())
 
-        enhanced_metadata = {}
+        enhanced_metadata = {"deepseek_enhanced": False}
         if config["enable_deepseek_summary"]:
             summary = deepseek_process_note(
                 chunk_content,
@@ -816,6 +820,8 @@ class EmbeddingGenerator:
                 model=config.get("deepseek_chat_model", "deepseek-chat"),
                 use_cache=True,  # 启用缓存
             )
+            if summary:
+                enhanced_metadata["deepseek_enhanced"] = True
             enhanced_metadata["chunk_summary"] = summary or ""  # 存入摘要
 
         if config["enable_deepseek_tags"]:
@@ -825,10 +831,12 @@ class EmbeddingGenerator:
                 model=config.get("deepseek_chat_model", "deepseek-chat"),
                 use_cache=True,  # 启用缓存
             )
+            if tags_str:
+                enhanced_metadata["deepseek_enhanced"] = True
             deepseek_tags = [t.strip() for t in tags_str.split(",")] if tags_str else []
             # 合并本地标签与DeepSeek标签（去重）
             original_tags = [t.strip() for t in note_tags.split(",")] if note_tags else []
-            enhanced_tags = list(set(original_tags+ deepseek_tags))
+            enhanced_tags = list(set(original_tags + deepseek_tags))
             enhanced_metadata["tags"] = ",".join(enhanced_tags)
 
         return enhanced_metadata
