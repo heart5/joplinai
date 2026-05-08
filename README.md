@@ -73,6 +73,17 @@ python joplin_web_app.py
 - **配置**: Joplin 云端笔记（INI 格式），支持热更新
 - **编辑模式**: Jupytext 配对笔记本（`jupytext.toml` 映射 `src/` ↔ `notebooks/`，percent 格式）
 
+## 最近更新
+
+```
+afb22a3  refactor: 统一迭代分块策略，废弃二次拆分和防过碎逻辑
+2ca3439  fix: 高命中分块建议按推荐尺寸聚合，去除无意义哈希
+bba352e  fix: 缓存分析报告表头与数据内容对应优化
+4846d36  fix: 缓存分析报告多项内容优化
+7a37e51  fix: DeepSeek 缓存报告标题不贴切且日期不更新
+85598aa  fix: 多项 bug 修复与代码完善
+```
+
 ## 许可证
 
 本项目基于 [MIT License](LICENSE) 许可。
