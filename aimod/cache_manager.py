@@ -885,15 +885,23 @@ class CacheStatsAnalyzer:
             FROM processing_cache
             WHERE task = 'adaptive_chunk_size'
             GROUP BY access_recency
+            ORDER BY
+                CASE access_recency
+                    WHEN '1天内' THEN 1
+                    WHEN '7天内' THEN 2
+                    WHEN '30天内' THEN 3
+                    ELSE 4
+                END
         """)
         effectiveness["access_recency"] = [dict(row) for row in self.cursor.fetchall()]
 
         # 4. 高价值缓存（命中次数最多的分块建议）
         self.cursor.execute("""
             SELECT
-                substr(cache_key, 1, 50) as sample_key,
+                substr(result, 1, 50) as content_preview,
                 total_hits,
-                created_at
+                created_at,
+                last_accessed
             FROM processing_cache
             WHERE task = 'adaptive_chunk_size'
             ORDER BY total_hits DESC
@@ -913,13 +921,14 @@ class CacheStatsAnalyzer:
 
         # 高命中缓存（top 10）
         self.cursor.execute("""
-            SELECT 
+            SELECT
                 cache_key,
                 task,
                 total_hits,
                 hit_count,
                 created_at,
-                last_accessed
+                last_accessed,
+                substr(result, 1, 30) as result_preview
             FROM processing_cache
             ORDER BY total_hits DESC
             LIMIT 10
@@ -1071,7 +1080,7 @@ class CacheReportGenerator:
         md_lines = []
 
         # 标题和元信息
-        md_lines.append(f"# 📊 缓存使用统计报告")
+        md_lines.append(f"# 📊 DeepSeek 缓存分析报告")
         md_lines.append(f"**生成时间**: {report['generated_at']}")
         md_lines.append(f"**数据库**: `{report['database_path']}`")
         md_lines.append("")
@@ -1151,16 +1160,11 @@ class CacheReportGenerator:
         md_lines.append("")
 
         md_lines.append("### 高命中缓存（Top 10）")
-        md_lines.append("| 缓存键（前20字符） | 任务 | 总命中 | 周期命中 | 创建时间 |")
-        md_lines.append("|-------------------|------|--------|----------|----------|")
+        md_lines.append("| 内容预览 | 任务 | 总命中 | 周期命中 | 创建时间 | 最近命中 |")
+        md_lines.append("|----------|------|--------|----------|----------|----------|")
         for hit in perf["top_hitters"][:10]:
-            short_key = (
-                hit["cache_key"][:20] + "..."
-                if len(hit["cache_key"]) > 20
-                else hit["cache_key"]
-            )
             md_lines.append(
-                f"| `{short_key}` | {hit['task']} | {hit['total_hits']} | {hit['hit_count']} | {hit['created_at'][:10]} |"
+                f"| `{hit['result_preview']}` | {hit['task']} | {hit['total_hits']} | {hit['hit_count']} | {hit['created_at'][:10]} | {hit['last_accessed'][:10]} |"
             )
         md_lines.append("")
 
@@ -1174,12 +1178,12 @@ class CacheReportGenerator:
             md_lines.append("### 每日新增缓存")
             md_lines.append("| 日期 | 新增条目 | 累计总数 |")
             md_lines.append("|------|----------|----------|")
-            for i, daily in enumerate(growth["daily_growth"][-10:]):  # 最近10天
-                cum = (
-                    growth["cumulative_growth"][i]["cumulative"]
-                    if i < len(growth["cumulative_growth"])
-                    else "N/A"
-                )
+            # 建立日期→累计值的查找字典
+            cumulative_by_date = {
+                c["date"]: c["cumulative"] for c in growth["cumulative_growth"]
+            }
+            for daily in reversed(growth["daily_growth"][-10:]):  # 最近10天，倒序（最新在前）
+                cum = cumulative_by_date.get(daily["date"], "N/A")
                 md_lines.append(f"| {daily['date']} | {daily['new_entries']} | {cum} |")
 
         # === 【新增章节】自适应分块缓存有效性分析 ===
@@ -1199,10 +1203,10 @@ class CacheReportGenerator:
 
         if adaptive_eff['top_hit_entries']:
             md_lines.append("### 高命中分块建议（Top 5）")
-            md_lines.append("| 缓存键样例 | 总命中 | 创建时间 |")
-            md_lines.append("|------------|--------|----------|")
+            md_lines.append("| 内容预览 | 总命中 | 创建时间 | 最近命中 |")
+            md_lines.append("|----------|--------|----------|----------|")
             for entry in adaptive_eff['top_hit_entries']:
-                md_lines.append(f"| `{entry['sample_key']}` | {entry['total_hits']} | {entry['created_at'][:10]} |")
+                md_lines.append(f"| `{entry['content_preview']}` | {entry['total_hits']} | {entry['created_at'][:10]} | {entry['last_accessed'][:10]} |")
 
         md_lines.append("") # 空行
         # === 新增章节结束 ===
