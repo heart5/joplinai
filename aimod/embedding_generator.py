@@ -157,7 +157,7 @@ class AdaptiveChunkOptimizer:
         if start_len is None:
             start_len = int(self.embedding_generator.chunk_size * 0.8)
         max_len = len(text)  # 理论最大值
-        growth_factor = 1.05  # 每次增长倍数
+        growth_factor = 1.1  # 每次增长倍数
         current_safe_len = start_len
 
         # 2. 指数增长阶段：快速找到失败边界
@@ -190,11 +190,18 @@ class AdaptiveChunkOptimizer:
                     # 遇到长度错误，停止增长，current_safe_len 即为最后一次成功的长度
                     break
                 else:
-                    # 其他类型的错误（如网络问题、参数错误），保守处理，停止探测并使用默认 chunk_size
-                    log.warning(f"  探测过程中遇到错误，停止探测并使用默认值: {e}")
-                    current_safe_len = (
-                        self.embedding_generator.chunk_size
-                    )  # 修正：失败时直接回退到全局默认值
+                    # 其他类型的错误（如Ollama超时、网络问题等）
+                    if test_len == start_len:
+                        # 首次探测即失败，回退到默认值
+                        current_safe_len = self.embedding_generator.chunk_size
+                        log.warning(
+                            f"  首次探测即失败，回退到默认 chunk_size={current_safe_len}: {e}"
+                        )
+                    else:
+                        # 已有成功探测，保留最后成功值，不浪费已付出的探测成本
+                        log.warning(
+                            f"  探测遇到非长度错误，保留最近安全值 {current_safe_len}: {e}"
+                        )
                     break
 
         # 3. 确保结果在合理范围内
@@ -1051,10 +1058,16 @@ class EmbeddingGenerator:
             # 复用现有标点感知切分逻辑找最佳切分位置
             best_split = ctx_splitter._find_best_split_position(window_text)
 
-            if best_split >= MIN_SIZE:
+            # 最小块尺寸保护：句子边界太靠前时用 margin 截断，避免过短块
+            MIN_FRACTION = 0.4
+            if best_split >= max(MIN_SIZE, int(margin * MIN_FRACTION)):
                 actual_chunk = remaining[:best_split]
                 chunk_end = pos + best_split
             else:
+                log.debug(
+                    f"  句子边界({best_split}字符)过短(阈值{max(MIN_SIZE, int(margin * MIN_FRACTION))})"
+                    f"，改用 margin={margin} 截断"
+                )
                 actual_chunk = window_text
                 chunk_end = pos + margin
 
