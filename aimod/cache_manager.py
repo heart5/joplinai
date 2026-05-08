@@ -588,7 +588,7 @@ DEFAULT_CACHE_DB = getdirmain() / "data" / ".deepseek_cache" / "deepseek_cache.d
 
 # 报告笔记配置
 REPORT_NOTEBOOK = "ewmobile"  # 报告保存的笔记本
-REPORT_NOTE_TITLE_PREFIX = "📊 缓存使用统计报告"  # 报告笔记标题前缀
+REPORT_NOTE_TITLE_PREFIX = "📊 DeepSeek 缓存分析报告"  # 报告笔记标题前缀
 
 # 统计时间范围配置
 TIME_WINDOWS = {
@@ -1266,7 +1266,7 @@ class CacheReportGenerator:
     ) -> bool:
         """保存报告到 Joplin 笔记"""
         try:
-            from func.jpfuncs import createnote, searchnotes, updatenote_body, searchnotebook
+            from func.jpfuncs import createnote, searchnotes, updatenote_body, updatenote_title, searchnotebook
 
             # 生成报告内容
             report_content = self.generate_markdown_report()
@@ -1285,10 +1285,11 @@ class CacheReportGenerator:
 
             success = False
             if existing_notes:
-                # 更新现有笔记
+                # 更新现有笔记（正文和标题）
                 note = existing_notes[0]
                 updatenote_body(note.id, report_content)
-                log.info(f"已更新缓存统计报告笔记: {title}")
+                updatenote_title(note.id, title)
+                log.info(f"已更新 DeepSeek 缓存分析报告笔记: {title}")
                 success = True
             else:
                 # 创建新笔记
