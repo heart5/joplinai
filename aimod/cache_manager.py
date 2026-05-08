@@ -895,16 +895,15 @@ class CacheStatsAnalyzer:
         """)
         effectiveness["access_recency"] = [dict(row) for row in self.cursor.fetchall()]
 
-        # 4. 高价值缓存（命中次数最多的分块建议）
+        # 4. 高命中分块建议（按推荐尺寸聚合，展示哪种尺寸最常用）
         self.cursor.execute("""
             SELECT
-                cache_key,
                 result as chunk_size,
-                total_hits,
-                created_at,
-                last_accessed
+                COUNT(*) as entry_count,
+                SUM(total_hits) as total_hits
             FROM processing_cache
             WHERE task = 'adaptive_chunk_size'
+            GROUP BY result
             ORDER BY total_hits DESC
             LIMIT 5
         """)
@@ -1203,12 +1202,11 @@ class CacheReportGenerator:
             md_lines.append(f"| {recency['access_recency']} | {recency['count']} |")
 
         if adaptive_eff['top_hit_entries']:
-            md_lines.append("### 高命中分块建议（Top 5）")
-            md_lines.append("| 内容哈希 | 推荐分块 | 总命中 | 创建时间 | 最近命中 |")
-            md_lines.append("|----------|----------|--------|----------|----------|")
+            md_lines.append("### 高命中分块建议（按推荐尺寸聚合 Top 5）")
+            md_lines.append("| 推荐分块 | 覆盖条目 | 总命中 |")
+            md_lines.append("|----------|----------|--------|")
             for entry in adaptive_eff['top_hit_entries']:
-                content_hash = entry['cache_key'].rsplit("_", 1)[0][:12]
-                md_lines.append(f"| `{content_hash}` | {entry['chunk_size']}字 | {entry['total_hits']} | {entry['created_at'][:10]} | {entry['last_accessed'][:10]} |")
+                md_lines.append(f"| {entry['chunk_size']}字 | {entry['entry_count']} 条 | {entry['total_hits']} |")
 
         md_lines.append("") # 空行
         # === 新增章节结束 ===
