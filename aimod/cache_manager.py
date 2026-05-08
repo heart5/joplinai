@@ -898,7 +898,8 @@ class CacheStatsAnalyzer:
         # 4. 高价值缓存（命中次数最多的分块建议）
         self.cursor.execute("""
             SELECT
-                substr(result, 1, 50) as content_preview,
+                cache_key,
+                result as chunk_size,
                 total_hits,
                 created_at,
                 last_accessed
@@ -1195,18 +1196,19 @@ class CacheReportGenerator:
         md_lines.append(f"- **估计节省探测次数**: {adaptive_eff['estimated_saved_probes']}")
         md_lines.append(f"- **估计节省时间**: ~{adaptive_eff['estimated_saved_time_hours']} 小时")
 
-        md_lines.append("### 缓存访问新鲜度")
-        md_lines.append("| 最后访问时间 | 条目数 |")
-        md_lines.append("|--------------|--------|")
+        md_lines.append("### 缓存访问新鲜度（互斥时段）")
+        md_lines.append("| 距最后命中时间 | 条目数 |")
+        md_lines.append("|----------------|--------|")
         for recency in adaptive_eff.get('access_recency', []):
             md_lines.append(f"| {recency['access_recency']} | {recency['count']} |")
 
         if adaptive_eff['top_hit_entries']:
             md_lines.append("### 高命中分块建议（Top 5）")
-            md_lines.append("| 内容预览 | 总命中 | 创建时间 | 最近命中 |")
-            md_lines.append("|----------|--------|----------|----------|")
+            md_lines.append("| 内容哈希 | 推荐分块 | 总命中 | 创建时间 | 最近命中 |")
+            md_lines.append("|----------|----------|--------|----------|----------|")
             for entry in adaptive_eff['top_hit_entries']:
-                md_lines.append(f"| `{entry['content_preview']}` | {entry['total_hits']} | {entry['created_at'][:10]} | {entry['last_accessed'][:10]} |")
+                content_hash = entry['cache_key'].rsplit("_", 1)[0][:12]
+                md_lines.append(f"| `{content_hash}` | {entry['chunk_size']}字 | {entry['total_hits']} | {entry['created_at'][:10]} | {entry['last_accessed'][:10]} |")
 
         md_lines.append("") # 空行
         # === 新增章节结束 ===
