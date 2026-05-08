@@ -919,13 +919,12 @@ def main():
             "joplinai", "force_update"
         )
 
-    # 处理笔记本列表字符串
+    # 处理笔记本列表字符串（优先级: CLI参数 > 云端配置 > 默认值）
+    notebook_titles_str = dynamic_config["notebook_titles"]
     if args.notebook_titles != dynamic_config["notebook_titles"]:
         notebook_titles_str = args.notebook_titles
-    elif notebook_titles_str := getinivaluefromcloud("joplinai", "imp_nbs"):
-        pass
-    else:
-        notebook_titles_str = dynamic_config["notebook_titles"]
+    elif cloud_imp_nbs := getinivaluefromcloud("joplinai", "imp_nbs"):
+        notebook_titles_str = cloud_imp_nbs
     dynamic_config["notebook_titles"] = notebook_titles_str
     log.info(
         f"动态配置：模型={dynamic_config['embedding_model']}, \

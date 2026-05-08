@@ -114,18 +114,27 @@ class ConfigManager:
             fresh_fingerprint = self._compute_fingerprint(fresh_config)
 
             if fresh_fingerprint != self.config_fingerprint:
+                is_initial = self.config_fingerprint is None
                 old_fp = (
-                    self.config_fingerprint[:8] if self.config_fingerprint else "None"
+                    "None" if is_initial
+                    else self.config_fingerprint[:8]
                 )
                 new_fp = fresh_fingerprint[:8]
 
+                # 保存旧快照后再更新，确保变更摘要能正确对比
+                old_snapshot = self.current_config_snapshot.copy()
                 self.current_config_snapshot = fresh_config
                 self.config_fingerprint = fresh_fingerprint
 
-                log.warning(
-                    f"🔁 云端配置已变更！指纹: {old_fp}... -> {new_fp}...\n"
-                    f"变更摘要: {self._generate_change_summary(fresh_config, self.current_config_snapshot)}"
-                )
+                if is_initial:
+                    log.info(
+                        f"云端配置初始加载完成，指纹: {new_fp}..."
+                    )
+                else:
+                    log.warning(
+                        f"云端配置已变更！指纹: {old_fp}... -> {new_fp}...\n"
+                        f"变更摘要: {self._generate_change_summary(fresh_config, old_snapshot)}"
+                    )
                 return True
             return False
 

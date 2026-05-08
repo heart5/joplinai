@@ -67,6 +67,10 @@ with pathmagic.context():
             def ask(self, question):
                 return {"answer": "模块未正确导入", "is_based_on_notes": False}
 
+        # 降级：确保 DEFAULT_CONFIG 不会 NameError
+        CONFIG_JA = {}
+        CONFIG_QA = {}
+
 # %% [markdown]
 # # 全局配置
 
@@ -87,6 +91,32 @@ _qa_system_lock = threading.Lock()
 # 会话历史存储 {session_id: [history_list]}
 _session_histories = {}
 _history_lock = threading.Lock()
+
+# 实例清理配置（防止内存泄漏）
+_INSTANCE_TTL = 10800  # 实例闲置超过3小时后可被清理
+_INSTANCE_CLEANUP_INTERVAL = 600  # 每10分钟检查一次
+_last_cleanup_time = 0
+
+
+def _cleanup_stale_instances():
+    """清理过期的问答系统实例"""
+    global _last_cleanup_time
+    now = time.time()
+    if now - _last_cleanup_time < _INSTANCE_CLEANUP_INTERVAL:
+        return
+    _last_cleanup_time = now
+
+    stale = [
+        sid
+        for sid, data in list(_qa_system_instances.items())
+        if now - data.get("created_at", 0) > _INSTANCE_TTL
+        and sid != "health_check"
+    ]
+    with _qa_system_lock:
+        for sid in stale:
+            _qa_system_instances.pop(sid, None)
+    if stale:
+        log.debug(f"清理 {len(stale)} 个过期问答系统实例")
 
 # %% [markdown]
 # # Flask应用
@@ -127,6 +157,9 @@ def get_qa_system_for_session(
 ) -> OptimizedJoplinQASystem:
     """获取或创建指定会话的问答系统实例（支持云端配置热更新）"""
     global _qa_system_instances
+
+    # 0. 定期清理过期实例
+    _cleanup_stale_instances()
 
     # 1. 获取最新的云端配置快照及其指纹
     cloud_config_snapshot = CONFIG_MANAGER.get_config_snapshot()
@@ -461,7 +494,7 @@ def api_get_stats():
 def api_health():
     """健康检查端点"""
     try:
-        qa_system = get_qa_system()
+        qa_system = get_qa_system_for_session("health_check")
         # 简单检查向量数据库连接
         stats = (
             qa_system.get_statistics() if hasattr(qa_system, "get_statistics") else {}

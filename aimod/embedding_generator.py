@@ -717,7 +717,6 @@ class EmbeddingGenerator:
                 512  # 512 token，中文是一对一，应为是一对三或者四，实际中文为主
             )
             return
-            return
         elif self.model_name == "qwen:1.8b":
             self.chunk_size = 4000  # 2048 token × 3 × 0.8 = 4916，取4000
             return
@@ -1405,7 +1404,7 @@ class EmbeddingGenerator:
                 )
             except Exception as e:
                 log.error(
-                    f"对笔记《{note.title}》的块 {block_number} "
+                    f"对笔记《{note_title}》的块 {block_number} "
                     f"（长度：{len(chunk_content)}）进行DeepSeek增强时失败: {e}",
                     exc_info=True,
                 )

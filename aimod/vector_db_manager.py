@@ -67,7 +67,6 @@ class VectorDBManager:
     def __init__(self, db_path: Path, embedding_model: str, for_creation: bool = False):
         """初始化向量数据库管理器"""
         try:
-            import pathmagic
             with pathmagic.context():
                 from joplinai import CONFIG as CONFIG_JA
             config = CONFIG_JA

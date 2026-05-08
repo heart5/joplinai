@@ -147,39 +147,6 @@ class UserManager:
             salt = "joplinai_salt_1232024"  # 应改为从配置文件读取
         return hashlib.sha256((salt + password).encode()).hexdigest()
 
-# %% [markdown]
-# ## create_user(self, username: str, password: str, display_name: str, role: str = "colleague") -> bool
-
-    # %%
-    def create_user(
-        self, username: str, password: str, display_name: str, role: str = "colleague"
-    ) -> bool:
-        """创建新用户"""
-        if role not in ["admin", "colleague"]:
-            return False
-
-        password_hash = self._hash_password(password)
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                INSERT INTO users (username, password_hash, display_name, role)
-                VALUES (?, ?, ?, ?)
-            """,
-                (username, password_hash, display_name, role),
-            )
-            conn.commit()
-            conn.close()
-            log.info(f"用户创建成功: {username}({display_name}), 角色: {role}")
-            return True
-        except sqlite3.IntegrityError:
-            log.warning(f"用户名已存在: {username}")
-            return False
-
-# %% [markdown]
-# ## verify_user(self, username: str, password: str) -> Optional[Dict]
-
     # %%
     def verify_user(self, username: str, password: str) -> Optional[Dict]:
         """验证用户凭据，返回用户信息字典"""
@@ -892,8 +859,8 @@ class UserManager:
                 log.warning(f"尝试删除不存在的用户: {target_username}")
                 return False
             
-            user_id = row
-            
+            user_id = row[0]
+
             # 1. 删除该用户的所有问答会话（chat_sessions 会级联删除 qa_history，但显式删除更可靠）
             cursor.execute("DELETE FROM qa_history WHERE session_id IN (SELECT session_id FROM chat_sessions WHERE user_id = ?)", (user_id,))
             cursor.execute("DELETE FROM chat_sessions WHERE user_id = ?", (user_id,))

@@ -793,6 +793,7 @@ class OptimizedJoplinQASystem(JoplinQASystem):
         history_parts = []
         # 添加对话历史（如果存在）
         if self.conversation_history:
+            history_parts.append("对话历史：")
             for hist in self.conversation_history[-3:]:  # 最近3条历史
                 history_parts.append(f"问: {hist['question']}")
                 history_parts.append(f"答: {hist['answer'][:200]}...")
@@ -802,7 +803,6 @@ class OptimizedJoplinQASystem(JoplinQASystem):
     相关笔记内容：
     {chr(10).join(note_contexts)}
 
-    对话历史：
     {chr(10).join(history_parts)}
 
     我的问题：{question}
@@ -1099,7 +1099,7 @@ class OptimizedJoplinQASystem(JoplinQASystem):
             )
             response.raise_for_status()
 
-            answer = response.json()["choices"]["message"]["content"].strip()
+            answer = response.json()["choices"][0]["message"]["content"].strip()
             return answer
 
         except Exception as e:
