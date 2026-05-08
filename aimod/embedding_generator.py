@@ -1639,7 +1639,7 @@ class EmbeddingGenerator:
 
         # 在尝试本地Ollama嵌入前，对文本进行一次嵌入预处理
         processed_text = self._preprocess_text_for_embedding(text)
-        max_retries = 3
+        max_retries = 5
         for attempt in range(1, max_retries + 1):
             try:
                 # 调用安全的嵌入生成
@@ -1649,15 +1649,28 @@ class EmbeddingGenerator:
                     break
             except Exception as e:
                 if attempt == max_retries:
-                    # 尝试到最后一次，则进行二次分块，兜底
-                    log.info(
-                        f"笔记《{source_note_title}》的文本块【{chunk_index}】"
-                        f"长度为({len(text)})，尝试嵌入操作到了第({attempt})次，仍然失败"
-                        "，开始执行二次分块嵌入……"
+                    # 多次重试仍失败，判断是否为长度错误
+                    error_msg = str(e).lower()
+                    is_length_error = any(
+                        kw in error_msg
+                        for kw in ["context length", "input length", "too long", "exceed"]
                     )
-                    embedding = self._get_rechunked_embedding(
-                        processed_text, safe_subchunk_size=int(self.chunk_size * 0.5)
-                    )
+                    if is_length_error:
+                        # 长度超限才触发重分块（此时块已在安全尺寸内，用 chunk_size 即可）
+                        log.info(
+                            f"笔记《{source_note_title}》的文本块【{chunk_index}】"
+                            f"长度为({len(text)})，嵌入超长，执行重分块嵌入……"
+                        )
+                        embedding = self._get_rechunked_embedding(
+                            processed_text, safe_subchunk_size=self.chunk_size
+                        )
+                    else:
+                        # 非长度错误（如Ollama不可用），不触发重分块
+                        log.error(
+                            f"笔记《{source_note_title}》的文本块【{chunk_index}】"
+                            f"嵌入最终失败（非长度错误）: {e}"
+                        )
+                        return []
                     break
                 else:
                     log.warning(f"获取嵌入失败(第{attempt}次): {e}")
