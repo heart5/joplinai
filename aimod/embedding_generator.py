@@ -185,16 +185,25 @@ class AdaptiveChunkOptimizer:
                         "500",
                     ]
                 ):
-                    log.debug(
-                        f"  探测失败（长度限制）: {test_len} 字符, 错误: {error_msg[:100]}"
-                    )
-                    # 遇到长度错误，停止增长，current_safe_len 即为最后一次成功的长度
+                    if test_len == start_len:
+                        # 首次探测即超长，回退到默认值
+                        current_safe_len = self.embedding_generator.chunk_size
+                        start_len = current_safe_len
+                        log.debug(
+                            f"  首次探测即超长，回退到默认 chunk_size={current_safe_len}"
+                        )
+                    else:
+                        log.debug(
+                            f"  探测失败（长度限制）: {test_len} 字符, "
+                            f"错误: {error_msg[:100]}"
+                        )
                     break
                 else:
                     # 其他类型的错误（如Ollama超时、网络问题等）
                     if test_len == start_len:
                         # 首次探测即失败，回退到默认值
                         current_safe_len = self.embedding_generator.chunk_size
+                        start_len = current_safe_len  # 同步，防止 max() 膨胀
                         log.warning(
                             f"  首次探测即失败，回退到默认 chunk_size={current_safe_len}: {e}"
                         )
@@ -1514,109 +1523,6 @@ class EmbeddingGenerator:
         return self.embedding_cache.get(text_hash)
 
 # %% [markdown]
-# ## _get_rechunked_embedding(self, original_text: str, safe_subchunk_size: int) -> List[float]
-
-    # %%
-    def _get_rechunked_embedding(
-        self, original_text: str, safe_subchunk_size: int
-    ) -> List[float]:
-        """
-        核心重分块逻辑。
-        原理：将超长文本按安全大小重新分割为多个语义子块，分别嵌入后合并。
-        """
-        import numpy as np
-
-        # 1. 使用安全大小进行语义重分块
-        sub_chunks = self._split_with_custom_size(
-            text=original_text, target_chunk_size=safe_subchunk_size
-        )
-        if not sub_chunks:
-            log.error("重分块未能产生有效子块")
-            return []
-
-        log.info(
-            f"📊 重分块详情 | 原块: {len(original_text)}字符 | 子块数: {len(sub_chunks)} | 目标大小: {safe_subchunk_size}字符"
-        )
-
-        # 2. 为每个子块生成嵌入
-        sub_embeddings = []
-        for i, chunk_content in enumerate(sub_chunks):
-            try:
-                # 递归调用 get_ollama_embedding，由于子块已很小，通常不会再次触发重分块
-                emb = self.get_ollama_embedding(chunk_content)
-                if emb:
-                    sub_embeddings.append(emb)
-                    log.debug(f"子块 {i + 1}/{len(sub_chunks)} 嵌入成功")
-                else:
-                    log.warning(f"子块 {i + 1} 嵌入返回空，跳过")
-            except Exception as e:
-                log.warning(f"子块 {i + 1} 嵌入异常: {str(e)[:50]}，跳过")
-                continue
-
-        # 3. 合并嵌入向量 (平均池化)
-        if not sub_embeddings:
-            log.error("所有子块嵌入均失败")
-            return []
-        if len(sub_embeddings) == 1:
-            return sub_embeddings
-
-        merged_embedding = np.mean(sub_embeddings, axis=0)
-        log.info(f"合并 {len(sub_embeddings)} 个子块嵌入成功")
-        return merged_embedding.tolist()
-
-# %% [markdown]
-# ## _split_with_custom_size(self, text: str, target_chunk_size: int) -> List[str]
-
-    # %%
-    def _split_with_custom_size(self, text: str, target_chunk_size: int) -> List[str]:
-        """
-        使用自定义目标大小进行语义分割。
-        优先复用现有分块逻辑，临时调整 chunk_size 参数。
-        """
-        original_chunk_size = self.chunk_size
-        try:
-            self.chunk_size = target_chunk_size
-            # 调用您现有的语义分块方法，它会使用临时的 chunk_size
-            chunk_dicts = self.split_into_semantic_chunks(
-                text=text, note_title="[重分块]", note_tags="", twice_probe=False
-            )
-            sub_chunks = [chunk["content"] for chunk in chunk_dicts]
-
-            # 二次检查：如果语义分块后仍有块过大，进行句子级分割
-            final_chunks = []
-            for chunk in sub_chunks:
-                if len(chunk) > target_chunk_size * 1.2:
-                    log.debug(f"子块仍过大({len(chunk)}字符)，进行句子级分割")
-                    sentences = self._split_into_sentences(chunk)
-                    current_chunk = ""
-                    for sent in sentences:
-                        if len(current_chunk) + len(sent) > target_chunk_size:
-                            if current_chunk:
-                                final_chunks.append(current_chunk.strip())
-                            current_chunk = sent
-                        else:
-                            current_chunk += "" + sent if current_chunk else sent
-                    if current_chunk:
-                        final_chunks.append(current_chunk.strip())
-                else:
-                    final_chunks.append(chunk)
-            return final_chunks
-        finally:
-            self.chunk_size = original_chunk_size  # 恢复原状
-
-# %% [markdown]
-# ## _split_into_sentences(self, text: str) -> List[str]
-
-    # %%
-    def _split_into_sentences(self, text: str) -> List[str]:
-        """简单的中文句子分割"""
-        import re
-
-        sentence_endings = r"[。！？；\n]"
-        sentences = re.split(sentence_endings, text)
-        return [s.strip() for s in sentences if s.strip()]
-
-# %% [markdown]
 # ## get_merged_embedding(self, text: str,) -> List[float]
     # %%
     def get_merged_embedding(
@@ -1666,14 +1572,16 @@ class EmbeddingGenerator:
                         for kw in ["context length", "input length", "too long", "exceed", "500"]
                     )
                     if is_length_error:
-                        # 长度超限才触发重分块（此时块已在安全尺寸内，用 chunk_size 即可）
+                        safe_size = int(self.chunk_size * 0.7)
                         log.info(
                             f"笔记《{source_note_title}》的文本块【{chunk_index}】"
-                            f"长度为({len(text)})，嵌入超长，执行重分块嵌入……"
+                            f"长度为({len(text)})，嵌入超长，截取前{safe_size}字符回退"
                         )
-                        embedding = self._get_rechunked_embedding(
-                            processed_text, safe_subchunk_size=self.chunk_size
-                        )
+                        try:
+                            embedding = self.get_ollama_embedding(processed_text[:safe_size])
+                        except Exception as e2:
+                            log.error(f"截取回退嵌入仍失败: {e2}")
+                            return []
                     else:
                         # 非长度错误（如Ollama不可用），不触发重分块
                         log.error(
