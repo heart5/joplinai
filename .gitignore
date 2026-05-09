@@ -1,12 +1,12 @@
 log/
 data/
 *.ipynb
-!notebooks/*.ipynb
-!/pathmagic.ipynb
-!src/pathmagic.ipynb
+!/*.ipynb
+!src/*.ipynb
 
 # Debug/scratch scripts
 test_qwen.py
+test_qwen.ipynb
 
 # Backup files
 *.bak

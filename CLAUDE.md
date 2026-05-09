@@ -21,16 +21,15 @@ Data flow: Browser → `joplin_web_app.py` (Flask sessions) → HTTP (API key au
 ### Source Layout
 
 ```
-src/              # .py source files (jupytext paired with notebooks/)
-├── config_manager.py
-├── queryanswer.py
-├── user_manager.py
-└── pathmagic.py
-joplinai.py           # Vectorization CLI
-joplin_qa_api.py      # Q&A API service
-joplin_web_app.py     # Web portal
-pathmagic.py          # Root path context for project imports
-notebooks/            # .ipynb files (paired via jupytext.toml)
+src/              # .py source files (jupytext paired with .ipynb in same dir)
+├── config_manager.py    + config_manager.ipynb
+├── queryanswer.py       + queryanswer.ipynb
+├── user_manager.py      + user_manager.ipynb
+└── pathmagic.py         + pathmagic.ipynb
+joplinai.py           # Vectorization CLI     + joplinai.ipynb
+joplin_qa_api.py      # Q&A API service      + joplin_qa_api.ipynb
+joplin_web_app.py     # Web portal           + joplin_web_app.ipynb
+pathmagic.py          # Root path context    + pathmagic.ipynb
 aimod/                # AI core modules (embedding, vector DB, cache, etc.)
 func/                 # Utility submodule (heart5/func)
 static/               # Frontend assets
@@ -78,7 +77,7 @@ python joplin_web_app.py
 ## Key Code Patterns
 
 - **`pathmagic.context()`**: All modules use `with pathmagic.context():` to ensure both the project root and `src/` are on `sys.path` before importing project-local modules. Always wrap project imports in this context manager.
-- **Jupytext paired notebooks**: `.py` files (in `src/` and at project root) are paired with `.ipynb` files in `notebooks/` via `jupytext.toml`. Edits to the `.py` file are the source of truth. Current jupytext version: 1.19.1. To sync: `jupytext --sync jupytext.toml`.
+- **Jupytext paired notebooks**: `.py` files are paired with `.ipynb` files in the same directory. Edits to the `.py` file are the source of truth. To sync: `jupytext --sync <file>.py`.
 - **Cloud config**: Configuration is fetched dynamically via `getinivaluefromcloud()` from an INI stored in a Joplin note. The `ConfigManager` singleton in `src/config_manager.py` handles hot-reloading (5-minute check interval).
 - **Inter-service auth**: `joplin_web_app.py` calls `joplin_qa_api.py` using an API key from the shared cloud config (`X-API-Key` header).
 - **No tests directory**: No formal test framework. Test-adjacent files are scratchpad notebooks.
@@ -91,7 +90,7 @@ python joplin_web_app.py
 
 - Branch: `main`
 - Remote: `origin` (GitHub: `heart5/joplinai`)
-- `.gitignore` covers: `log/`, `data/`, `*.ipynb` (except `notebooks/*.ipynb`), `__pycache__/`, debug scripts (`test_qwen.py`), backup files (`*.bak`), oversized favicon copies
+- `.gitignore` covers: `log/`, `data/`, `*.ipynb` (except `/*.ipynb` and `src/*.ipynb`), `__pycache__/`, debug scripts (`test_qwen.py`), backup files (`*.bak`), oversized favicon copies
 
 ## Configuration
 
