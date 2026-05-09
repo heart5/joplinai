@@ -70,47 +70,9 @@ class AdaptiveChunkOptimizer:
     利用本地模型零成本的优势，动态调整分块大小，避免过碎分块。
     """
 
-    def __init__(
-        self, embedding_generator, enabled=False, cache_size=100, cache_manager=None
-    ):
-        """
-        初始化优化器。
-        :param embedding_generator: EmbeddingGenerator 实例，用于实际调用嵌入接口。
-        :param enabled: 是否启用自适应分块。
-        :param cache_size: 缓存大小，避免重复探测。
-        :param cache_manager: SQLiteCacheManager 实例，用于持久化缓存。
-        """
+    def __init__(self, embedding_generator, enabled=False):
         self.embedding_generator = embedding_generator
         self.enabled = enabled
-        self.cache_manager = cache_manager  # 持久化缓存管理器
-        # 缓存：键为 (模型名, 文本特征哈希)，值为探测出的最佳块大小（字符数）
-        self.memory_cache = {}
-        self.cache_size = cache_size
-
-    def _get_cache_key(self, text: str, model_name: str) -> str:
-        """
-        生成用于持久化缓存的键。
-        格式: f"{model_name}|{text_signature}"
-        """
-        text_sig = self._get_text_signature(text)  # 复用原有的签名方法
-        return f"{model_name}|{text_sig}"
-
-    def _get_text_signature(self, text: str) -> str:
-        """
-        生成文本的简易特征签名，用于缓存键。
-        基于文本长度、开头和结尾部分，平衡识别精度与计算开销。
-        """
-        import hashlib
-
-        # 取文本长度、前200字符和后200字符（如果存在）的组合
-        prefix = text[:200] if len(text) > 200 else text
-        suffix = text[-200:] if len(text) > 200 else text
-        # 生成一个简短的哈希作为签名
-        sig_content = f"{len(text)}|{prefix}|{suffix}"
-        signature = hashlib.md5(sig_content.encode("utf-8")).hexdigest()[
-            :12
-        ]  # 取前12位
-        return signature
 
     @staticmethod
     def _is_length_error(exception: Exception) -> bool:
@@ -142,28 +104,6 @@ class AdaptiveChunkOptimizer:
         """
         if not self.enabled:
             return self.embedding_generator.chunk_size
-
-        # 1. 检查内存缓存
-        memory_key = (model_name, self._get_text_signature(text))
-        if memory_key in self.memory_cache:
-            log.debug(
-                f"自适应分块内存缓存命中[字符]: {memory_key} -> {self.memory_cache[memory_key]}字符"
-            )
-            return self.memory_cache[memory_key]
-
-        # 2. 检查持久化缓存
-        persistent_key = self._get_cache_key(text, model_name)
-        if self.cache_manager:
-            cache_result = self.cache_manager.get(
-                persistent_key, task="adaptive_chunk_size"
-            )
-            if cache_result.content is not None:
-                cached_size = int(cache_result.content)
-                log.debug(
-                    f"自适应分块持久化缓存命中[字符]: {persistent_key} -> {cached_size}字符"
-                )
-                self.memory_cache[memory_key] = cached_size
-                return cached_size
 
         chunk_size = self.embedding_generator.chunk_size
         if start_len is None:
@@ -231,25 +171,6 @@ class AdaptiveChunkOptimizer:
         log.info(
             f"自适应分块探测完成: 建议块大小={final_safe_len}字符 (chunk_size={chunk_size}字符)"
         )
-
-        # 4. 持久化缓存
-        if self.cache_manager:
-            try:
-                self.cache_manager.set(
-                    content_hash=persistent_key,
-                    task="adaptive_chunk_size",
-                    result=str(final_safe_len),
-                )
-                log.debug(
-                    f"自适应分块结果已持久化[字符]: {persistent_key} -> {final_safe_len}字符"
-                )
-            except Exception as e:
-                log.warning(f"持久化自适应分块缓存失败: {e}，但不影响程序运行")
-
-        # 5. 内存缓存
-        if len(self.memory_cache) >= self.cache_size:
-            self.memory_cache.pop(next(iter(self.memory_cache)))
-        self.memory_cache[memory_key] = final_safe_len
 
         return final_safe_len
 
@@ -533,37 +454,22 @@ class EmbeddingGenerator:
         config: dict,
         model_name: str,
         chunk_size: int = 1024,
-        enable_adaptive_chunking=False,  # 【新增】是否启用自适应分块
+        enable_adaptive_chunking=False,
         chunk_overlap=50,
-        adaptive_cache_size=100,  # 【新增】自适应探测缓存大小
-        cache_manager=None,  # 【新增】接收外部缓存管理器
     ):
         self.config = config
         self.model_name = model_name
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
-        self._model_dimension_cache = {}  # 添加这行：初始化缓存字典
+        self._model_dimension_cache = {}
         self.embedding_dim = self._get_model_dimension()
-        self.embedding_cache = {}  # 简单缓存
-        self._chunk_embedding_cache = {}  # 分块阶段生成的嵌入缓存: chunk_text_hash -> embedding
-        # 【新增】如果没有传入，则创建一个（确保 deepseek_cache 目录存在）
-        if cache_manager is None:
-            from cache_manager import SQLiteCacheManager  # 导入
-            from func.first import getdirmain
-            import os
-            cache_dir = getdirmain() / "data" / ".deepseek_cache"
-            os.makedirs(cache_dir, exist_ok=True)
-            cache_db_path = cache_dir / "deepseek_cache.db"
-            cache_manager = SQLiteCacheManager(db_path=str(cache_db_path))
+        self.embedding_cache = {}
+        self._chunk_embedding_cache = {}
         self._set_chunk_size()
-        # 【新增】初始化自适应分块优化器
         self.adaptive_optimizer = AdaptiveChunkOptimizer(
             embedding_generator=self,
             enabled=enable_adaptive_chunking,
-            cache_size=adaptive_cache_size,
-            cache_manager=cache_manager,  # 传递
         )
-        # 保存状态，便于其他地方判断
         self.enable_adaptive_chunking = enable_adaptive_chunking
 
     @property

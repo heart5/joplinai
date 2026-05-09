@@ -699,22 +699,6 @@ class CacheStatsAnalyzer:
         """)
         stats["task_distribution"] = [dict(row) for row in self.cursor.fetchall()]
 
-        # === 【新增】自适应分块缓存的专项统计 ===
-        self.cursor.execute("""
-            SELECT
-                COUNT(*) as total_entries,
-                SUM(total_hits) as total_hits,
-                AVG(total_hits) as avg_hits_per_entry,
-                SUM(hit_count) as current_period_hits
-            FROM processing_cache
-            WHERE task = 'adaptive_chunk_size'
-        """)
-        row = self.cursor.fetchone()
-        stats["adaptive_chunk_cache"] = dict(row) if row else {
-            "total_entries": 0, "total_hits": 0, "avg_hits_per_entry": 0, "current_period_hits": 0
-        }
-        # === 新增结束 ===
-
         return stats
 
     # %%
@@ -842,76 +826,6 @@ class CacheStatsAnalyzer:
         return analysis
 
 # %% [markdown]
-# ## get_adaptive_chunk_effectiveness(self) -> Dict[str, Any]
-
-    # %%
-    def get_adaptive_chunk_effectiveness(self) -> Dict[str, Any]:
-        """分析自适应分块缓存的有效性"""
-        effectiveness = {}
-
-        # 1. 基础数据
-        self.cursor.execute("""
-            SELECT
-                COUNT(*) as entries,
-                SUM(total_hits) as total_hits
-            FROM processing_cache
-            WHERE task = 'adaptive_chunk_size'
-        """)
-        row = self.cursor.fetchone()
-        entries = row['entries'] if row and row['entries'] else 0
-        total_hits = row['total_hits'] if row and row['total_hits'] else 0
-
-        effectiveness["entries"] = entries
-        effectiveness["total_hits"] = total_hits
-
-        # 2. 计算“估计节省的探测次数”
-        # 原理：每次缓存命中，意味着避免了一次对Ollama的嵌入调用（即一次探测）。
-        # 假设每次探测平均消耗0.5秒（包含网络和计算），可估算节省的时间。
-        estimated_saved_probes = total_hits
-        estimated_saved_time_seconds = estimated_saved_probes * 0.5
-        effectiveness["estimated_saved_probes"] = estimated_saved_probes
-        effectiveness["estimated_saved_time_hours"] = round(estimated_saved_time_seconds / 3600, 2)
-
-        # 3. 缓存新鲜度：最后访问时间分布
-        self.cursor.execute("""
-            SELECT
-                CASE
-                    WHEN julianday('now') - julianday(last_accessed) <= 1 THEN '1天内'
-                    WHEN julianday('now') - julianday(last_accessed) <= 7 THEN '7天内'
-                    WHEN julianday('now') - julianday(last_accessed) <= 30 THEN '30天内'
-                    ELSE '超过30天'
-                END as access_recency,
-                COUNT(*) as count
-            FROM processing_cache
-            WHERE task = 'adaptive_chunk_size'
-            GROUP BY access_recency
-            ORDER BY
-                CASE access_recency
-                    WHEN '1天内' THEN 1
-                    WHEN '7天内' THEN 2
-                    WHEN '30天内' THEN 3
-                    ELSE 4
-                END
-        """)
-        effectiveness["access_recency"] = [dict(row) for row in self.cursor.fetchall()]
-
-        # 4. 高命中分块建议（按推荐尺寸聚合，展示哪种尺寸最常用）
-        self.cursor.execute("""
-            SELECT
-                result as chunk_size,
-                COUNT(*) as entry_count,
-                SUM(total_hits) as total_hits
-            FROM processing_cache
-            WHERE task = 'adaptive_chunk_size'
-            GROUP BY result
-            ORDER BY total_hits DESC
-            LIMIT 5
-        """)
-        effectiveness["top_hit_entries"] = [dict(row) for row in self.cursor.fetchall()]
-
-        return effectiveness
-
-# %% [markdown]
 # ## get_performance_metrics(self) -> Dict[str, Any]
 
     # %%
@@ -1026,8 +940,6 @@ class CacheStatsAnalyzer:
             "validation_analysis": self.get_validation_analysis(),
             "performance_metrics": self.get_performance_metrics(),
             "growth_trends": self.get_growth_trends(30),
-            # === 【新增】集成自适应分块缓存分析 ===
-            "adaptive_chunk_effectiveness": self.get_adaptive_chunk_effectiveness(),
             "summary": {},
         }
 
@@ -1035,9 +947,6 @@ class CacheStatsAnalyzer:
         basic = report["basic_stats"]
         time_ana = report["time_analysis"]
         valid_ana = report["validation_analysis"]
-
-        # 也可以在summary中加入分块缓存的關鍵指標
-        adaptive_stats = report["adaptive_chunk_effectiveness"]
 
         report["summary"] = {
             "total_cache_entries": basic["total_entries"],
@@ -1047,8 +956,6 @@ class CacheStatsAnalyzer:
             "validation_coverage": f"{sum([v['count'] for v in valid_ana['validation_states'] if v['validation_state'] != 'not_validated'])} entries validated",
             "estimated_size": f"{report['performance_metrics']['estimated_size_mb']} MB",
             "growth_rate": f"{report['growth_trends']['predicted_weekly_growth']} entries/week (predicted)",
-            "adaptive_cache_entries": adaptive_stats.get("entries", 0),
-            "adaptive_cache_saved_probes": adaptive_stats.get("estimated_saved_probes", 0),
         }
 
         return report
@@ -1186,31 +1093,6 @@ class CacheReportGenerator:
                 cum = cumulative_by_date.get(daily["date"], "N/A")
                 md_lines.append(f"| {daily['date']} | {daily['new_entries']} | {cum} |")
 
-        # === 【新增章节】自适应分块缓存有效性分析 ===
-        md_lines.append("## 🔧 自适应分块缓存分析")
-        adaptive_eff = self.report_data["adaptive_chunk_effectiveness"]
-
-        md_lines.append(f"- **总缓存条目数**: {adaptive_eff['entries']}")
-        md_lines.append(f"- **总命中次数**: {adaptive_eff['total_hits']}")
-        md_lines.append(f"- **估计节省探测次数**: {adaptive_eff['estimated_saved_probes']}")
-        md_lines.append(f"- **估计节省时间**: ~{adaptive_eff['estimated_saved_time_hours']} 小时")
-
-        md_lines.append("### 缓存访问新鲜度（互斥时段）")
-        md_lines.append("| 距最后命中时间 | 条目数 |")
-        md_lines.append("|----------------|--------|")
-        for recency in adaptive_eff.get('access_recency', []):
-            md_lines.append(f"| {recency['access_recency']} | {recency['count']} |")
-
-        if adaptive_eff['top_hit_entries']:
-            md_lines.append("### 高命中分块建议（按推荐尺寸聚合 Top 5）")
-            md_lines.append("| 推荐分块 | 覆盖条目 | 总命中 |")
-            md_lines.append("|----------|----------|--------|")
-            for entry in adaptive_eff['top_hit_entries']:
-                md_lines.append(f"| {entry['chunk_size']}字 | {entry['entry_count']} 条 | {entry['total_hits']} |")
-
-        md_lines.append("") # 空行
-        # === 新增章节结束 ===
-
         # 建议和洞察
         md_lines.append("")
         md_lines.append("## 💡 洞察与建议")
@@ -1230,10 +1112,6 @@ class CacheReportGenerator:
             insights.append(
                 "**活跃度低**: 近期活跃缓存比例较低，考虑优化缓存策略或检查数据新鲜度"
             )
-        if adaptive_eff['entries'] > 0 and adaptive_eff['total_hits'] / adaptive_eff['entries'] < 0.5:
-            insights.append("**分块缓存利用率低**: 自适应分块缓存平均命中率较低，考虑检查文本特征多样性或调整探测策略。")
-        if adaptive_eff.get('estimated_saved_probes', 0) > 1000:
-            insights.append("**分块缓存效果显著**: 已节省大量探测调用，有效提升了系统效率。")
         if not insights:
             insights.append("缓存系统运行良好，继续保持当前策略")
 

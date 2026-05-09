@@ -50,7 +50,6 @@ import pathmagic
 with pathmagic.context():
     try:
         from aimod.aitaskreporter import JoplinAITaskReporter
-        from aimod.cache_manager import SQLiteCacheManager
         from aimod.embedding_generator import EmbeddingGenerator
         from aimod.vector_db_manager import VectorDBManager
         from func.configpr import (
@@ -116,7 +115,6 @@ CONFIG = {
     "enable_adaptive_chunking": getinivaluefromcloud(
         "joplinai", "enable_adaptive_chunking"
     ),
-    "adaptive_cache_size": 100,
 }
 
 model_name_str = (
@@ -125,19 +123,6 @@ model_name_str = (
 CONFIG["state_path"] = str(
     getdirmain() / "data" / f"joplin_process_state_{model_name_str}.json"
 )  # 处理状态文件路径
-
-# %% [markdown]
-# # 全局变量
-
-# %%
-# 确保缓存目录存在
-cache_dir = getdirmain() / "data" / ".deepseek_cache"
-os.makedirs(cache_dir, exist_ok=True)
-cache_db_path = cache_dir / "deepseek_cache.db"
-
-# 创建全局缓存管理器实例
-global_cache_manager = SQLiteCacheManager(db_path=str(cache_db_path))
-
 
 # %% [markdown]
 # # 功能函数集
@@ -492,8 +477,6 @@ def process_notes_incremental(notebook_title: str, config: Dict):
             chunk_overlap=config.get("chunk_overlap", 50),
             # 【新增】传递自适应分块配置
             enable_adaptive_chunking=config.get("enable_adaptive_chunking", False),
-            adaptive_cache_size=config.get("adaptive_cache_size", 100),
-            cache_manager=global_cache_manager,  # 传入统一的缓存管理器
         )
         log.info(f"嵌入生成器初始化完成")
 
