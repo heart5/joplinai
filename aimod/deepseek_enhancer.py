@@ -101,12 +101,13 @@ def _ensure_cache_dir():
 
 # %%
 def get_cache_manager():
-    """获取缓存管理器 — 远程优先，无配置则本地"""
+    """获取缓存管理器 — 云配置按 deviceid 区分，本机无配置则直接本地 SQLite"""
     global _CACHE_MANAGER
     if _CACHE_MANAGER is not None:
         return _CACHE_MANAGER
 
-    remote_url = getinivaluefromcloud("joplinai", "deepseek_cache_url")
+    device_id = getdeviceid()
+    remote_url = getinivaluefromcloud("joplinai", f"deepseek_cache_url_{device_id}")
     api_key = getinivaluefromcloud("joplinai", "deepseek_cache_api_key")
     if remote_url and api_key:
         from aimod.deepseek_cache_client import RemoteCacheClient
