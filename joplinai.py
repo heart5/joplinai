@@ -882,6 +882,12 @@ def parse_args():
         default=CONFIG["force_update"],
         help=f"开启deepseek标签支持（默认：{CONFIG['force_update']}）",
     )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=0,
+        help="分批处理时每轮处理的笔记本数，需配合 --enable_force_update 使用（默认：0=不分批）",
+    )
     return parser.parse_args()
 
 
@@ -918,6 +924,8 @@ def main():
         dynamic_config["force_update"] = getinivaluefromcloud(
             "joplinai", "force_update"
         )
+
+    dynamic_config["batch_size"] = args.batch_size
 
     # 处理笔记本列表字符串（优先级: CLI参数 > 云端配置 > 默认值）
     notebook_titles_str = dynamic_config["notebook_titles"]
@@ -983,7 +991,38 @@ def main():
         for title in re.split(r"[,，]", notebook_titles_str.strip())
         if title.strip()
     ]
+    total_notebook_count = len(notebook_titles)
     try:
+        # === 分批处理逻辑（仅 force_update 时生效） ===
+        batch_size = dynamic_config.get("batch_size", 0)
+        is_batch = batch_size > 0 and dynamic_config.get("force_update", False)
+        batch_progress = None
+        resume_index = 0
+        if is_batch:
+            batch_progress = dynamic_config["state_path"].with_suffix(".batch_progress")
+            if batch_progress.exists():
+                try:
+                    with open(batch_progress) as f:
+                        progress = json.load(f)
+                    resume_index = progress.get("next_index", 0)
+                    log.info(
+                        f"分批处理检查点: 从第 {resume_index + 1} 个笔记本继续"
+                        f"（共 {total_notebook_count} 个）"
+                    )
+                except Exception as e:
+                    log.warning(f"读取分批处理检查点失败: {e}，从头开始")
+            batch = notebook_titles[resume_index:resume_index + batch_size]
+            if not batch:
+                log.info("分批处理: 所有笔记本已处理完毕")
+                batch_progress.unlink()
+                return
+            notebook_titles = batch
+            log.info(f"本轮分批处理 {len(batch)} 个笔记本: {batch}")
+        elif batch_size > 0:
+            log.warning(
+                "--batch-size 需配合 --enable_force_update 使用，本次忽略分批设置"
+            )
+
         # 添加检查点
         checkpoint_file = dynamic_config["state_path"].with_suffix(".checkpoint")
         if checkpoint_file.exists():
@@ -1016,6 +1055,26 @@ def main():
                     json.dump(checkpoint_data, f)
 
         log.info("===== 所有笔记本处理完成 =====")
+
+        # 保存/清理分批处理进度
+        if is_batch:
+            new_index = resume_index + len(notebook_titles)
+            if new_index >= total_notebook_count:
+                if batch_progress.exists():
+                    batch_progress.unlink()
+                log.info("分批处理完成: 所有笔记本已处理完毕")
+            else:
+                with open(batch_progress, "w") as f:
+                    json.dump(
+                        {
+                            "next_index": new_index,
+                            "timestamp": datetime.now().isoformat(),
+                        },
+                        f,
+                    )
+                log.info(
+                    f"分批处理检查点已保存: 下次运行将从第 {new_index + 1} 个笔记本继续"
+                )
 
         # 生成并保存报告到Joplin
         # 关键步骤：通知报告器本次运行结束，保存全局记录
