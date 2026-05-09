@@ -129,7 +129,7 @@ class AdaptiveChunkOptimizer:
         memory_key = (model_name, self._get_text_signature(text))
         if memory_key in self.memory_cache:
             log.debug(
-                f"自适应分块内存缓存命中: {memory_key} -> {self.memory_cache[memory_key]}"
+                f"自适应分块内存缓存命中[字符]: {memory_key} -> {self.memory_cache[memory_key]}字符"
             )
             return self.memory_cache[memory_key]
 
@@ -144,7 +144,7 @@ class AdaptiveChunkOptimizer:
                 # 缓存命中，解析结果（存储的是字符串，需转换为整数）
                 cached_size = int(cache_result.content)
                 log.debug(
-                    f"自适应分块持久化缓存命中: {persistent_key} -> {cached_size}"
+                    f"自适应分块持久化缓存命中[字符]: {persistent_key} -> {cached_size}字符"
                 )
                 # 同时更新到内存缓存
                 self.memory_cache[memory_key] = cached_size
@@ -169,7 +169,7 @@ class AdaptiveChunkOptimizer:
                 _ = self.embedding_generator.get_ollama_embedding(test_text)
                 # 调用成功，更新安全长度记录
                 current_safe_len = test_len
-                log.debug(f"  探测通过: {test_len} 字符")
+                log.debug(f"  探测通过[字符→API]: {test_len}字符未超token上下文")
                 # 指数增长
                 test_len = int(test_len * growth_factor)
             except Exception as e:
@@ -194,8 +194,8 @@ class AdaptiveChunkOptimizer:
                         )
                     else:
                         log.debug(
-                            f"  探测失败（长度限制）: {test_len} 字符, "
-                            f"错误: {error_msg[:100]}"
+                            f"  探测失败[token超限]: {test_len}字符→超出模型token上下文, "
+                            f"API错误: {error_msg[:100]}"
                         )
                     break
                 else:
@@ -224,7 +224,7 @@ class AdaptiveChunkOptimizer:
             ),
         )
         log.info(
-            f"自适应分块探测完成: 建议块大小={final_safe_len} 字符 (原始默认={self.embedding_generator.chunk_size})"
+            f"自适应分块探测完成: 建议块大小={final_safe_len}字符 (默认chunk_size={self.embedding_generator.chunk_size}字符)"
         )
 
         # 4. 将探测结果保存到持久化缓存
@@ -236,7 +236,7 @@ class AdaptiveChunkOptimizer:
                     result=str(final_safe_len),  # 结果存储为字符串
                 )
                 log.debug(
-                    f"自适应分块结果已持久化: {persistent_key} -> {final_safe_len}"
+                    f"自适应分块结果已持久化[字符]: {persistent_key} -> {final_safe_len}字符"
                 )
             except Exception as e:
                 log.warning(f"持久化自适应分块缓存失败: {e}，但不影响程序运行")
@@ -340,9 +340,9 @@ class PunctuationAwareSplitter:
                 final_chunks.extend(sub_chunks)
 
         log.info(
-            f"文本【{repr(text[:30])}……】长度为({len(text)})，"
-            f"被增强型语义切割工具切割为({len(final_chunks)})块，"
-            f"切块长度列表为：{[len(chunk) for chunk in final_chunks]}"
+            f"文本【{repr(text[:30])}……】总长{len(text)}字符，"
+            f"被增强型语义切割工具切割为{len(final_chunks)}块，"
+            f"各块字符数: {[len(chunk) for chunk in final_chunks]}"
         )
         return final_chunks
 
@@ -603,15 +603,15 @@ class EmbeddingGenerator:
         """精确获取模型上下文限制（token→字符转换）"""
         # 特殊处理已知模型
         if self.model_name == "nomic-embed-text":
-            self.chunk_size = 1850  # 768 token × 3字符/token × 0.8余量 ≈ 1850
+            self.chunk_size = 1850  # 字符: 768token × 3字符/token × 0.8 ≈ 1850字符
             return
         elif self.model_name == "dengcao/bge-large-zh-v1.5":
             self.chunk_size = (
-                512  # 512 token，中文是一对一，应为是一对三或者四，实际中文为主
+                512  # 字符: bge中文模型 512token上下文, 中文≈1token/字符
             )
             return
         elif self.model_name == "qwen:1.8b":
-            self.chunk_size = 4000  # 2048 token × 3 × 0.8 = 4916，取4000
+            self.chunk_size = 4000  # 字符: 2048token上下文 × 3字符/token × 0.8 ≈ 4916字符, 取4000字符
             return
 
         # 通用模型处理
@@ -651,12 +651,12 @@ class EmbeddingGenerator:
 
             self.chunk_size = int(num_ctx * 3 * 0.8)
             log.info(
-                f"模型 {self.model_name} 上下文长度: {num_ctx} tokens, 分块大小: {self.chunk_size} 字符"
+                f"模型 {self.model_name} 上下文={num_ctx}token, chunk_size(字符)={self.chunk_size}字符"
             )
 
         except Exception as e:
             log.warning(
-                f"获取模型上下文失败({self.model_name})，使用默认值1024字符: {e}"
+                f"获取模型上下文失败({self.model_name}), 回退默认chunk_size=1024字符: {e}"
             )
             self.chunk_size = 1024
 
@@ -1075,8 +1075,8 @@ class EmbeddingGenerator:
                 chunk_end = pos + best_split
             else:
                 log.debug(
-                    f"  句子边界({best_split}字符)过短(阈值{max(MIN_SIZE, int(margin * MIN_FRACTION))})"
-                    f"，改用 margin={margin} 截断"
+                    f"  句子边界({best_split}字符)过短(阈值{max(MIN_SIZE, int(margin * MIN_FRACTION))}字符)"
+                    f"，改用 margin={margin}字符 截断"
                 )
                 actual_chunk = window_text
                 chunk_end = pos + margin
@@ -1087,8 +1087,8 @@ class EmbeddingGenerator:
             )
             chunks.append(chunk_ctx)
             log.debug(
-                f"迭代分块: pos={pos}, 剩余={remaining_len}, "
-                f"{'探测' if can_adaptive else '固定'}安全={safe_len}, "
+                f"迭代分块: pos={pos}字符, 剩余={remaining_len}字符, "
+                f"安全块大小({'探测' if can_adaptive else '固定'})={safe_len}字符, "
                 f"实际取={len(actual_chunk)}字符"
             )
 
@@ -1116,7 +1116,7 @@ class EmbeddingGenerator:
         log.info(
             f"笔记《{note_title}》迭代分块完成"
             f"（{'自适应探测' if can_adaptive else '固定大小'}），"
-            f"共 {len(chunks)} 块，大小: {[len(c) for c in chunks]}"
+            f"共 {len(chunks)} 块，各块字符数: {[len(c) for c in chunks]}"
         )
         return chunks
 
@@ -1510,7 +1510,7 @@ class EmbeddingGenerator:
                         error_msg = f"{error_msg} | {body}"
                 except Exception:
                     pass
-            log.error(f"远程Ollama嵌入调用失败: {error_msg}")
+            log.error(f"远程Ollama嵌入调用失败[API-token超限]: {error_msg}")
             raise Exception(error_msg) from e
 
 # %% [markdown]
