@@ -182,6 +182,7 @@ class AdaptiveChunkOptimizer:
                         "input length",
                         "too long",
                         "exceed",
+                        "500",
                     ]
                 ):
                     log.debug(
@@ -1653,7 +1654,7 @@ class EmbeddingGenerator:
                     error_msg = str(e).lower()
                     is_length_error = any(
                         kw in error_msg
-                        for kw in ["context length", "input length", "too long", "exceed"]
+                        for kw in ["context length", "input length", "too long", "exceed", "500"]
                     )
                     if is_length_error:
                         # 长度超限才触发重分块（此时块已在安全尺寸内，用 chunk_size 即可）
