@@ -1492,8 +1492,17 @@ class EmbeddingGenerator:
             resp.raise_for_status()
             return resp.json()["embedding"]
         except Exception as e:
-            log.error(f"远程Ollama嵌入调用失败: {e}")
-            raise
+            # 从响应体中提取 Ollama 详细错误信息（如"input length exceeds context length"）
+            error_msg = str(e)
+            if hasattr(e, "response") and e.response is not None:
+                try:
+                    body = e.response.text
+                    if body:
+                        error_msg = f"{error_msg} | {body}"
+                except Exception:
+                    pass
+            log.error(f"远程Ollama嵌入调用失败: {error_msg}")
+            raise Exception(error_msg) from e
 
 # %% [markdown]
 # ## get_cached_embedding(self, text_hash: str) -> Optional[List[float]]
