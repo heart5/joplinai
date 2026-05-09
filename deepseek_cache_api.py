@@ -15,7 +15,7 @@
 
 # %% [markdown]
 # # DeepSeek 缓存集中服务
-# 独立于 Joplin — 直接操作 SQLite，API Key 从本地 INI 读取
+# API Key 从云端配置读取，SQLite 操作独立（不依赖 cache_manager 避免级联导入）
 
 # %%
 import argparse
@@ -23,7 +23,6 @@ import configparser
 import logging
 import os
 import sqlite3
-from dataclasses import dataclass
 from datetime import datetime
 from functools import wraps
 from pathlib import Path
@@ -40,23 +39,36 @@ log = logging.getLogger("deepseek_cache_api")
 
 app = Flask(__name__)
 
-# %% [markdown]
-# # 配置读取（本地文件，不依赖 Joplin）
-
 # %%
 DB_PATH = Path(__file__).parent / "data" / ".deepseek_cache" / "deepseek_cache.db"
-LOCAL_INI = Path(__file__).parent / "data" / "joplinai.ini"
+VALIDATION_THRESHOLD = 5000
+DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 
 def _get_api_key() -> Optional[str]:
-    """优先环境变量，其次本地 INI 文件"""
+    """1. 环境变量 → 2. 云端配置 → 3. 本地 INI 回退"""
     env_key = os.getenv("DEEPSEEK_CACHE_API_KEY")
     if env_key:
         return env_key
-    if LOCAL_INI.exists():
+    try:
+        import pathmagic
+        with pathmagic.context():
+            from func.jpfuncs import getinivaluefromcloud  # noqa: E402
+        key = getinivaluefromcloud("joplinai", "deepseek_cache_api_key")
+        if key:
+            log.info("API Key 从云端配置读取成功")
+            return key
+    except BaseException as e:
+        # BaseException 捕获 SystemExit（jpfuncs 模块级 getapi() 失败时会 sys.exit）
+        log.warning(f"云端配置读取失败（Joplin 可能未就绪）: {type(e).__name__}: {e}")
+    local_ini = Path(__file__).parent / "data" / "joplinai.ini"
+    if local_ini.exists():
         cp = configparser.ConfigParser()
-        cp.read(LOCAL_INI)
-        return cp.get("joplinai", "deepseek_cache_api_key", fallback=None)
+        cp.read(local_ini)
+        fallback = cp.get("joplinai", "deepseek_cache_api_key", fallback=None)
+        if fallback:
+            log.info("API Key 从本地 INI 回退读取成功")
+            return fallback
     return None
 
 
@@ -64,23 +76,11 @@ CACHE_API_KEY = _get_api_key()
 log.info(f"缓存服务 API Key {'已配置' if CACHE_API_KEY else '未配置!'}")
 
 # %% [markdown]
-# # SQLite 操作（精简版，不依赖 cache_manager 模块）
+# # SQLite 操作
 
 # %%
-VALIDATION_THRESHOLD = 5000
-DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-
-
-@dataclass
-class CacheResult:
-    content: Optional[str]
-    requires_validation: bool
-    cache_key: str
-    current_hit_count: int
-    total_hits: int
-
-
-def _init_db():
+def _db():
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(DB_PATH))
     conn.execute("""
         CREATE TABLE IF NOT EXISTS processing_cache (
@@ -99,14 +99,7 @@ def _init_db():
     conn.execute("CREATE INDEX IF NOT EXISTS idx_hash_task ON processing_cache(content_hash, task)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_last_accessed ON processing_cache(last_accessed)")
     conn.commit()
-    conn.close()
-
-
-_init_db()
-
-
-def _db():
-    return sqlite3.connect(str(DB_PATH))
+    return conn
 
 
 def cache_get(content_hash: str, task: str) -> dict:
@@ -156,7 +149,6 @@ def cache_set(content_hash: str, task: str, result: str):
         "VALUES (?,?,?,?,?,?,NULL,0,0,NULL)",
         (cache_key, content_hash, task, result, now, now),
     )
-    # LRU 清理
     count = conn.execute("SELECT COUNT(*) FROM processing_cache").fetchone()[0]
     if count > 50000:
         conn.execute("DELETE FROM processing_cache WHERE cache_key IN "
