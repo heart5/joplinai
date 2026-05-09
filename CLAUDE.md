@@ -6,7 +6,7 @@ Guidance for Claude Code when working in this repository.
 
 Joplinai is an AI-powered knowledge retrieval and Q&A system for [Joplin](https://joplinapp.org/) notes. It vectorizes Joplin notes into ChromaDB, enables semantic search, and provides a multi-user web chat interface with admin management.
 
-## Architecture — Three Independent Services
+## Architecture — Four Independent Services
 
 All services are Flask apps run directly with `python <file>`. No Docker/containerization.
 
@@ -14,9 +14,12 @@ All services are Flask apps run directly with `python <file>`. No Docker/contain
 |---------|------|------|---------|
 | Web Portal | `joplin_web_app.py` | 127.0.0.1:5001 | User login, Q&A chat UI, admin panel |
 | Q&A API | `joplin_qa_api.py` | dynamic (from config) | Internal HTTP API for vector search + LLM Q&A |
+| DeepSeek Cache API | `deepseek_cache_api.py` | 127.0.0.1:5003 | Centralized DeepSeek summary/tags cache for multi-host vectorization |
 | Vectorization CLI | `joplinai.py` | — | Chunks Joplin notes, generates embeddings, stores in ChromaDB |
 
-Data flow: Browser → `joplin_web_app.py` (Flask sessions) → HTTP (API key auth) → `joplin_qa_api.py` → ChromaDB + Ollama
+Data flow: `joplinai.py` → `deepseek_enhancer.py` → `RemoteCacheClient` (HTTP + API key auth) → `deepseek_cache_api.py` → SQLite
+
+Cache client (`aimod/deepseek_cache_client.py`) uses remote-first with local SQLite fallback when the remote service is unreachable or not configured.
 
 ### Source Layout
 
@@ -26,11 +29,14 @@ src/              # .py source files (jupytext paired with .ipynb in same dir)
 ├── queryanswer.py       + queryanswer.ipynb
 ├── user_manager.py      + user_manager.ipynb
 └── pathmagic.py         + pathmagic.ipynb
-joplinai.py           # Vectorization CLI     + joplinai.ipynb
-joplin_qa_api.py      # Q&A API service      + joplin_qa_api.ipynb
-joplin_web_app.py     # Web portal           + joplin_web_app.ipynb
-pathmagic.py          # Root path context    + pathmagic.ipynb
-aimod/                # AI core modules (embedding, vector DB, cache, etc.)
+joplinai.py            # Vectorization CLI     + joplinai.ipynb
+joplin_qa_api.py       # Q&A API service      + joplin_qa_api.ipynb
+joplin_web_app.py      # Web portal           + joplin_web_app.ipynb
+deepseek_cache_api.py  # Cache API service
+pathmagic.py           # Root path context    + pathmagic.ipynb
+deploy/                # systemd service files
+aimod/                 # AI core modules
+├── deepseek_cache_client.py  # Remote cache client with local fallback
 func/                 # Utility submodule (heart5/func)
 static/               # Frontend assets
 templates/            # Jinja2 templates
@@ -43,6 +49,7 @@ log/                  # Logs (gitignored)
 - `embedding_generator.py` — Text chunking + embedding via Ollama models
 - `vector_db_manager.py` — ChromaDB CRUD operations
 - `cache_manager.py` — SQLite-based LRU cache for AI calls
+- `deepseek_cache_client.py` — Remote cache client with local SQLite fallback
 - `deepseek_enhancer.py` — Optional DeepSeek API for enhanced summaries/tags
 - `aitaskreporter.py` — Vectorization run reports and trend analytics
 

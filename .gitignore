@@ -3,6 +3,7 @@ data/
 *.ipynb
 !/*.ipynb
 !src/*.ipynb
+!/aimod/deepseek_cache_client.ipynb
 
 # Debug/scratch scripts
 test_qwen.py

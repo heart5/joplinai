@@ -1,0 +1,36 @@
+[Unit]
+Description=DeepSeek Cache API Service (Gunicorn)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=baiyefeng
+Group=class
+Environment="PATH=/etc/miniconda3/envs/lsp/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+WorkingDirectory=/home/baiyefeng/work/joplinai
+ExecStart=/etc/miniconda3/envs/lsp/bin/gunicorn -w 2 \
+    --access-logfile /var/log/joplin-qa/cache_access.log \
+    --error-logfile /var/log/joplin-qa/cache_error.log \
+    --log-level info \
+    -b 127.0.0.1:5003 --timeout 30 deepseek_cache_api:app
+
+Restart=always
+RestartSec=10
+StartLimitInterval=600
+StartLimitBurst=5
+
+StandardOutput=journal
+StandardError=journal
+
+MemoryMax=300M
+CPUQuota=30%
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/home/baiyefeng/work/joplinai
+ReadWritePaths=/var/log/joplin-qa
+
+[Install]
+WantedBy=multi-user.target
