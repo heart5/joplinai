@@ -333,6 +333,7 @@ def process_note_chunks(
                         "chunk_id": expected_chunk_id,
                         "content": chunk_content,
                         "base_metadata": base_metadata,
+                        "embedding": chunk_info.get("embedding"),
                     }
                 )
 
@@ -348,8 +349,15 @@ def process_note_chunks(
             base_metadata = chunk_data["base_metadata"]
             metadata_chunk_idx_from_one = base_metadata["chunk_index"]
 
-            # 生成嵌入
-            embedding = embedding_generator.get_merged_embedding(chunk_data)
+            # 生成嵌入：优先使用分块阶段预生成的嵌入
+            embedding = chunk_data.get("embedding")
+            if embedding is None:
+                embedding = embedding_generator.get_merged_embedding(chunk_data)
+            else:
+                log.info(
+                    f"笔记《{note.title}》块 {metadata_chunk_idx_from_one} "
+                    f"复用分块阶段预生成嵌入（{len(embedding)}维）"
+                )
             if not embedding:
                 log.warning(
                     f"笔记《{note.title}》块 {metadata_chunk_idx_from_one} （长度：{len(chunk_content)}）嵌入生成失败，跳过此块。"
