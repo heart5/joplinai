@@ -162,6 +162,10 @@ def _init_db():
     return conn
 
 
+# gunicorn 导入时不执行 main()，需在模块级确保 DB 初始化
+_init_db()
+log.info("统一数据库 joplinai_center.db 初始化完成")
+
 # %% [markdown]
 # # DeepSeek 缓存操作
 
@@ -566,7 +570,14 @@ def require_auth(f):
 # %%
 @app.route("/health")
 def health():
-    return jsonify({"service": "Joplinai Center API", "status": "running"})
+    try:
+        conn = _init_db()
+        conn.execute("SELECT 1 FROM deepseek_cache LIMIT 0")
+        conn.close()
+        db_ok = True
+    except Exception:
+        db_ok = False
+    return jsonify({"service": "Joplinai Center API", "status": "running", "db_ok": db_ok})
 
 
 # %% [markdown]
