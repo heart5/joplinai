@@ -522,6 +522,7 @@ def process_notes_incremental(notebook_title: str, config: Dict, note_ids: List[
     total_skipped_for_notebook = 0
     total_orphans_cleaned_for_notebook = 0
     updated_count = 0
+    skipped_note_count = 0
     new_time_notes = []
     failed_notes = []
 
@@ -628,7 +629,13 @@ def process_notes_incremental(notebook_title: str, config: Dict, note_ids: List[
                         "processed_time": datetime.now().timestamp(),
                         "deepseek_missing": result_dict.get("deepseek_missing", False),
                     }
-                    updated_count += 1
+                    # 仅当有实际块变更（新增/更新/清理孤儿）时才计入 updated_count
+                    note_upserted = note_chunk_stats.get("upserted", 0)
+                    note_orphans = note_chunk_stats.get("orphans_cleaned", 0)
+                    if note_upserted > 0 or note_orphans > 0:
+                        updated_count += 1
+                    else:
+                        skipped_note_count += 1
                 else:
                     failed_notes.append(note_title)
                     log.error(f"向量化处理笔记 《{note_title}》 时可能异常")
@@ -638,7 +645,12 @@ def process_notes_incremental(notebook_title: str, config: Dict, note_ids: List[
     # 保存状态
     save_process_state(process_state, config["state_path"])
     log.info(
-        f"增量处理笔记本【{notebook_title}】中的笔记完成情况小结：新日期需要更新 {len(new_time_notes)} 条，成功 {updated_count} 条，失败 {len(failed_notes)} 条（总计 {len(notes)} 条）"
+        f"增量处理笔记本【{notebook_title}】中的笔记完成情况小结："
+        f"新日期需要更新 {len(new_time_notes)} 条，"
+        f"实际更新 {updated_count} 条，"
+        f"无变化跳过 {skipped_note_count} 条，"
+        f"失败 {len(failed_notes)} 条"
+        f"（总计 {len(notes)} 条）"
     )
     if failed_notes:
         log.warning(
@@ -750,6 +762,7 @@ def process_notes_incremental(notebook_title: str, config: Dict, note_ids: List[
         "notebook_title": notebook_title,
         "total_notes": len(notes),
         "updated_count": updated_count,
+        "skipped_note_count": skipped_note_count,
         "failed_notes": list(set(failed_notes)),
         "new_time_notes": new_time_notes,
         "notes_added": notes_added_titles,
