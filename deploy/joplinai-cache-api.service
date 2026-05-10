@@ -6,7 +6,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=baiyefeng
-Group=class
+Group=club
 Environment="PATH=/usr/miniconda3/envs/newlsp/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 WorkingDirectory=/home/baiyefeng/work/joplinai
 ExecStart=/usr/miniconda3/envs/newlsp/bin/gunicorn -w 2 \
