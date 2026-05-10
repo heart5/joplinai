@@ -388,7 +388,7 @@ def process_note_chunks(
                     exc_info=True,
                 )
 
-        # 5. 智能清理“孤儿块”
+        # 5. 智能清理"孤儿块"
         # 找出那些存在于 existing_chunks_map，但不在本次新块列表 new_chunk_hashes 中的块ID
         orphan_chunk_ids = [
             chunk_id
@@ -442,12 +442,18 @@ def process_note_chunks(
 # %% [markdown]
 # ### process_notes_incremental(notebook_title: str, config: Dict)
 # %%
-def process_notes_incremental(notebook_title: str, config: Dict):
-    """增量处理笔记本笔记（修复时间处理问题）"""
+def process_notes_incremental(notebook_title: str, config: Dict, note_ids: List[str] = None):
+    """增量处理笔记本笔记。
+
+    Args:
+        notebook_title: 笔记本名称（虚拟笔记集时作为标识名）
+        config: 配置字典
+        note_ids: 可选，直接指定笔记ID列表，作为虚拟笔记集处理。为None时按物理笔记本处理。
+    """
     model_name = config["embedding_model"]
     # 动态获取模型最大上下文
     # chunk_size = EmbeddingGenerator(config["embedding_model"]).chunk_size
-    # log.info(f"使用模型“{model_name}”")
+    # log.info(f"使用模型"{model_name}"")
 
 
 # %% [markdown]
@@ -487,8 +493,11 @@ def process_notes_incremental(notebook_title: str, config: Dict):
     # 获取强制更新配置
     force_update = config.get("force_update", False)
 
-    # 获取笔记本所有笔记
-    notes_all = get_notes_in_notebook_by_title(notebook_title=notebook_title)
+    # 获取笔记列表：物理笔记本或虚拟笔记集
+    if note_ids is not None:
+        notes_all = [getnote(nid) for nid in note_ids if getnote(nid)]
+    else:
+        notes_all = get_notes_in_notebook_by_title(notebook_title=notebook_title)
     # 过滤需要排除的笔记
     notes = filter_notes(notes_all)
     if len(notes_all) != len(notes):
@@ -636,109 +645,115 @@ def process_notes_incremental(notebook_title: str, config: Dict):
         )
 
 # %% [markdown]
-# #### 清理已移除当前笔记本的向量数据
+# #### 清理已移除当前笔记集的向量数据
 
     # %%
-    # 在 process_notes_incremental 函数内部，所有笔记处理完成后，返回 stats 之前添加
-    # ========== 新增：清理已移出当前笔记本的笔记的向量数据 ==========
-    log.info(f"开始执行笔记本【{notebook_title}】的‘孤儿笔记’向量数据清理...")
+    # ========== 清理已移出当前笔记集的笔记的向量数据 ==========
+    # 初始化安全默认值
+    notes_removed_titles = []
+    notes_added_titles = []
+    orphan_note_ids = []
+
+    is_virtual = note_ids is not None
+    log.info(f"开始执行笔记集【{notebook_title}】的'孤儿笔记'向量数据清理...")
+
     try:
-        # 1. 获取当前笔记本对象及其ID
-        notebook_id = searchnotebook(notebook_title) # 直接返回笔记本的id
-        current_notebook_id = notebook_id
+        if not is_virtual:
+            # --- 物理笔记本：按 source_notebook_id 从向量库反查 ---
+            notebook_id = searchnotebook(notebook_title)
+            current_notebook_id = notebook_id
 
-        if not current_notebook_id:
-            log.warning(f"无法获取笔记本【{notebook_title}】的ID，跳过清理步骤。")
-        else:
-            # 2. 获取当前笔记本中所有笔记的ID集合
-            current_note_ids_in_notebook = list(set(note.id for note in notes))
-
-            # 3. 从向量库中查询所有 source_notebook_id 等于当前笔记本ID的块，并聚合出笔记ID
-            # 我们需要一个辅助函数来执行这个查询。由于ChromaDB的get不支持直接按元数据值分组，
-            # 我们先获取所有相关块，再在内存中聚合。
-            all_results = vector_db.collection.get(
-                where={"source_notebook_id": current_notebook_id},
-                include=["metadatas"]
-            )
-            # print(f"从向量数据库中取出当前笔记本【{notebook_title}】相关的文本块结果入下：\n{all_results}")
-
-            notes_in_vector_db = {}
-            for metadata in all_results.get("metadatas", []):
-                notes_in_vector_db[metadata.get("source_note_id")] = metadata.get('source_note_title')
-            log.info(
-                f"从向量数据库既有数据查找到的笔记本【{notebook_title}】"
-                f"中的笔记有这些：{list(notes_in_vector_db.values())[-5:]}……"
-            )
-
-            # 4. 找出在向量库中存在，但已不在当前笔记本中的笔记ID
-            orphan_note_ids = [note_id for id in notes_in_vector_db if note_id not in current_note_ids_in_notebook]
-
-            # 5. 清理这些“孤儿笔记”对应的所有块
-            cleaned_total_chunks = 0
-            for note_id in orphan_note_ids:
-                deleted_chunks_count = vector_db.delete_chunks_by_note_id(note_id)
-                cleaned_total_chunks += deleted_chunks_count
-                if deleted_chunks_count > 0:
-                    note_title = notes_in_vector_db.get(note_id, "")
-                    log.info(f"清理已移除笔记《{note_title}》（note_id={note_id}）的孤儿文本块向量数据, 删除 {deleted_chunks_count} 个块。")
-                    # 可选：从处理状态中移除该笔记的记录
-                    process_state.pop(note_id, None)
-
-            if cleaned_total_chunks > 0:
-                log.info(f"笔记本【{notebook_title}】清理完成。共移除 {len(orphan_note_ids)} 条笔记的向量数据，涉及 {cleaned_total_chunks} 个块。")
+            if not current_notebook_id:
+                log.warning(f"无法获取笔记本【{notebook_title}】的ID，跳过清理步骤。")
+                notes_in_vector_db = {}
             else:
-                log.info(f"笔记本【{notebook_title}】未发现需要清理的孤儿笔记向量数据。")
+                current_note_ids_in_notebook = list(set(note.id for note in notes))
 
-            notes_removed_titles = [notes_in_vector_db.get(nid) for nid in orphan_note_ids]
+                all_results = vector_db.collection.get(
+                    where={"source_notebook_id": current_notebook_id},
+                    include=["metadatas"]
+                )
 
-            # 计算新增笔记 (当前笔记本中的笔记ID 减去 向量库中存在的笔记ID)
+                notes_in_vector_db = {}
+                for metadata in all_results.get("metadatas", []):
+                    notes_in_vector_db[metadata.get("source_note_id")] = metadata.get('source_note_title')
+                log.info(
+                    f"从向量数据库既有数据查找到的笔记本【{notebook_title}】"
+                    f"中的笔记有这些：{list(notes_in_vector_db.values())[-5:]}……"
+                )
+
+                orphan_note_ids = [nid for nid in notes_in_vector_db if nid not in current_note_ids_in_notebook]
+        else:
+            # --- 虚拟笔记集：对比上次运行的笔记ID列表 ---
+            vcollections = process_state.get("_virtual_collections", {})
+            last_vc = vcollections.get(notebook_title, {})
+            last_note_ids = last_vc.get("note_ids", [])
+            last_note_id_set = set(last_note_ids)
+            current_note_id_set = set(note_ids)
+
+            orphan_note_ids = list(last_note_id_set - current_note_id_set)
+            notes_in_vector_db = {}
+            for nid in last_note_ids:
+                note_obj = getnote(nid)
+                notes_in_vector_db[nid] = note_obj.title if note_obj else ""
+
+            log.info(
+                f"虚拟笔记集【{notebook_title}】：上次 {len(last_note_ids)} 条，"
+                f"本次 {len(note_ids)} 条，移除 {len(orphan_note_ids)} 条"
+            )
+
+            # 保存本次快照到状态文件
+            process_state.setdefault("_virtual_collections", {})[notebook_title] = {
+                "note_ids": note_ids,
+                "last_run": datetime.now().isoformat(),
+            }
+
+        # --- 以下清理和统计逻辑两种模式共用 ---
+        cleaned_total_chunks = 0
+        for note_id in orphan_note_ids:
+            deleted_chunks_count = vector_db.delete_chunks_by_note_id(note_id)
+            cleaned_total_chunks += deleted_chunks_count
+            if deleted_chunks_count > 0:
+                note_title = notes_in_vector_db.get(note_id, "")
+                log.info(f"清理已移除笔记《{note_title}》（note_id={note_id}）的孤儿文本块向量数据, 删除 {deleted_chunks_count} 个块。")
+                process_state.pop(note_id, None)
+
+        if cleaned_total_chunks > 0:
+            log.info(f"笔记集【{notebook_title}】清理完成。共移除 {len(orphan_note_ids)} 条笔记的向量数据，涉及 {cleaned_total_chunks} 个块。")
+        else:
+            log.info(f"笔记集【{notebook_title}】未发现需要清理的孤儿笔记向量数据。")
+
+        # 计算移除的笔记标题
+        notes_removed_titles = [
+            notes_in_vector_db.get(nid, f"[已删除的笔记: {nid}]") for nid in orphan_note_ids
+        ]
+
+        # 计算新增的笔记
+        if not is_virtual:
             current_note_ids = set(note.id for note in notes)
             notes_added_ids = current_note_ids - set(notes_in_vector_db)
-            notes_added_titles = [getnote(nid).title for nid in notes_added_ids if getnote(nid)]
+        else:
+            last_note_id_set_v = set(last_note_ids) if last_note_ids else set()
+            notes_added_ids = current_note_id_set - last_note_id_set_v
+        notes_added_titles = [getnote(nid).title for nid in notes_added_ids if getnote(nid)]
 
     except Exception as e:
-        log.error(f"执行笔记本【{notebook_title}】的清理步骤时出错: {e}", exc_info=True)
+        log.error(f"执行笔记集【{notebook_title}】的清理步骤时出错: {e}", exc_info=True)
     # ========== 清理步骤结束 ==========
 
 # %% [markdown]
 # #### 统计汇总
 
     # %%
-    # ========== 在“清理已移除当前笔记本的向量数据”步骤之后，构建最终stats之前 ==========
-    # 此时我们已经有了 orphan_note_ids (被清理的笔记ID集合)
-    # 和 notes_in_vector_db (向量库中属于本笔记本的笔记字典)
-    # 以及 current_note_ids (当前笔记本中的笔记ID集合)
-
-    # 1. 计算并获取“移除的笔记”标题列表
-    notes_removed_titles = []
-    for note_id in orphan_note_ids:
-        note_title = notes_in_vector_db.get(note_id, "")
-        if note_title:
-            notes_removed_titles.append(note_title)
-        else:
-            # 笔记可能已被彻底删除，记录ID
-            notes_removed_titles.append(f"[已删除的笔记: {note_id}]")
-
-    # 2. 计算并获取“新增的笔记”标题列表
-    # 新增的笔记 = 当前在笔记本中，但不在向量库历史记录中的笔记
-    notes_added_ids = current_note_ids - set(notes_in_vector_db)
-    notes_added_titles = []
-    for note_id in notes_added_ids:
-        note_detail = getnote(note_id)
-        if note_detail:
-            notes_added_titles.append(note_detail.title)
-
-    # 3. 构建增强的统计字典
     stats = {
         "notebook_title": notebook_title,
         "total_notes": len(notes),
         "updated_count": updated_count,
         "failed_notes": list(set(failed_notes)),
         "new_time_notes": new_time_notes,
-        # === 以下为新增字段，用于深度分析 ===
-        "notes_added": notes_added_titles,      # 列表
-        "notes_removed": notes_removed_titles,  # 列表
-        "chunk_stats": {                        # 字典
+        "notes_added": notes_added_titles,
+        "notes_removed": notes_removed_titles,
+        "chunk_stats": {
             "total_chunks": total_chunks_for_notebook,
             "upserted": total_upserted_for_notebook,
             "skipped": total_skipped_for_notebook,
@@ -747,7 +762,7 @@ def process_notes_incremental(notebook_title: str, config: Dict):
         "process_time": datetime.now().isoformat(),
     }
 
-    log.info(f"笔记本【{notebook_title}】处理完成。")
+    log.info(f"笔记集【{notebook_title}】处理完成。")
     # 返回这个完整的 stats 字典
     return stats
 
@@ -847,7 +862,7 @@ def parse_args():
         "--notebook_titles",
         type=str,
         default=CONFIG["notebook_titles"],
-        help=f"笔记本名称（用“,”分割）（默认：{CONFIG['notebook_titles']}）",
+        help=f"笔记本名称（用逗号分割）（默认：{CONFIG['notebook_titles']}）",
     )
     parser.add_argument(
         "--workers",
@@ -878,6 +893,12 @@ def parse_args():
         type=int,
         default=0,
         help="分批处理时每轮处理的笔记本数，需配合 --enable_force_update 使用（默认：0=不分批）",
+    )
+    parser.add_argument(
+        "--note_ids",
+        type=str,
+        default="",
+        help="指定笔记ID列表（用\",\"或\"，\"分割），作为虚拟笔记集处理（默认：空）",
     )
     return parser.parse_args()
 
@@ -925,6 +946,10 @@ def main():
     elif cloud_imp_nbs := getinivaluefromcloud("joplinai", "imp_nbs"):
         notebook_titles_str = cloud_imp_nbs
     dynamic_config["notebook_titles"] = notebook_titles_str
+
+    # 处理指定笔记ID列表（优先级: CLI参数 > 云端配置）
+    note_ids_str = args.note_ids or getinivaluefromcloud("joplinai", "imp_note_ids") or ""
+
     log.info(
         f"动态配置：模型={dynamic_config['embedding_model']}, \
         处理状态文件={dynamic_config['state_path']}, \
@@ -933,6 +958,7 @@ def main():
         chroma server={dynamic_config['chroma_server_host']}, \
         chroma port={dynamic_config['chroma_server_port']}, \
         笔记本={dynamic_config['notebook_titles']}, \
+        指定笔记ID={'有' if note_ids_str else '无'}, \
         并发数={dynamic_config['max_workers']}， \
         使能deepseek摘要功能为{dynamic_config['enable_deepseek_summary']}， \
         使能deepseek标签功能为{dynamic_config['enable_deepseek_tags']}， \
@@ -1046,6 +1072,23 @@ def main():
                     json.dump(checkpoint_data, f)
 
         log.info("===== 所有笔记本处理完成 =====")
+
+        # === 虚拟笔记集：处理指定的笔记ID列表（互补模式） ===
+        if note_ids_str.strip():
+            note_ids = [
+                nid.strip()
+                for nid in re.split(r"[,，]", note_ids_str.strip())
+                if nid.strip()
+            ]
+            if note_ids:
+                log.info(
+                    f"开始处理虚拟笔记集【[指定笔记]】，共 {len(note_ids)} 条指定笔记ID"
+                )
+                v_stats = process_notes_incremental(
+                    "[指定笔记]", dynamic_config, note_ids=note_ids
+                )
+                task_reporter.add_notebook_record("[指定笔记]", v_stats)
+                log.info("虚拟笔记集处理完成。")
 
         # 保存/清理分批处理进度
         if is_batch:

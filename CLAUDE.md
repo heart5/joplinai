@@ -73,6 +73,8 @@ All commands run from the project root directory.
 ```bash
 # 1. Vectorize notes (CLI, run first to populate ChromaDB)
 python joplinai.py
+# With specific note IDs (comma-separated, or set cloud item `imp_note_ids`):
+python joplinai.py --note_ids "id1,id2,id3"
 
 # 2. Start Q&A API middleware (starts on configured port)
 python joplin_qa_api.py
@@ -85,7 +87,7 @@ python joplin_web_app.py
 
 - **`pathmagic.context()`**: All modules use `with pathmagic.context():` to ensure both the project root and `src/` are on `sys.path` before importing project-local modules. Always wrap project imports in this context manager.
 - **Jupytext paired notebooks**: `.py` files are paired with `.ipynb` files in the same directory. Edits to the `.py` file are the source of truth. To sync: `jupytext --sync <file>.py`.
-- **Cloud config**: Configuration is fetched dynamically via `getinivaluefromcloud()` from an INI stored in a Joplin note. The `ConfigManager` singleton in `src/config_manager.py` handles hot-reloading (5-minute check interval).
+- **Cloud config**: Configuration is fetched dynamically via `getinivaluefromcloud()` from an INI stored in a Joplin note. The `ConfigManager` singleton in `src/config_manager.py` handles hot-reloading (5-minute check interval). Key cloud items: `imp_nbs` (notebook titles), `imp_note_ids` (specific note IDs as virtual notebook), both comma-separated.
 - **Inter-service auth**: `joplin_web_app.py` calls `joplin_qa_api.py` using an API key from the shared cloud config (`X-API-Key` header).
 - **No tests directory**: No formal test framework. Test-adjacent files are scratchpad notebooks.
 
