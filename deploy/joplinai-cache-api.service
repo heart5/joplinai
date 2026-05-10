@@ -23,7 +23,7 @@ StartLimitBurst=5
 StandardOutput=journal
 StandardError=journal
 
-MemoryMax=300M
+MemoryMax=800M
 CPUQuota=30%
 
 NoNewPrivileges=true
