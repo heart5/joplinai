@@ -38,6 +38,7 @@ with pathmagic.context():
     try:
         from aimod.deepseek_enhancer import deepseek_process_note, get_cache_manager
         from func.datatools import compute_content_hash
+        from func.getid import getdeviceid
         from func.jpfuncs import (
             createnote,
             get_notebook_ids_for_note,
@@ -70,9 +71,10 @@ class AdaptiveChunkOptimizer:
     利用本地模型零成本的优势，动态调整分块大小，避免过碎分块。
     """
 
-    def __init__(self, embedding_generator, enabled=False):
+    def __init__(self, embedding_generator, enabled=False, probe_client=None):
         self.embedding_generator = embedding_generator
         self.enabled = enabled
+        self.probe_client = probe_client  # ProbeCacheClient 或 None
 
     @staticmethod
     def _is_length_error(exception: Exception) -> bool:
@@ -104,6 +106,14 @@ class AdaptiveChunkOptimizer:
         """
         if not self.enabled:
             return self.embedding_generator.chunk_size
+
+        # 查探测缓存（远程集中式）
+        if self.probe_client is not None:
+            text_md5 = hashlib.md5(text.encode("utf-8")).hexdigest()
+            cached = self.probe_client.get(text_md5)
+            if cached is not None:
+                log.debug(f"[自适应探测] 缓存命中: {text_md5[:8]}... → {cached}字符")
+                return cached
 
         chunk_size = self.embedding_generator.chunk_size
         if start_len is None:
@@ -172,6 +182,17 @@ class AdaptiveChunkOptimizer:
             f"[自适应探测完成] 建议块大小={final_safe_len}字符 "
             f"(chunk_size={chunk_size}字符)"
         )
+
+        # 写入探测缓存
+        if self.probe_client is not None:
+            text_md5 = hashlib.md5(text.encode("utf-8")).hexdigest()
+            self.probe_client.set(
+                text_md5=text_md5,
+                safe_len=final_safe_len,
+                snippet=text[:20],
+                model_name=model_name,
+                chunk_size=chunk_size,
+            )
 
         return final_safe_len
 
@@ -467,9 +488,23 @@ class EmbeddingGenerator:
         self.embedding_cache = {}
         self._chunk_embedding_cache = {}
         self._set_chunk_size()
+
+        # 初始化探测缓存客户端（远程优先，失败不影响运行）
+        probe_client = None
+        try:
+            remote_url = getinivaluefromcloud("joplinai", f"joplinai_cache_url_{getdeviceid()}")
+            api_key = getinivaluefromcloud("joplinai", "joplinai_cache_api_key")
+            if remote_url and api_key:
+                from aimod.cache_client import ProbeCacheClient
+                probe_client = ProbeCacheClient(remote_url, api_key)
+                log.info("[自适应探测] 远程缓存客户端已连接")
+        except Exception:
+            pass
+
         self.adaptive_optimizer = AdaptiveChunkOptimizer(
             embedding_generator=self,
             enabled=enable_adaptive_chunking,
+            probe_client=probe_client,
         )
         self.enable_adaptive_chunking = enable_adaptive_chunking
 
@@ -953,7 +988,7 @@ class EmbeddingGenerator:
 # %% [markdown]
 # ## _iterative_chunking(self, text, note_title, source_date)
 
-# %%
+    # %%
     def _iterative_chunking(
         self, text: str, note_title: str, source_date: str
     ) -> list:

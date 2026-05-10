@@ -107,12 +107,12 @@ def get_cache_manager():
         return _CACHE_MANAGER
 
     device_id = getdeviceid()
-    remote_url = getinivaluefromcloud("joplinai", f"deepseek_cache_url_{device_id}")
-    api_key = getinivaluefromcloud("joplinai", "deepseek_cache_api_key")
+    remote_url = getinivaluefromcloud("joplinai", f"joplinai_cache_url_{device_id}")
+    api_key = getinivaluefromcloud("joplinai", "joplinai_cache_api_key")
     if remote_url and api_key:
-        from aimod.deepseek_cache_client import RemoteCacheClient
+        from aimod.cache_client import DeepSeekCacheClient
 
-        _CACHE_MANAGER = RemoteCacheClient(remote_url, api_key)
+        _CACHE_MANAGER = DeepSeekCacheClient(remote_url, api_key)
         return _CACHE_MANAGER
 
     _ensure_cache_dir()

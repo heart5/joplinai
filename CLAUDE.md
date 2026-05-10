@@ -14,12 +14,12 @@ All services are Flask apps run directly with `python <file>`. No Docker/contain
 |---------|------|------|---------|
 | Web Portal | `joplin_web_app.py` | 127.0.0.1:5001 | User login, Q&A chat UI, admin panel |
 | Q&A API | `joplin_qa_api.py` | dynamic (from config) | Internal HTTP API for vector search + LLM Q&A |
-| DeepSeek Cache API | `deepseek_cache_api.py` | 127.0.0.1:5003 | Centralized DeepSeek summary/tags cache for multi-host vectorization |
+| Cache API | `joplinai_cache_api.py` | 127.0.0.1:5003 | Centralized cache (DeepSeek summary/tags + probe results) for multi-host sharing |
 | Vectorization CLI | `joplinai.py` | — | Chunks Joplin notes, generates embeddings, stores in ChromaDB |
 
-Data flow: `joplinai.py` → `deepseek_enhancer.py` → `RemoteCacheClient` (HTTP + API key auth) → `deepseek_cache_api.py` → SQLite
+Data flow: `joplinai.py` → `deepseek_enhancer.py` / `embedding_generator.py` → `DeepSeekCacheClient` / `ProbeCacheClient` (HTTP + API key auth) → `joplinai_cache_api.py` → SQLite
 
-Cache client (`aimod/deepseek_cache_client.py`) uses remote-first with local SQLite fallback when the remote service is unreachable or not configured.
+Cache client (`aimod/cache_client.py`) provides `DeepSeekCacheClient` and `ProbeCacheClient`, both remote-first with local/none fallback when the remote service is unreachable.
 
 ### Source Layout
 
@@ -32,11 +32,11 @@ src/              # .py source files (jupytext paired with .ipynb in same dir)
 joplinai.py            # Vectorization CLI     + joplinai.ipynb
 joplin_qa_api.py       # Q&A API service      + joplin_qa_api.ipynb
 joplin_web_app.py      # Web portal           + joplin_web_app.ipynb
-deepseek_cache_api.py  # Cache API service
+joplinai_cache_api.py  # Cache API service
 pathmagic.py           # Root path context    + pathmagic.ipynb
 deploy/                # systemd service files
 aimod/                 # AI core modules
-├── deepseek_cache_client.py  # Remote cache client with local fallback
+├── cache_client.py           # Unified cache client (DeepSeek + Probe)
 func/                 # Utility submodule (heart5/func)
 static/               # Frontend assets
 templates/            # Jinja2 templates
@@ -49,7 +49,7 @@ log/                  # Logs (gitignored)
 - `embedding_generator.py` — Text chunking + embedding via Ollama models
 - `vector_db_manager.py` — ChromaDB CRUD operations
 - `cache_manager.py` — SQLite-based LRU cache for AI calls
-- `deepseek_cache_client.py` — Remote cache client with local SQLite fallback
+- `cache_client.py` — Unified cache client (`DeepSeekCacheClient` + `ProbeCacheClient`), remote-first
 - `deepseek_enhancer.py` — Optional DeepSeek API for enhanced summaries/tags
 - `aitaskreporter.py` — Vectorization run reports and trend analytics
 
