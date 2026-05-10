@@ -7,9 +7,9 @@ Wants=network-online.target
 Type=simple
 User=baiyefeng
 Group=class
-Environment="PATH=/etc/miniconda3/envs/lsp/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="PATH=/usr/miniconda3/envs/newlsp/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 WorkingDirectory=/home/baiyefeng/work/joplinai
-ExecStart=/etc/miniconda3/envs/lsp/bin/gunicorn -w 2 \
+ExecStart=/usr/miniconda3/envs/newlsp/bin/gunicorn -w 2 \
     --access-logfile /var/log/joplin-qa/cache_access.log \
     --error-logfile /var/log/joplin-qa/cache_error.log \
     --log-level info \
