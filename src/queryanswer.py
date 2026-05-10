@@ -117,149 +117,449 @@ class JoplinQASystem:
     def __init__(self, config: Dict = None):
         from joplinai import CONFIG as CONFIG_JA
         from queryanswer import CONFIG as CONFIG_QA
-        config_all = {**CONFIG_JA, **CONFIG_QA, **config}
+        config_all = {**CONFIG_JA, **CONFIG_QA}
+        if config:
+            config_all.update(config)
         self.config = config_all
-        # for_creation=False表示用于查询
         self.vector_db = VectorDBManager(
             self.config["db_path"], self.config["embedding_model"], for_creation=False
         )
-        self.conversation_history = []  # 对话历史
+        self.conversation_history = []
+
+        from aimod.embedding_generator import EmbeddingGenerator
+        self.embedding_generator = EmbeddingGenerator(
+            self.config,
+            model_name=self.config["embedding_model"],
+        )
+        log.info(
+            f"JoplinQASystem 初始化完成，已加载 embedding_generator，"
+            f"嵌入模型为：{self.config['embedding_model']}"
+        )
 
 # %% [markdown]
 # ### ask(self, question: str, use_history: bool = True) -> Dict
 
     # %%
-    def ask(self, question: str, use_history: bool = True) -> Dict:
+    def ask(self, question: str, use_history: bool = True, user_identity: Optional[Dict] = None) -> Dict:
+        """提问入口，基于块进行检索和回答。
+        用户身份示例：
+        user_identity = {
+            'username': 'chenzhiwei',
+            'display_name': '陈志伟',
+            'role': 'colleague'  # 'admin' 或 'colleague'
+        }
         """
-        回答用户问题
+        # 1. 预处理问题
+        processed_question = self._preprocess_question(question)
 
-        Args:
-            question: 用户问题
-            use_history: 是否使用对话历史
+        # 2. 获取问题嵌入
+        chunk_dict_for_question = {
+            "content": processed_question,
+            "base_metadata": {
+                "content_hash": compute_content_hash(processed_question),
+                "source_note_title": f"{processed_question[:20]}",
+                "chunk_index": 0,
+            }
+        }
+        query_embedding = self.embedding_generator.get_merged_embedding(chunk_dict_for_question)
+        if not query_embedding:
+            return {"answer": "无法生成问题嵌入，请检查配置。", "relevant_chunks": []}
 
-        Returns:
-            包含答案和相关上下文的字典
-        """
-        log.info(f"处理问题: {question}")
-
-        # 1. 检索相关笔记
-        similar_notes = self.vector_db.search_similar_notes(
-            question, n_results=self.config["max_retrieved_notes"]
+        # 3. 搜索相似块
+        similar_chunks = self.vector_db.search_similar_chunks(
+            query_embedding,
+            limit=self.config.get("max_retrieved_chunks", 15),
+            user_identity=user_identity
         )
 
-        # 过滤低相似度的笔记
-        filtered_notes = [
-            note
-            for note in similar_notes
-            if note["similarity"] >= self.config["similarity_threshold"]
-        ]
+        # 4. 过滤和重排序块
+        filtered_chunks = self._filter_and_rank_chunks(similar_chunks, question)
 
-        if not filtered_notes:
-            log.warning("未找到相关笔记，将使用通用回答")
-            answer = self._generate_generic_answer(question)
-            return {
-                "question": question,
-                "answer": answer,
-                "relevant_notes": [],
-                "sources": [],
-                "is_based_on_notes": False,
-                "context_length": 0,  # 添加context_length字段
-            }
+        # 5. 构建优化上下文（基于块）
+        context = self._build_optimized_context_from_chunks(
+            filtered_chunks,
+            question,
+            user_identity=user_identity
+        )
+        log.debug(f"过滤后块数: {len(filtered_chunks)}")
+        log.debug(f"构建的上下文长度: {len(context)}")
 
-        # 2. 构建上下文
-        context = self._build_context(filtered_notes, question)
+        # 6. 生成答案
+        answer = self._generate_optimized_answer(question, context)
+        final_answer = self._postprocess_answer(answer)
 
-        # 3. 生成答案
-        if self.config["enable_deepseek"] and self.config["deepseek_api_key"]:
-            answer = self._generate_answer_with_deepseek(question, context)
-        else:
-            answer = self._generate_answer_with_ollama(question, context)
-
-        # 4. 更新对话历史
+        # 构建兼容的返回字典：将 filtered_chunks 转换为 relevant_notes 格式
+        relevant_notes_for_return = self._get_relevant_notes_for_return(filtered_chunks)
+        # 更新对话历史
         if use_history:
             self.conversation_history.append(
                 {
                     "question": question,
                     "answer": answer,
                     "timestamp": datetime.now().isoformat(),
-                    "relevant_note_ids": [note["note_id"] for note in filtered_notes],
+                    "relevant_note_ids": [note["note_id"] for note in relevant_notes_for_return],
                 }
             )
-            # 保持历史记录长度
             if len(self.conversation_history) > 10:
                 self.conversation_history = self.conversation_history[-10:]
 
-        # 5. 提取来源信息
-        sources = self._extract_sources(filtered_notes)
+        sources = self._extract_sources(relevant_notes_for_return)
 
         return {
             "question": question,
-            "answer": answer,
-            "relevant_notes": filtered_notes,
+            "answer": final_answer,
+            "relevant_notes": relevant_notes_for_return,
             "sources": sources,
-            "is_based_on_notes": True,
+            "relevant_chunks": filtered_chunks,
             "context_length": len(context),
+            "is_based_on_notes": len(filtered_chunks) > 0,
         }
 
 # %% [markdown]
-# ### _build_context(self, notes: List[Dict], question: str) -> str
+# ### _preprocess_question(self, question: str) -> str
 
     # %%
-    def _build_context(self, notes: List[Dict], question: str) -> str:
-        """构建问答上下文"""
-        context_parts = []
+    def _preprocess_question(self, question: str) -> str:
+        """预处理问题，提高检索效果"""
+        question = question.lower()
+        stop_words = ["请问", "请", "帮我", "我想知道", "什么是", "怎么", "如何"]
+        for word in stop_words:
+            question = question.replace(word, "")
 
-        # 添加系统提示
-        system_prompt = """你是我个人的笔记助手，请基于我的笔记内容回答问题。
-    我的笔记特点：
-    1. 记录工作、学习、生活的点滴
-    2. 包含具体项目、人名、日期
-    3. 可能有零散的想法和计划
-    
-    回答要求：
-    1. 基于笔记事实，不要编造
-    2. 引用具体的笔记内容
-    3. 如果笔记中没有相关信息，请说明
-    4. 用第一人称视角回答（因为这是我的笔记）
-    """
-        context_parts.append(system_prompt)
+        if "我" in question or "我的" in question:
+            question = "个人笔记 " + question
 
-        # 添加相关笔记内容
-        context_parts.append("\n相关笔记内容：")
-        for i, note in enumerate(notes, 1):
-            note_content = note["content"][:800]  # 限制每个笔记长度
-            metadata = note.get("metadata", {})
-            tags = metadata.get("tags", "")
-            summary = metadata.get("summary", "")
+        return question.strip()
 
-            note_context = f"\n【笔记{i} - 相似度:{note['similarity']:.2f}】"
-            if tags:
-                note_context += f" 标签:{tags}"
-            if summary:
-                note_context += f"\n摘要: {summary}"
-            note_context += f"\n内容: {note_content}"
+# %% [markdown]
+# ### _extract_keywords(self, text: str) -> List[str]
 
-            context_parts.append(note_context)
+    # %%
+    def _extract_keywords(self, text: str) -> List[str]:
+        """提取关键词（简单实现）"""
+        import re
+        text = re.sub(r"[^\w\s]", "", text)
+        words = text.split()
+        from collections import Counter
+        word_counts = Counter(words)
+        stop_words = {"的", "了", "在", "是", "我", "你", "他", "她", "它", "这", "那"}
+        keywords = [
+            word
+            for word, count in word_counts.most_common(10)
+            if word not in stop_words and len(word) > 1
+        ]
+        return keywords[:3]
 
-        # 添加对话历史（如果存在）
+# %% [markdown]
+# ### _filter_and_rank_chunks(self, chunks: List[Dict], question: str) -> List[Dict]
+
+    # %%
+    def _filter_and_rank_chunks(self, chunks: List[Dict], question: str) -> List[Dict]:
+        """过滤和重排序检索到的文本块。"""
+        if not chunks:
+            return []
+        log.debug(
+            f"原始检索到 {len(chunks)} 个块，相似度样例: {[c.get('similarity') for c in chunks[:3]]}"
+        )
+
+        chunks.sort(key=lambda x: x["similarity"], reverse=True)
+
+        threshold = self.config.get("similarity_threshold", 0.6)
+        filtered = [chunk for chunk in chunks if chunk["similarity"] >= threshold]
+
+        if len(filtered) < 3 and len(chunks) > 0:
+            filtered = chunks[:3]
+
+        keywords = self._extract_keywords(question)
+        if keywords:
+            scored_chunks = []
+            for chunk in filtered:
+                score = chunk["similarity"]
+                content = chunk["content"].lower()
+                for keyword in keywords:
+                    if keyword in content:
+                        score += 0.1
+                scored_chunks.append((score, chunk))
+            scored_chunks.sort(key=lambda x: x[0], reverse=True)
+            filtered = [chunk for _, chunk in scored_chunks]
+
+        return filtered
+
+# %% [markdown]
+# ### _build_optimized_context_from_chunks(self, chunks, question, user_identity)
+
+    # %%
+    def _build_optimized_context_from_chunks(
+        self, chunks: List[Dict],
+        question: str,
+        user_identity: Optional[Dict] = None,
+    ) -> str:
+        """基于检索到的块构建问答上下文。"""
+        if not chunks:
+            return "没有找到相关笔记内容。"
+
+        from collections import defaultdict
+
+        notes_dict = defaultdict(list)
+        for chunk in chunks:
+            note_id = chunk["source_note_id"]
+            notes_dict[note_id].append(chunk)
+
+        if user_identity:
+            user_role = user_identity.get('role')
+            user_display_name = user_identity.get('display_name')
+            log.debug(f"[权限过滤] 解析身份 -> role: '{user_role}', display_name: '{user_display_name}'")
+
+            default_personal_author = getinivaluefromcloud("joplinai", "default_personal_author")
+
+            import re
+            split_ptn = re.compile(r"[,，]")
+            if (colleague_str := getinivaluefromcloud("joplinai", "colleague")):
+                colleague = [title.strip() for title in split_ptn.split(colleague_str)]
+            else:
+                colleague = ["XXA", "XXB"]
+            colleague_str = "，".join([f"“{person}”" for person in colleague])
+
+            sys_prompt = PromptManager.get_sys_prompt_for_role(user_identity)
+            log.debug(f"[提示词管理] 为用户角色 '{user_identity.get('role') if user_identity else None}' 获取到系统提示词，长度: {len(sys_prompt)}")
+
+        else:
+            log.warning("[权限过滤] user_identity 为 None！将不应用任何过滤。这可能是个安全问题！")
+
+        note_contexts = []
+        for note_id, chunk_list in notes_dict.items():
+            sample_chunk = chunk_list[0]
+            note_title = sample_chunk["metadata"].get("source_note_title", "未知标题")
+            default_author = user_display_name if user_role != 'admin' else default_personal_author
+            note_author = sample_chunk.get("metadata", {}).get("note_author", default_author)
+            note_type = sample_chunk.get("metadata", {}).get("note_type", "个人笔记")
+
+            all_tags = set()
+            for chunk in chunk_list:
+                tags_str = chunk.get("metadata", {}).get("tags", "")
+                if tags_str:
+                    all_tags.update(
+                        tag.strip() for tag in tags_str.split(",") if tag.strip()
+                    )
+            note_tags = ",".join(list(all_tags))
+
+            combined_content = "\n---\n".join([c["content"] for c in chunk_list])
+
+            note_context = f"""【笔记：{note_title} | 类型：{note_type} | 作者：{note_author}】
+标签：{note_tags}
+相关内容：
+{combined_content}
+"""
+            note_contexts.append(note_context)
+
+        history_parts = []
         if self.conversation_history:
-            context_parts.append("\n对话历史：")
-            for hist in self.conversation_history[-3:]:  # 最近3条历史
-                context_parts.append(f"问: {hist['question']}")
-                context_parts.append(f"答: {hist['answer'][:200]}...")
+            history_parts.append("对话历史：")
+            for hist in self.conversation_history[-3:]:
+                history_parts.append(f"问: {hist['question']}")
+                history_parts.append(f"答: {hist['answer'][:200]}...")
 
-        # 添加当前问题
-        context_parts.append(f"\n用户问题: {question}")
-        context_parts.append("\n请基于以上笔记内容回答问题，并注明信息来源。")
+        context = f"""{sys_prompt}
 
-        full_context = "\n".join(context_parts)
+相关笔记内容：
+{chr(10).join(note_contexts)}
 
-        # 限制上下文长度
-        if len(full_context) > self.config["context_max_length"]:
-            full_context = full_context[: self.config["context_max_length"]] + "..."
+{chr(10).join(history_parts)}
 
-        log.debug(f"构建上下文长度: {len(full_context)}字符")
-        return full_context
+我的问题：{question}
+
+请基于以上笔记内容回答，如果笔记中没有相关信息，请说明。"""
+
+        max_len = self.config.get("context_max_length", 2000)
+        log.info(f"设置的最大上下文长度为：{max_len}，本次提交的上下文长度为：{len(context)}")
+        if len(context) > max_len:
+            context = context[:max_len] + "..."
+
+        return context
+
+# %% [markdown]
+# ### _get_relevant_notes_for_return(filtered_chunks: List)
+
+    # %%
+    def _get_relevant_notes_for_return(self, filtered_chunks: List):
+        """将过滤后的块按原始笔记聚合，构建兼容的返回格式"""
+        from collections import defaultdict
+
+        notes_dict = defaultdict(list)
+
+        for chunk in filtered_chunks:
+            metadata = chunk.get("metadata", {})
+            original_note_id = metadata.get("source_note_id")
+
+            if not original_note_id:
+                chunk_id = chunk.get("chunk_id", "")
+                if "_chunk_" in chunk_id:
+                    original_note_id = chunk_id.split("_chunk_")[0]
+                else:
+                    original_note_id = chunk_id
+
+            notes_dict[original_note_id].append(chunk)
+
+        relevant_notes_for_return = []
+        for source_note_id, chunk_list in notes_dict.items():
+            if not chunk_list:
+                continue
+
+            sample_chunk = chunk_list[0]
+            sample_metadata = sample_chunk.get("metadata", {})
+
+            note_title = sample_metadata.get("source_note_title", "未知标题")
+
+            max_similarity = max(chunk.get("similarity", 0.0) for chunk in chunk_list)
+
+            all_tags = set()
+            for chunk in chunk_list:
+                tags_str = chunk.get("metadata", {}).get("tags", "")
+                if tags_str:
+                    all_tags.update(
+                        tag.strip() for tag in tags_str.split(",") if tag.strip()
+                    )
+
+            note_entry = {
+                "note_id": source_note_id,
+                "title": note_title,
+                "similarity": max_similarity,
+                "metadata": {
+                    "aggregated_from_chunks": len(chunk_list),
+                    "tags": ",".join(list(all_tags)),
+                    "source_note_title": note_title,
+                },
+                "related_chunk_ids": [
+                    chunk.get("chunk_id") for chunk in chunk_list if chunk.get("chunk_id")
+                ],
+            }
+            relevant_notes_for_return.append(note_entry)
+
+        relevant_notes_for_return.sort(key=lambda x: x["similarity"], reverse=True)
+
+        return relevant_notes_for_return
+
+# %% [markdown]
+# ### _generate_optimized_answer(self, question: str, context: str) -> str
+
+    # %%
+    def _generate_optimized_answer(self, question: str, context: str) -> str:
+        """生成优化答案"""
+        if self.config["enable_deepseek"] and self.config["deepseek_api_key"]:
+            log.info(f"启用deepseek聊天模式")
+            return self._generate_answer_with_deepseek_optimized(question, context)
+        else:
+            log.info(f"启用本地ollama调用的聊天大模型{self.config['chat_model']}")
+            return self._generate_answer_with_ollama(question, context)
+
+# %% [markdown]
+# ### _generate_answer_with_deepseek_optimized(self, question: str, context: str) -> str
+
+    # %%
+    def _generate_answer_with_deepseek_optimized(
+        self, question: str, context: str
+    ) -> str:
+        """优化版的DeepSeek答案生成"""
+        try:
+            import requests
+
+            headers = {
+                "Authorization": f"Bearer {self.config['deepseek_api_key']}",
+                "Content-Type": "application/json",
+            }
+
+            prompt = f"""{context}
+
+回答要求：
+1. 基于笔记事实，不要编造
+2. 如果笔记信息不完整，可以合理推断但需说明
+3. 回答要具体、实用
+4. 语言自然，像在对话"""
+
+            payload = {
+                "model": self.config["deepseek_chat_model"],
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "你是我个人的笔记助手，帮助我回忆和整理笔记内容。",
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                "temperature": 0.3,
+                "max_tokens": 1800,
+                "top_p": 0.9,
+            }
+
+            response = requests.post(
+                "https://api.deepseek.com/v1/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=60,
+            )
+            response.raise_for_status()
+
+            answer = response.json()["choices"][0]["message"]["content"].strip()
+
+            if len(answer) < self.config.get("min_answer_length", 30):
+                log.warning(f"答案过短: {len(answer)}字符")
+                answer = self._regenerate_answer(question, context)
+
+            return answer
+
+        except Exception as e:
+            log.error(f"DeepSeek生成答案失败: {e}")
+            return f"抱歉，生成答案时出错: {str(e)[:100]}"
+
+# %% [markdown]
+# ### _regenerate_answer(self, question: str, context: str) -> str
+
+    # %%
+    def _regenerate_answer(self, question: str, context: str) -> str:
+        """重新生成答案（当答案质量不高时）"""
+        simplified_context = f"问题：{question}\n\n笔记摘要：{context[:500]}..."
+
+        try:
+            import requests
+
+            headers = {
+                "Authorization": f"Bearer {self.config['deepseek_api_key']}",
+                "Content-Type": "application/json",
+            }
+
+            payload = {
+                "model": self.config["deepseek_chat_model"],
+                "messages": [
+                    {"role": "user", "content": f"请回答：{question}"},
+                ],
+                "temperature": 0.7,
+                "max_tokens": 400,
+            }
+
+            response = requests.post(
+                "https://api.deepseek.com/v1/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=30,
+            )
+            response.raise_for_status()
+
+            answer = response.json()["choices"][0]["message"]["content"].strip()
+            return answer
+
+        except Exception as e:
+            return "根据我的笔记，我找到了一些相关信息，但无法生成完整的回答。建议您直接查看相关笔记。"
+
+# %% [markdown]
+# ### _postprocess_answer(self, answer: str) -> str
+
+    # %%
+    def _postprocess_answer(self, answer: str) -> str:
+        """后处理答案"""
+        import re
+        answer = re.sub(r"\n\s*\n", "\n\n", answer)
+        if answer and answer[-1] not in [".", "。", "!", "！", "?", "？"]:
+            answer += "。"
+        return answer.strip()
 
 # %% [markdown]
 # ### _generate_answer_with_ollama(self, question: str, context: str) -> str
@@ -336,22 +636,6 @@ class JoplinQASystem:
             log.error(f"DeepSeek生成答案失败: {e}")
             # 回退到Ollama
             return self._generate_answer_with_ollama(question, context)
-
-# %% [markdown]
-# ### _generate_generic_answer(self, question: str) -> str
-
-    # %%
-    def _generate_generic_answer(self, question: str) -> str:
-        """生成通用回答（当没有相关笔记时）"""
-        generic_responses = [
-            "我在您的笔记中没有找到相关信息。您可以尝试：\n1. 添加相关笔记\n2. 重新表述问题\n3. 检查笔记是否已正确向量化",
-            "目前笔记库中没有与此问题直接相关的内容。建议您完善相关主题的笔记。",
-            "未找到相关笔记信息。请确保相关笔记已导入并完成向量化处理。",
-        ]
-
-        import random
-
-        return random.choice(generic_responses)
 
 # %% [markdown]
 # ### _extract_sources(self, notes: List[Dict]) -> List[Dict]
@@ -496,618 +780,6 @@ class PromptManager:
         for key in variant_keys:
             variants[key] = getinivaluefromcloud("joplinai", key)
         return variants
-
-# %% [markdown]
-# ## 优化的问答系统核心OptimizedJoplinQASystem(JoplinQASystem)
-
-
-# %%
-class OptimizedJoplinQASystem(JoplinQASystem):
-    """优化版的问答系统，针对个人笔记"""
-
-# %% [markdown]
-# ### __init__(self, config: Dict)
-
-    # %%
-    def __init__(self, config: Dict):
-        # 首先，调用父类的初始化（如果继承了 JoplinQASystem）
-        super().__init__(config)  # 如果 OptimizedJoplinQASystem 继承自 JoplinQASystem
-        # 或者手动初始化父类的必要属性：
-        # self.config = config
-        # self.vector_db = VectorDBManager(...)
-        # self.conversation_history = []
-
-        # 关键修复：初始化 embedding_generator
-        # 需要导入或创建 EmbeddingGenerator 类（参考 joplinai.py 中的使用）
-        from aimod.embedding_generator import EmbeddingGenerator  # 请根据实际模块名调整
-
-        self.embedding_generator = EmbeddingGenerator(
-            self.config,
-            model_name=self.config["embedding_model"],
-        )
-        log.info(
-            f"OptimizedJoplinQASystem 初始化完成，已加载 embedding_generator，"
-            f"嵌入模型为：{self.config['embedding_model']}"
-        )
-
-# %% [markdown]
-# ### ask(self, question: str, use_history: bool = True, user_identity: Optional[Dict] = None) -> Dict
-
-    # %%
-    def ask(self, question: str, use_history: bool = True, user_identity: Optional[Dict] = None) -> Dict:
-        """提问入口，现在基于块进行检索和回答。
-        用户身份示例：
-        user_identity = {
-            'username': 'chenzhiwei',
-            'display_name': '陈志伟',
-            'role': 'colleague'  # 'admin' 或 'colleague'
-        }
-        """
-        # 1. 预处理问题
-        processed_question = self._preprocess_question(question)
-
-        # 2. 获取问题嵌入
-        chunk_dict_for_question = {
-            "content": processed_question,
-            "base_metadata": {
-                "content_hash": compute_content_hash(processed_question),
-                "source_note_title": f"{processed_question[:20]}",
-                "chunk_index": 0,
-            }
-        }
-        query_embedding = self.embedding_generator.get_merged_embedding(chunk_dict_for_question)
-        if not query_embedding:
-            return {"answer": "无法生成问题嵌入，请检查配置。", "relevant_chunks": []}
-
-        # 3. 搜索相似块（注意：调用的是 search_similar_chunks）
-        similar_chunks = self.vector_db.search_similar_chunks(
-            query_embedding,
-            limit=self.config.get("max_retrieved_chunks", 15),  # 可配置
-            user_identity=user_identity  # 新增参数
-        )
-
-        # 4. 过滤和重排序块
-        filtered_chunks = self._filter_and_rank_chunks(similar_chunks, question)
-
-        # 5. 构建优化上下文（基于块）
-        context = self._build_optimized_context_from_chunks(
-            filtered_chunks,
-            question,
-            user_identity=user_identity  # 新增参数
-        )
-        log.debug(f"过滤后块数: {len(filtered_chunks)}")
-        log.debug(f"构建的上下文长度: {len(context)}")
-        # log.debug(f"上下文预览 (前500字符): {context[:500]}")
-
-        # 6. 生成答案
-        answer = self._generate_optimized_answer(question, context)
-        final_answer = self._postprocess_answer(answer)
-
-        # 构建与原始JoplinQASystem兼容的返回字典
-        # 关键：将 `filtered_chunks` 转换为 `relevant_notes` 格式
-        relevant_notes_for_return = self._get_relevant_notes_for_return(filtered_chunks)
-        # 4. 更新对话历史
-        if use_history:
-            self.conversation_history.append(
-                {
-                    "question": question,
-                    "answer": answer,
-                    "timestamp": datetime.now().isoformat(),
-                    "relevant_note_ids": [note["note_id"] for note in relevant_notes_for_return],
-                }
-            )
-            # 保持历史记录长度
-            if len(self.conversation_history) > 10:
-                self.conversation_history = self.conversation_history[-10:]
-
-        # 构建来源信息（sources）
-        sources = self._extract_sources(relevant_notes_for_return)
-
-        return {
-            "question": question,
-            "answer": final_answer,
-            "relevant_notes": relevant_notes_for_return,  # <-- 必须包含此键
-            "sources": sources,
-            "relevant_chunks": filtered_chunks,  # 返回块信息
-            "context_length": len(context),
-            "is_based_on_notes": len(filtered_chunks) > 0,  # 如果有相关块，则基于笔记
-        }
-
-# %% [markdown]
-# ### _preprocess_question(self, question: str) -> str
-
-    # %%
-    def _preprocess_question(self, question: str) -> str:
-        """预处理问题，提高检索效果"""
-        # 移除常见疑问词
-        question = question.lower()
-        stop_words = ["请问", "请", "帮我", "我想知道", "什么是", "怎么", "如何"]
-        for word in stop_words:
-            question = question.replace(word, "")
-
-        # 提取关键词
-        keywords = self._extract_keywords(question)
-
-        # 如果是关于"我"的问题，添加个人化标记
-        if "我" in question or "我的" in question:
-            question = "个人笔记 " + question
-
-        return question.strip()
-
-# %% [markdown]
-# ### _extract_keywords(self, text: str) -> List[str]
-
-    # %%
-    def _extract_keywords(self, text: str) -> List[str]:
-        """提取关键词（简单实现）"""
-        # 移除标点
-        import re
-
-        text = re.sub(r"[^\w\s]", "", text)
-
-        # 按词频提取（这里可以更复杂）
-        words = text.split()
-        from collections import Counter
-
-        word_counts = Counter(words)
-
-        # 返回前3个高频词（排除停用词）
-        stop_words = {"的", "了", "在", "是", "我", "你", "他", "她", "它", "这", "那"}
-        keywords = [
-            word
-            for word, count in word_counts.most_common(10)
-            if word not in stop_words and len(word) > 1
-        ]
-
-        return keywords[:3]
-
-# %% [markdown]
-# ### _filter_and_rank_chunks(self, chunks: List[Dict], question: str) -> List[Dict]
-
-    # %%
-    def _filter_and_rank_chunks(self, chunks: List[Dict], question: str) -> List[Dict]:
-        """过滤和重排序检索到的文本块。"""
-        if not chunks:
-            return []
-        log.debug(
-            f"原始检索到 {len(chunks)} 个块，相似度样例: {[c.get('similarity') for c in chunks[:3]]}"
-        )
-
-        # 1. 按相似度排序
-        chunks.sort(key=lambda x: x["similarity"], reverse=True)
-
-        # 2. 应用阈值过滤
-        threshold = self.config.get("similarity_threshold", 0.6)
-        filtered = [chunk for chunk in chunks if chunk["similarity"] >= threshold]
-
-        # 3. 如果过滤后太少，放宽条件
-        if len(filtered) < 3 and len(chunks) > 0:
-            filtered = chunks[:3]
-
-        # 4. 基于问题关键词进一步过滤（可选）
-        keywords = self._extract_keywords(question)
-        if keywords:
-            scored_chunks = []
-            for chunk in filtered:
-                score = chunk["similarity"]
-                content = chunk["content"].lower()
-                for keyword in keywords:
-                    if keyword in content:
-                        score += 0.1
-                scored_chunks.append((score, chunk))
-            scored_chunks.sort(key=lambda x: x[0], reverse=True)
-            filtered = [chunk for _, chunk in scored_chunks]
-
-        return filtered
-
-# %% [markdown]
-# ### _build_optimized_context_from_chunks(self, chunks: List[Dict], question: str, user_identity: Optional[Dict] = None) -> str
-
-    # %%
-    def _build_optimized_context_from_chunks(
-        self, chunks: List[Dict],
-        question: str,
-        user_identity: Optional[Dict] = None,
-    ) -> str:
-        """基于检索到的块构建问答上下文。"""
-        if not chunks:
-            return "没有找到相关笔记内容。"
-
-        # 按原始笔记对块进行分组，便于组织
-        from collections import defaultdict
-
-        notes_dict = defaultdict(list)
-        for chunk in chunks:
-            note_id = chunk["source_note_id"]
-            notes_dict[note_id].append(chunk)
-
-        # 构建系统提示
-        if user_identity:
-            user_role = user_identity.get('role')
-            user_display_name = user_identity.get('display_name')
-            # === 【新增】调试日志：记录角色和显示名 ===
-            log.debug(f"[权限过滤] 解析身份 -> role: '{user_role}', display_name: '{user_display_name}'")
-
-            default_personal_author = getinivaluefromcloud("joplinai", "default_personal_author")
-
-            import re
-            split_ptn = re.compile(r"[,，]")
-            if (colleague_str := getinivaluefromcloud("joplinai", "colleague")):
-                colleague = [title.strip() for title in split_ptn.split(colleague_str)]
-            else:
-                colleague= ["XXA", "XXB"]
-            colleague_str = "，".join([f"“{person}”" for person in colleague])
-
-            # 使用 PromptManager 获取动态提示词
-            sys_prompt = PromptManager.get_sys_prompt_for_role(user_identity)
-            log.debug(f"[提示词管理] 为用户角色 '{user_identity.get('role') if user_identity else None}' 获取到系统提示词，长度: {len(sys_prompt)}")
-
-        else:
-            log.warning("[权限过滤] user_identity 为 None！将不应用任何过滤。这可能是个安全问题！")
-
-        # 为每个原始笔记构建上下文部分
-        note_contexts = []
-        for note_id, chunk_list in notes_dict.items():
-            # 取该笔记的第一个块获取标题等信息（假设所有块metadata一致）
-            sample_chunk = chunk_list[0]
-            note_title = sample_chunk["metadata"].get("source_note_title", "未知标题")
-            default_author = user_display_name if user_role != 'admin' else default_personal_author
-            # log.info(default_author)
-            note_author = sample_chunk.get("metadata", {}).get("note_author", default_author)
-            note_type = sample_chunk.get("metadata", {}).get("note_type", "个人笔记")
-
-            # 合并该笔记所有相关块的标签字符串，拆分合并，并用集合去重
-            all_tags = set()
-            for chunk in chunk_list:
-                tags_str = chunk.get("metadata", {}).get("tags", "")
-                if tags_str:
-                    all_tags.update(
-                        tag.strip() for tag in tags_str.split(",") if tag.strip()
-                    )
-            note_tags = ",".join(list(all_tags))
-
-            # 合并该笔记的所有相关块内容
-            combined_content = "\n---\n".join([c["content"] for c in chunk_list])
-
-            note_context = f"""【笔记：{note_title} | 类型：{note_type} | 作者：{note_author}】
-    标签：{note_tags}
-    相关内容：
-    {combined_content}
-    """
-            note_contexts.append(note_context)
-
-        history_parts = []
-        # 添加对话历史（如果存在）
-        if self.conversation_history:
-            history_parts.append("对话历史：")
-            for hist in self.conversation_history[-3:]:  # 最近3条历史
-                history_parts.append(f"问: {hist['question']}")
-                history_parts.append(f"答: {hist['answer'][:200]}...")
-        # 组合完整上下文
-        context = f"""{sys_prompt}
-
-    相关笔记内容：
-    {chr(10).join(note_contexts)}
-
-    {chr(10).join(history_parts)}
-
-    我的问题：{question}
-
-    请基于以上笔记内容回答，如果笔记中没有相关信息，请说明。"""
-
-        # 限制长度
-        max_len = self.config.get(
-            "context_max_length", 2000
-        )  # 可适当提高，因为现在信息更密集
-        # print(context)
-        log.info(f"设置的最大上下文长度为：{max_len}，本次提交的上下文长度为：{len(context)}")
-        if len(context) > max_len:
-            context = context[:max_len] + "..."
-
-        return context
-
-# %% [markdown]
-# ### _build_optimized_context(self, notes: List[Dict], question: str) -> str
-
-    # %%
-    def _build_optimized_context(self, notes: List[Dict], question: str) -> str:
-        """构建优化上下文"""
-        if not notes:
-            return "没有找到相关笔记。"
-
-        # 构建系统提示
-        system_prompt = """你是我个人的笔记助手，基于Joplin笔记回答问题。
-笔记记录了工作（轻行动功能饮料、习龙酱酒等）、学习、生活、想法等各种内容，请注意，因为有共享笔记本，这意味着有些笔记是同事或者朋友记录的。
-如果涉及到轻行动品牌（主要是功能饮料等系列产品），注意人物关系，我（白晔峰）是轻行动运营公司的负责人，陈志伟（志伟）和张永是领导班子成员，白磊（磊帅）是轻行动商业模式的创始人
-请基于以下相关笔记片段。
-如果笔记中没有相关信息，请如实告知。"""
-
-        # 构建笔记上下文
-        note_contexts = []
-        for i, note in enumerate(notes[:3]):  # 最多3条
-            metadata = note.get("metadata", {})
-            tags = metadata.get("tags", "无标签")
-            summary = metadata.get("summary", "")
-
-            # 提取最相关的片段（基于问题关键词）
-            content_snippet = self._extract_relevant_snippet(
-                note["content"], question, max_length=300
-            )
-
-            note_context = f"""【笔记{i + 1}】
-标签：{tags}
-摘要：{summary}
-相关内容：{content_snippet}"""
-
-            note_contexts.append(note_context)
-
-        # 组合完整上下文
-        context = f"""{system_prompt}
-
-相关笔记：
-{chr(10).join(note_contexts)}
-
-我的问题：{question}
-
-请基于以上笔记回答，如果笔记中没有相关信息，请说明。"""
-
-        # 限制长度
-        max_len = self.config.get("context_max_length", 1500)
-        if len(context) > max_len:
-            context = context[:max_len] + "..."
-
-        return context
-
-# %% [markdown]
-# ### _get_relevant_notes_for_return(filtered_chunks: List)
-
-    # %%
-    def _get_relevant_notes_for_return(self, filtered_chunks: List):
-        # 1. 按原始笔记ID (original_note_id) 对块进行分组
-        from collections import defaultdict
-
-        notes_dict = defaultdict(list)
-
-        for chunk in filtered_chunks:
-            metadata = chunk.get("metadata", {})
-            original_note_id = metadata.get("source_note_id")
-
-            # 如果 original_note_id 不存在，尝试用其他逻辑获取（如从chunk_id解析）
-            if not original_note_id:
-                # 备选方案：假设 chunk_id 格式为 “{note_id}_chunk_{index}”
-                chunk_id = chunk.get("chunk_id", "")
-                if "_chunk_" in chunk_id:
-                    # 【修正】取分割后的第一部分作为笔记ID
-                    original_note_id = chunk_id.split("_chunk_")[0]
-                else:
-                    original_note_id = chunk_id  # 降级处理
-
-            notes_dict[original_note_id].append(chunk)
-
-        # 2. 为每个原始笔记构建一条返回记录
-        relevant_notes_for_return = []
-        for source_note_id, chunk_list in notes_dict.items():
-            if not chunk_list:
-                continue
-
-            # 取第一个块获取笔记标题（假设同笔记的所有块metadata一致）
-            sample_chunk = chunk_list[0]
-            sample_metadata = sample_chunk.get("metadata", {})
-
-            # 确定笔记标题：优先用 source_note_title
-            # 【优化】此处逻辑有冗余，直接获取并设置默认值即可
-            note_title = sample_metadata.get("source_note_title", "未知标题")
-
-            # 计算该笔记下所有块中的最高相似度作为此笔记的关联度
-            max_similarity = max(chunk.get("similarity", 0.0) for chunk in chunk_list)
-
-            # 聚合所有块的标签等信息
-            all_tags = set()
-            for chunk in chunk_list:
-                tags_str = chunk.get("metadata", {}).get("tags", "")
-                if tags_str:
-                    all_tags.update(
-                        tag.strip() for tag in tags_str.split(",") if tag.strip()
-                    )
-
-            note_entry = {
-                "note_id": source_note_id,  # 返回原始笔记ID
-                "title": note_title,  # 正确的来源笔记标题
-                "similarity": max_similarity,  # 笔记级别的关联度
-                "metadata": {
-                    "aggregated_from_chunks": len(chunk_list),  # 包含几个相关块
-                    "tags": ",".join(list(all_tags)),  # 聚合后的标签
-                    "source_note_title": note_title,
-                },
-                # 如果需要，可以附加关联的块ID列表
-                "related_chunk_ids": [
-                    chunk.get("chunk_id") for chunk in chunk_list if chunk.get("chunk_id")
-                ],
-            }
-            relevant_notes_for_return.append(note_entry)
-
-        # 3. 按相似度排序
-        relevant_notes_for_return.sort(key=lambda x: x["similarity"], reverse=True)
-
-        return relevant_notes_for_return
-
-# %% [markdown]
-# ### _extract_relevant_snippet(self, content: str, question: str, max_length: int = 300) -> str
-
-    # %%
-    def _extract_relevant_snippet(
-        self, content: str, question: str, max_length: int = 300
-    ) -> str:
-        """提取内容中最相关的片段"""
-        keywords = self._extract_keywords(question)
-
-        if not keywords:
-            # 没有关键词，取开头部分
-            return content[:max_length] + ("..." if len(content) > max_length else "")
-
-        # 查找包含关键词的句子
-        import re
-
-        sentences = re.split(r"[。！？；\n]", content)
-
-        relevant_sentences = []
-        for sentence in sentences:
-            for keyword in keywords:
-                if keyword in sentence:
-                    relevant_sentences.append(sentence.strip())
-                    break
-
-        if relevant_sentences:
-            # 合并相关句子
-            snippet = "。".join(relevant_sentences[:5]) + "。"
-            if len(snippet) > max_length:
-                snippet = snippet[:max_length] + "..."
-            return snippet
-        else:
-            # 没有找到关键词，取开头
-            return content[:max_length] + ("..." if len(content) > max_length else "")
-
-# %% [markdown]
-# ### _generate_optimized_answer(self, question: str, context: str) -> str
-
-    # %%
-    def _generate_optimized_answer(self, question: str, context: str) -> str:
-        """生成优化答案"""
-        # 使用DeepSeek
-        if self.config["enable_deepseek"] and self.config["deepseek_api_key"]:
-            log.info(f"启用deepseek聊天模式")
-            return self._generate_answer_with_deepseek_optimized(question, context)
-        else:
-            log.info(f"启用本地ollama调用的聊天大模型{self.config['chat_model']}")
-            return self._generate_answer_with_ollama(question, context)
-
-# %% [markdown]
-# ### _generate_answer_with_deepseek_optimized(self, question: str, context: str) -> str
-
-    # %%
-    def _generate_answer_with_deepseek_optimized(
-        self, question: str, context: str
-    ) -> str:
-        """优化版的DeepSeek答案生成"""
-        try:
-            import requests
-
-            headers = {
-                "Authorization": f"Bearer {self.config['deepseek_api_key']}",
-                "Content-Type": "application/json",
-            }
-
-            # 优化提示词
-#             prompt = f"""{context}
-
-# 回答要求：
-# 1. 基于笔记事实，不要编造
-# 2. 引用具体的笔记内容（如：根据笔记《1》提到...）
-# 3. 如果笔记信息不完整，可以合理推断但需说明
-# 4. 回答要具体、实用
-# 5. 语言自然，像在对话"""
-
-            prompt = f"""{context}
-
-回答要求：
-1. 基于笔记事实，不要编造
-2. 如果笔记信息不完整，可以合理推断但需说明
-3. 回答要具体、实用
-4. 语言自然，像在对话"""
-
-            payload = {
-                "model": self.config["deepseek_chat_model"],
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": "你是我个人的笔记助手，帮助我回忆和整理笔记内容。",
-                    },
-                    {"role": "user", "content": prompt},
-                ],
-                "temperature": 0.3,
-                "max_tokens": 1800,
-                "top_p": 0.9,
-            }
-
-            response = requests.post(
-                "https://api.deepseek.com/v1/chat/completions",
-                headers=headers,
-                json=payload,
-                timeout=60,
-            )
-            response.raise_for_status()
-
-            answer = response.json()["choices"][0]["message"]["content"].strip()
-
-            # 检查答案质量
-            if len(answer) < self.config.get("min_answer_length", 30):
-                log.warning(f"答案过短: {len(answer)}字符")
-                # 尝试重新生成
-                answer = self._regenerate_answer(question, context)
-
-            return answer
-
-        except Exception as e:
-            log.error(f"DeepSeek生成答案失败: {e}")
-            return f"抱歉，生成答案时出错: {str(e)[:100]}"
-
-# %% [markdown]
-# ### _regenerate_answer(self, question: str, context: str) -> str
-
-    # %%
-    def _regenerate_answer(self, question: str, context: str) -> str:
-        """重新生成答案（当答案质量不高时）"""
-        # 简化上下文，重新生成
-        simplified_context = f"问题：{question}\n\n笔记摘要：{context[:500]}..."
-
-        try:
-            import requests
-
-            headers = {
-                "Authorization": f"Bearer {self.config['deepseek_api_key']}",
-                "Content-Type": "application/json",
-            }
-
-            payload = {
-                "model": self.config["deepseek_chat_model"],
-                "messages": [
-                    {"role": "user", "content": f"请回答：{question}"},
-                ],
-                "temperature": 0.7,
-                "max_tokens": 400,
-            }
-
-            response = requests.post(
-                "https://api.deepseek.com/v1/chat/completions",
-                headers=headers,
-                json=payload,
-                timeout=30,
-            )
-            response.raise_for_status()
-
-            answer = response.json()["choices"][0]["message"]["content"].strip()
-            return answer
-
-        except Exception as e:
-            return "根据我的笔记，我找到了一些相关信息，但无法生成完整的回答。建议您直接查看相关笔记。"
-
-# %% [markdown]
-# ### _postprocess_answer(self, answer: str) -> str
-
-    # %%
-    def _postprocess_answer(self, answer: str) -> str:
-        """后处理答案"""
-        # 移除多余的空白
-        import re
-
-        answer = re.sub(r"\n\s*\n", "\n\n", answer)
-
-        # 确保以句号结束
-        if answer and answer[-1] not in [".", "。", "!", "！", "?", "？"]:
-            answer += "。"
-
-        return answer.strip()
-
 
 # %% [markdown]
 # ## 命令行界面
@@ -1257,8 +929,7 @@ def main():
 
     # 初始化问答系统
     log.info("初始化Joplin问答系统...")
-    # qa_system = JoplinQASystem(dynamic_config)
-    qa_system = OptimizedJoplinQASystem(dynamic_config)
+    qa_system = JoplinQASystem(dynamic_config)
 
     # 检查向量数据库
     if not qa_system.vector_db.collection:
