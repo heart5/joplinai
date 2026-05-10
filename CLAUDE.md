@@ -14,12 +14,12 @@ All services are Flask apps run directly with `python <file>`. No Docker/contain
 |---------|------|------|---------|
 | Web Portal | `joplin_web_app.py` | 127.0.0.1:5001 | User login, Q&A chat UI, admin panel |
 | Q&A API | `joplin_qa_api.py` | dynamic (from config) | Internal HTTP API for vector search + LLM Q&A |
-| Cache API | `joplinai_cache_api.py` | 127.0.0.1:5003 | Centralized cache (DeepSeek summary/tags + probe results) for multi-host sharing |
+| Center API | `joplinai_center_api.py` | 127.0.0.1:5003 | Centralized data service (DeepSeek cache + probe cache + history DB) for multi-host sharing |
 | Vectorization CLI | `joplinai.py` | — | Chunks Joplin notes, generates embeddings, stores in ChromaDB |
 
-Data flow: `joplinai.py` → `deepseek_enhancer.py` / `embedding_generator.py` → `DeepSeekCacheClient` / `ProbeCacheClient` (HTTP + API key auth) → `joplinai_cache_api.py` → SQLite
+Data flow: `joplinai.py` → `deepseek_enhancer.py` / `embedding_generator.py` / `aitaskreporter.py` → `DeepSeekCacheClient` / `ProbeCacheClient` / `HistoryClient` (HTTP + API key auth) → `joplinai_center_api.py` → `data/joplinai_center.db`（4张表：`deepseek_cache`、`probe_cache`、`notebook_history`、`global_run_history`）
 
-Cache client (`aimod/cache_client.py`) provides `DeepSeekCacheClient` and `ProbeCacheClient`, both remote-first with local/none fallback when the remote service is unreachable.
+Center client (`aimod/center_client.py`) provides `DeepSeekCacheClient`, `ProbeCacheClient`, and `HistoryClient`, all remote-first with local fallback. URL 发现逻辑：云端 `joplinai_center_url` 未配置则本机为生产主机走 `127.0.0.1:5003`。
 
 ### Source Layout
 
@@ -31,12 +31,13 @@ src/              # .py source files (jupytext paired with .ipynb in same dir)
 └── pathmagic.py         + pathmagic.ipynb
 joplinai.py            # Vectorization CLI     + joplinai.ipynb
 joplin_qa_api.py       # Q&A API service      + joplin_qa_api.ipynb
-joplin_web_app.py      # Web portal           + joplin_web_app.ipynb
-joplinai_cache_api.py  # Cache API service
-pathmagic.py           # Root path context    + pathmagic.ipynb
-deploy/                # systemd service files
-aimod/                 # AI core modules
-├── cache_client.py           # Unified cache client (DeepSeek + Probe)
+joplin_web_app.py           # Web portal           + joplin_web_app.ipynb
+joplinai_center_api.py       # Center API service   + joplinai_center_api.ipynb
+pathmagic.py                 # Root path context    + pathmagic.ipynb
+deploy/                      # systemd service files
+├── joplinai-center-api.service
+aimod/                       # AI core modules
+├── center_client.py         # 数据中心客户端 (DeepSeek + Probe + History)
 func/                 # Utility submodule (heart5/func)
 static/               # Frontend assets
 templates/            # Jinja2 templates
@@ -48,10 +49,10 @@ log/                  # Logs (gitignored)
 
 - `embedding_generator.py` — Text chunking + embedding via Ollama models
 - `vector_db_manager.py` — ChromaDB CRUD operations
-- `cache_manager.py` — SQLite-based LRU cache for AI calls
-- `cache_client.py` — Unified cache client (`DeepSeekCacheClient` + `ProbeCacheClient`), remote-first
+- `cache_manager.py` — SQLite-based LRU cache for AI calls (本地回退用)
+- `center_client.py` — 数据中心客户端 (`DeepSeekCacheClient` + `ProbeCacheClient` + `HistoryClient`), remote-first
 - `deepseek_enhancer.py` — Optional DeepSeek API for enhanced summaries/tags
-- `aitaskreporter.py` — Vectorization run reports and trend analytics
+- `aitaskreporter.py` — Vectorization run reports and trend analytics (远程优先，本地回退)
 
 ### Utility Submodule (`func/`)
 
@@ -104,6 +105,8 @@ python joplin_web_app.py
 ## Configuration
 
 Main config stored in cloud-synced Joplin note (INI format). Local override: `data/joplinai.ini`. Key settings: Joplin API token, Ollama model name, embedding model, ChromaDB path, Q&A prompts, user session settings.
+
+**数据中心配置**：`joplinai_center_url`（非生产主机配，指向 TC 公网IP；生产主机不配则自动走 localhost）、`joplinai_center_api_key`（认证密钥）、`probe_cache_limit`（探测缓存上限，默认 10000）。
 
 ### Remote Joplin fallback
 

@@ -38,7 +38,6 @@ with pathmagic.context():
     try:
         from aimod.deepseek_enhancer import deepseek_process_note, get_cache_manager
         from func.datatools import compute_content_hash
-        from func.getid import getdeviceid
         from func.jpfuncs import (
             createnote,
             get_notebook_ids_for_note,
@@ -492,10 +491,12 @@ class EmbeddingGenerator:
         # 初始化探测缓存客户端（远程优先，失败不影响运行）
         probe_client = None
         try:
-            remote_url = getinivaluefromcloud("joplinai", f"joplinai_cache_url_{getdeviceid()}")
-            api_key = getinivaluefromcloud("joplinai", "joplinai_cache_api_key")
+            remote_url = getinivaluefromcloud("joplinai", "joplinai_center_url")
+            if not remote_url:
+                remote_url = "http://127.0.0.1:5003"
+            api_key = getinivaluefromcloud("joplinai", "joplinai_center_api_key")
             if remote_url and api_key:
-                from aimod.cache_client import ProbeCacheClient
+                from aimod.center_client import ProbeCacheClient
                 probe_client = ProbeCacheClient(remote_url, api_key)
                 log.info("[自适应探测] 远程缓存客户端已连接")
         except Exception:

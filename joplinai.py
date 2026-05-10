@@ -50,6 +50,7 @@ import pathmagic
 with pathmagic.context():
     try:
         from aimod.aitaskreporter import JoplinAITaskReporter
+        from aimod.center_client import HistoryClient
         from aimod.embedding_generator import EmbeddingGenerator
         from aimod.vector_db_manager import VectorDBManager
         from func.configpr import (
@@ -999,8 +1000,20 @@ def main():
 # #### 初始化任务报告器并启动处理传入的笔记本列表
 
     # %%
+    # 初始化历史数据库客户端（远程优先）
+    history_client = None
+    try:
+        remote_url = getinivaluefromcloud("joplinai", "joplinai_center_url")
+        if not remote_url:
+            remote_url = "http://127.0.0.1:5003"
+        api_key = getinivaluefromcloud("joplinai", "joplinai_center_api_key")
+        if remote_url and api_key:
+            history_client = HistoryClient(remote_url, api_key)
+    except Exception:
+        pass
+
     # 初始化任务报告器
-    task_reporter = JoplinAITaskReporter(dynamic_config)
+    task_reporter = JoplinAITaskReporter(dynamic_config, history_client=history_client)
 
     log.info("===== 启动Joplin笔记向量化处理 =====")
     notebook_titles = [

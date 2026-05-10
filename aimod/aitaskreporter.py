@@ -79,8 +79,9 @@ class JoplinAITaskReporter:
 # ## \_\_init__(self, config: Dict)
 
     # %%
-    def __init__(self, config: Dict):
+    def __init__(self, config: Dict, history_client=None):
         self.config = config
+        self.history_client = history_client  # HistoryClient 实例（远程优先）
         self.task_records = []  # 本次运行的内存记录
         self.summary_data = {}  # 本次运行按笔记本汇总的数据
         # 全局块统计（本次运行）
@@ -91,9 +92,10 @@ class JoplinAITaskReporter:
             "orphan_chunks_cleaned": 0,
         }
         # 历史数据库路径
-        self.history_db_path = getdirmain() / "data" / "joplinai_history.db"
-        # 初始化历史数据库
-        self._init_history_db()
+        self.history_db_path = getdirmain() / "data" / "joplinai_center.db"
+        # 初始化历史数据库（无 remote client 时用本地 SQLite）
+        if not self.history_client:
+            self._init_history_db()
 
 # %% [markdown]
 # ## _init_history_db(self)
@@ -179,7 +181,7 @@ class JoplinAITaskReporter:
 # ## add_notebook_record(self, notebook_title: str, stats: Dict)
     # %%
     def add_notebook_record(self, notebook_title: str, stats: Dict):
-        """添加单个笔记本的处理记录到内存，并立即保存到历史数据库"""
+        """添加单个笔记本的处理记录到内存，并立即保存到历史数据库（远程优先）"""
         # 1. 保存到内存（原有逻辑）
         record = {
             "notebook": notebook_title,
@@ -200,15 +202,20 @@ class JoplinAITaskReporter:
             "orphans_cleaned", 0
         )
 
-        # 2. 立即持久化到历史数据库
+        # 2. 远程优先写入
+        run_id = self._get_current_run_id()
+        timestamp = datetime.now().isoformat()
+        if self.history_client:
+            self.history_client.add_notebook_record(
+                notebook_title, stats, run_id, timestamp
+            )
+            return
+
+        # 3. 本地回退
         try:
             conn = sqlite3.connect(self.history_db_path)
             cursor = conn.cursor()
 
-            # 生成本次运行的唯一ID（例如：时间戳+模型名哈希前8位）
-            run_id = self._get_current_run_id()
-
-            # 准备数据
             notes_added = stats.get("notes_added", [])
             notes_removed = stats.get("notes_removed", [])
             failed_notes = stats.get("failed_notes", [])
@@ -226,7 +233,7 @@ class JoplinAITaskReporter:
                 (
                     run_id,
                     notebook_title,
-                    datetime.now().isoformat(),
+                    timestamp,
                     stats.get("total_notes", 0),
                     stats.get("updated_count", 0),
                     len(failed_notes),
@@ -244,7 +251,7 @@ class JoplinAITaskReporter:
 
             conn.commit()
             conn.close()
-            log.debug(f"笔记本【{notebook_title}】处理记录已保存到历史数据库")
+            log.debug(f"笔记本【{notebook_title}】处理记录已保存到本地历史数据库")
 
         except Exception as e:
             log.error(f"保存笔记本记录到历史数据库失败: {e}", exc_info=True)
@@ -253,24 +260,39 @@ class JoplinAITaskReporter:
 # ## finalize_run(self, success: bool = True, error_msg: str = None)
     # %%
     def finalize_run(self, success: bool = True, error_msg: str = None):
-        """完成本次运行，保存全局运行记录到历史数据库"""
+        """完成本次运行，保存全局运行记录到历史数据库（远程优先）"""
+        run_id = self._get_current_run_id()
+        timestamp = datetime.now().isoformat()
+        embedding_model = self.config["embedding_model"]
+        notebook_count = len(self.summary_data)
+
+        total_notes_processed = sum(
+            s.get("total_notes", 0) for s in self.summary_data.values()
+        )
+        total_notes_added = sum(
+            len(s.get("notes_added", [])) for s in self.summary_data.values()
+        )
+        total_notes_removed = sum(
+            len(s.get("notes_removed", [])) for s in self.summary_data.values()
+        )
+        total_chunks = self.global_chunk_stats["total_chunks_processed"]
+
+        if self.history_client:
+            self.history_client.finalize_run(
+                run_id=run_id, timestamp=timestamp,
+                embedding_model=embedding_model, notebook_count=notebook_count,
+                total_notes_processed=total_notes_processed,
+                total_chunks_processed=total_chunks,
+                total_notes_added=total_notes_added,
+                total_notes_removed=total_notes_removed,
+                success=success, error_message=error_msg,
+            )
+            log.info(f"本次运行全局记录已保存到远程历史数据库，Run ID: {run_id}")
+            return
+
         try:
             conn = sqlite3.connect(self.history_db_path)
             cursor = conn.cursor()
-
-            run_id = self._get_current_run_id()
-
-            # 计算本次运行的全局汇总
-            total_notes_processed = sum(
-                s.get("total_notes", 0) for s in self.summary_data.values()
-            )
-            total_notes_added = sum(
-                len(s.get("notes_added", [])) for s in self.summary_data.values()
-            )
-            total_notes_removed = sum(
-                len(s.get("notes_removed", [])) for s in self.summary_data.values()
-            )
-
             cursor.execute(
                 """
                 INSERT OR REPLACE INTO global_run_history (
@@ -281,22 +303,15 @@ class JoplinAITaskReporter:
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
                 (
-                    run_id,
-                    datetime.now().isoformat(),
-                    self.config["embedding_model"],
-                    len(self.summary_data),
-                    total_notes_processed,
-                    self.global_chunk_stats["total_chunks_processed"],
-                    total_notes_added,
-                    total_notes_removed,
-                    success,
-                    error_msg,
+                    run_id, timestamp, embedding_model, notebook_count,
+                    total_notes_processed, total_chunks,
+                    total_notes_added, total_notes_removed,
+                    success, error_msg,
                 ),
             )
-
             conn.commit()
             conn.close()
-            log.info(f"本次运行全局记录已保存到历史数据库，Run ID: {run_id}")
+            log.info(f"本次运行全局记录已保存到本地历史数据库，Run ID: {run_id}")
 
         except Exception as e:
             log.error(f"保存全局运行记录失败: {e}", exc_info=True)
@@ -319,7 +334,12 @@ class JoplinAITaskReporter:
 # ### get_cumulative_stats(self, days: int = None) -> Dict
     # %%
     def get_cumulative_stats(self, days: int = None) -> Dict:
-        """获取累积统计（可指定最近N天）"""
+        """获取累积统计（远程优先）"""
+        if self.history_client:
+            result = self.history_client.get_cumulative_stats(days)
+            if result:
+                return result
+
         try:
             conn = sqlite3.connect(self.history_db_path)
             conn.row_factory = sqlite3.Row
@@ -407,7 +427,12 @@ class JoplinAITaskReporter:
 # ### get_change_analysis(self, notebook_title: str = None, days: int = 30) -> Dict
     # %%
     def get_change_analysis(self, notebook_title: str = None, days: int = 30) -> Dict:
-        """分析指定笔记本或全局的笔记动态变化"""
+        """分析指定笔记本或全局的笔记动态变化（远程优先）"""
+        if self.history_client:
+            result = self.history_client.get_change_analysis(notebook_title, days)
+            if result:
+                return result
+
         try:
             conn = sqlite3.connect(self.history_db_path)
             conn.row_factory = sqlite3.Row
@@ -483,7 +508,12 @@ class JoplinAITaskReporter:
 # ### get_efficiency_metrics(self, days: int = 30) -> Dict
     # %%
     def get_efficiency_metrics(self, days: int = 30) -> Dict:
-        """获取处理效率指标"""
+        """获取处理效率指标（远程优先）"""
+        if self.history_client:
+            result = self.history_client.get_efficiency_metrics(days)
+            if result:
+                return result
+
         try:
             conn = sqlite3.connect(self.history_db_path)
             conn.row_factory = sqlite3.Row

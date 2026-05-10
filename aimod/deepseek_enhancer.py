@@ -82,8 +82,8 @@ DEFAULT_CHAT_MODEL = "deepseek-chat"  # DeepSeek大模型（示例）
 # %%
 # 初始化全局缓存管理器（单例模式）
 _CACHE_MANAGER = None
-CACHE_DIR = getdirmain() / "data" / ".deepseek_cache"
-CACHE_FILE = CACHE_DIR / "deepseek_cache.db"
+CACHE_DIR = getdirmain() / "data"
+CACHE_FILE = CACHE_DIR / "joplinai_center.db"
 
 
 # %% [markdown]
@@ -101,16 +101,17 @@ def _ensure_cache_dir():
 
 # %%
 def get_cache_manager():
-    """获取缓存管理器 — 云配置按 deviceid 区分，本机无配置则直接本地 SQLite"""
+    """获取缓存管理器 — 云端未配 URL 则本机为生产主机走本地"""
     global _CACHE_MANAGER
     if _CACHE_MANAGER is not None:
         return _CACHE_MANAGER
 
-    device_id = getdeviceid()
-    remote_url = getinivaluefromcloud("joplinai", f"joplinai_cache_url_{device_id}")
-    api_key = getinivaluefromcloud("joplinai", "joplinai_cache_api_key")
+    remote_url = getinivaluefromcloud("joplinai", "joplinai_center_url")
+    if not remote_url:
+        remote_url = "http://127.0.0.1:5003"
+    api_key = getinivaluefromcloud("joplinai", "joplinai_center_api_key")
     if remote_url and api_key:
-        from aimod.cache_client import DeepSeekCacheClient
+        from aimod.center_client import DeepSeekCacheClient
 
         _CACHE_MANAGER = DeepSeekCacheClient(remote_url, api_key)
         return _CACHE_MANAGER

@@ -1,5 +1,5 @@
 [Unit]
-Description=Joplinai 统一缓存 API 服务 (Gunicorn)
+Description=Joplinai 数据中心 (Gunicorn)
 After=network-online.target
 Wants=network-online.target
 
@@ -13,7 +13,7 @@ ExecStart=/usr/miniconda3/envs/newlsp/bin/gunicorn -w 2 \
     --access-logfile /var/log/joplin-qa/cache_access.log \
     --error-logfile /var/log/joplin-qa/cache_error.log \
     --log-level info \
-    -b 0.0.0.0:5003 --timeout 30 joplinai_cache_api:app
+    -b 0.0.0.0:5003 --timeout 30 joplinai_center_api:app
 
 Restart=always
 RestartSec=10
