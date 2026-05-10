@@ -112,8 +112,8 @@ class AdaptiveChunkOptimizer:
         max_len = len(text)
 
         log.info(
-            f"开始自适应分块探测: 模型={model_name}, 文本长度={max_len}字符, "
-            f"起始={start_len}字符"
+            f"[自适应探测] 模型={model_name}, 文本长度={max_len}字符, "
+            f"起始探测={start_len}字符"
         )
 
         current_safe_len = start_len
@@ -122,7 +122,7 @@ class AdaptiveChunkOptimizer:
         try:
             ok, _ = self._probe_at(text, min(start_len, max_len))
         except Exception as e:
-            log.warning(f"  起始探测非长度错误，回退默认chunk_size={chunk_size}: {e}")
+            log.warning(f"  起始探测非长度错误，回退默认chunk_size={chunk_size}字符: {e}")
             current_safe_len = chunk_size
             ok = False  # 触发下方回退
 
@@ -134,22 +134,22 @@ class AdaptiveChunkOptimizer:
                 try:
                     ok, _ = self._probe_at(text, test_len)
                 except Exception as e:
-                    log.warning(f"  探测非长度错误，保留 {current_safe_len}字符: {e}")
+                    log.warning(f"  探测非长度错误，保留current_safe_len={current_safe_len}字符: {e}")
                     break
                 if ok:
                     current_safe_len = test_len
-                    log.debug(f"  探测通过[字符→API]: {test_len}字符未超token上下文")
+                    log.debug(f"  探测通过: {test_len}字符 未超模型token上下文限制")
                     test_len = int(test_len * 1.1)
                 else:
                     log.debug(
-                        f"  探测失败[token超限]: {test_len}字符→超出模型token上下文"
+                        f"  探测失败(token超限): {test_len}字符 → 超出模型token上下文限制"
                     )
                     break
         else:
             # 起始点失败 → 二分搜索向下探索
             lo = int(chunk_size * 0.5)  # 绝对下限
             hi = min(start_len, max_len)
-            log.debug(f"  起始探测超限，二分搜索: [{lo}, {hi}]")
+            log.debug(f"  起始探测超限，二分搜索字符范围: [{lo}字符, {hi}字符]")
             while lo < hi:
                 mid = (lo + hi) // 2
                 try:
@@ -169,7 +169,8 @@ class AdaptiveChunkOptimizer:
             min(current_safe_len, chunk_size * 2),
         )
         log.info(
-            f"自适应分块探测完成: 建议块大小={final_safe_len}字符 (chunk_size={chunk_size}字符)"
+            f"[自适应探测完成] 建议块大小={final_safe_len}字符 "
+            f"(chunk_size={chunk_size}字符)"
         )
 
         return final_safe_len
@@ -266,8 +267,8 @@ class PunctuationAwareSplitter:
                 final_chunks.extend(sub_chunks)
 
         log.info(
-            f"文本【{repr(text[:30])}……】总长{len(text)}字符，"
-            f"被增强型语义切割工具切割为{len(final_chunks)}块，"
+            f"[语义切割] 文本【{repr(text[:30])}……】总长{len(text)}字符，"
+            f"切割为{len(final_chunks)}块，"
             f"各块字符数: {[len(chunk) for chunk in final_chunks]}"
         )
         return final_chunks
@@ -588,12 +589,14 @@ class EmbeddingGenerator:
 
             self.chunk_size = int(num_ctx * 3 * 0.8)
             log.info(
-                f"模型 {self.model_name} 上下文={num_ctx}token, chunk_size(字符)={self.chunk_size}字符"
+                f"[模型上下文] {self.model_name}: num_ctx={num_ctx}token, "
+                f"chunk_size={self.chunk_size}字符 (={num_ctx}token × 3字符/token × 0.8)"
             )
 
         except Exception as e:
             log.warning(
-                f"获取模型上下文失败({self.model_name}), 回退默认chunk_size=1024字符: {e}"
+                f"[模型上下文] 获取失败({self.model_name}), "
+                f"回退默认chunk_size=1024字符: {e}"
             )
             self.chunk_size = 1024
 
@@ -784,7 +787,7 @@ class EmbeddingGenerator:
         len_text = len(text)
         if len_text > safe_length:
             text = text[:safe_length]
-            log.debug(f"激进缩减，从{len_text}缩减至{safe_length}个字符")
+            log.debug(f"[激进缩减] 从{len_text}字符缩减至{safe_length}字符")
 
         # 2. 【新增】针对“人名列表”的特殊处理
         # 检测模式：包含大量顿号、冒号，且无明显段落
@@ -820,7 +823,7 @@ class EmbeddingGenerator:
             return text
 
         original_len = len(text)
-        log.warning(f"文本过长({original_len}字符)，启动智能缩减。")
+        log.warning(f"[智能缩减] 文本过长({original_len}字符)，启动智能缩减")
 
         # 策略1: 移除纯格式性、低信息量的行（如空行、纯分隔符）
         lines = text.splitlines()
@@ -867,7 +870,7 @@ class EmbeddingGenerator:
                 text = truncated + f"...【文本截断，原始长度{original_len}字符】"
             log.warning(f"文本经智能缩减后仍超长，已进行截断并添加标记。")
 
-        log.info(f"智能缩减完成: {original_len} -> {len(text)} 字符")
+        log.info(f"[智能缩减完成] {original_len}字符 -> {len(text)}字符")
         return text
 
 # %% [markdown]
@@ -985,7 +988,7 @@ class EmbeddingGenerator:
                 chunks.append(chunk_ctx)
                 self._try_embed_chunk(chunk_ctx)
                 log.debug(
-                    f"迭代分块: 剩余文本({remaining_len}字符)≤保守安全上限"
+                    f"[迭代分块] 剩余文本({remaining_len}字符)≤安全净字符上限"
                     f"({self._safe_net_chars}字符)，直接作为末块"
                 )
                 break
@@ -1010,7 +1013,7 @@ class EmbeddingGenerator:
                 chunks.append(chunk_ctx)
                 self._try_embed_chunk(chunk_ctx)
                 log.debug(
-                    f"迭代分块: 剩余文本({remaining_len}字符)≤探测margin"
+                    f"[迭代分块] 剩余文本({remaining_len}字符)≤探测margin"
                     f"({margin}字符)，直接作为末块"
                 )
                 break
@@ -1026,8 +1029,9 @@ class EmbeddingGenerator:
                 chunk_end = pos + best_split
             else:
                 log.debug(
-                    f"  句子边界({best_split}字符)过短(阈值{max(MIN_SIZE, int(margin * MIN_FRACTION))}字符)"
-                    f"，改用 margin={margin}字符 截断"
+                    f"  [迭代分块] 句子边界({best_split}字符)过短"
+                    f"(阈值{max(MIN_SIZE, int(margin * MIN_FRACTION))}字符)，"
+                    f"改用 margin={margin}字符 硬截断"
                 )
                 actual_chunk = window_text
                 chunk_end = pos + margin
@@ -1039,7 +1043,7 @@ class EmbeddingGenerator:
             chunks.append(chunk_ctx)
             self._try_embed_chunk(chunk_ctx)
             log.debug(
-                f"迭代分块: pos={pos}字符, 剩余={remaining_len}字符, "
+                f"[迭代分块] pos={pos}字符, 剩余={remaining_len}字符, "
                 f"安全块大小({'探测' if can_adaptive else '固定'})={safe_len}字符, "
                 f"实际取={len(actual_chunk)}字符"
             )
@@ -1066,9 +1070,9 @@ class EmbeddingGenerator:
             pos = next_pos
 
         log.info(
-            f"笔记《{note_title}》迭代分块完成"
+            f"[迭代分块完成] 笔记《{note_title}》"
             f"（{'自适应探测' if can_adaptive else '固定大小'}），"
-            f"共 {len(chunks)} 块，各块字符数: {[len(c) for c in chunks]}"
+            f"共{len(chunks)}块，各块字符数: {[len(c) for c in chunks]}"
         )
         return chunks
 
@@ -1263,10 +1267,10 @@ class EmbeddingGenerator:
         if not final_chunks or (
             len(final_chunks) == 1 and len(final_chunks[0]) > self.chunk_size * 1.1
         ):
-            log.debug(f"按照语义拆分不太合格：{[len(chunk) for chunk in final_chunks]}")
+            log.debug(f"[分块回退] 语义拆分不理想，各块字符数：{[len(chunk) for chunk in final_chunks]}")
             final_chunks = self._split_into_paragraphs_chunks(text)
             log.debug(
-                f"回退用段落甚至字符拆分后：{[len(chunk) for chunk in final_chunks]}"
+                f"[分块回退] 段落/字符拆分后各块字符数：{[len(chunk) for chunk in final_chunks]}"
             )
 
         # ========== 构建块字典和元数据 ==========
@@ -1318,8 +1322,8 @@ class EmbeddingGenerator:
                 )
             except Exception as e:
                 log.error(
-                    f"对笔记《{note_title}》的块 {block_number} "
-                    f"（长度：{len(chunk_content)}）进行DeepSeek增强时失败: {e}",
+                    f"[DeepSeek增强失败] 笔记《{note_title}》块{block_number} "
+                    f"（长度：{len(chunk_content)}字符）: {e}",
                     exc_info=True,
                 )
             # tags = list(set([t.strip() for t in note_tags] + [t.strip() for t in enhanced_metadata.get("tags", "")]))
@@ -1392,7 +1396,7 @@ class EmbeddingGenerator:
 
         # 最终检查：如果仍有块过大，启用最终回退（但应尽量避免走到这一步）
         if any(len(ch) > target_size for ch in chunks):
-            log.warning("段落分割后仍存在过大块，启用字符级回退。")
+            log.warning("[段落分割] 仍存在过大块，启用字符级回退")
             return self._split_text_into_chunks_fallback(text, target_size)
 
         return chunks
@@ -1482,7 +1486,7 @@ class EmbeddingGenerator:
                         error_msg = f"{error_msg} | {body}"
                 except Exception:
                     pass
-            log.error(f"远程Ollama嵌入调用失败[API-token超限]: {error_msg}")
+            log.error(f"[远程Ollama] 嵌入调用失败(token超限): {error_msg}")
             raise Exception(error_msg) from e
 
 # %% [markdown]
@@ -1511,7 +1515,7 @@ class EmbeddingGenerator:
         if chunk_emb is not None:
             self.embedding_cache[text_hash] = chunk_emb  # 同步至主缓存
             log.info(
-                f"笔记《{source_note_title}》的文本块【{chunk_index}】分块缓存击中"
+                f"[嵌入缓存] 笔记《{source_note_title}》块【{chunk_index}】分块阶段缓存击中"
             )
             return chunk_emb
 
@@ -1519,7 +1523,7 @@ class EmbeddingGenerator:
         cached = self.get_cached_embedding(text_hash)
         if cached:
             log.info(
-                f"笔记《{source_note_title}》的文本块【{chunk_index}】缓存击中: {text_hash[:12]}"
+                f"[嵌入缓存] 笔记《{source_note_title}》块【{chunk_index}】缓存击中: {text_hash[:12]}"
             )
             return cached
 
@@ -1550,29 +1554,29 @@ class EmbeddingGenerator:
                                 truncated = truncated[:i+1]
                                 break
                         log.warning(
-                            f"笔记《{source_note_title}》的文本块【{chunk_index}】"
-                            f"长度({len(text)}字符)5次重试均token超限，"
+                            f"[嵌入重试耗尽] 笔记《{source_note_title}》块【{chunk_index}】"
+                            f"长度({len(text)}字符)经5次重试均token超限，"
                             f"句子边界截断至{len(truncated)}字符（安全上限={safe_chars}字符）"
                         )
                         try:
                             embedding = self.get_ollama_embedding(truncated)
                         except Exception as e2:
-                            log.error(f"截断回退嵌入仍失败: {e2}")
+                            log.error(f"[嵌入失败] 截断回退嵌入仍失败: {e2}")
                             return []
                     else:
                         # 非长度错误（如Ollama不可用），不触发重分块
                         log.error(
-                            f"笔记《{source_note_title}》的文本块【{chunk_index}】"
-                            f"嵌入最终失败（非长度错误）: {e}"
+                            f"[嵌入失败] 笔记《{source_note_title}》块【{chunk_index}】"
+                            f"嵌入最终失败（非token长度错误）: {e}"
                         )
                         return []
                     break
                 else:
-                    log.warning(f"获取嵌入失败(第{attempt}次): {e}")
+                    log.warning(f"[嵌入重试] 第{attempt}次获取嵌入失败: {e}")
                 continue
 
         if not embedding:
-            log.error(f"为文本生成嵌入最终失败，将返回空列表。")
+            log.error(f"[嵌入失败] 为文本生成嵌入最终失败，将返回空列表")
             return []
         self.embedding_cache[text_hash] = embedding
 
