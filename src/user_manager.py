@@ -964,7 +964,6 @@ class UserManager:
 def _create_remote_first_manager():
     """创建远程优先的用户管理器，失败时回退到本地 SQLite。"""
     local_db = str(getdirmain() / "data" / "joplinai_users.db")
-    local_mgr = UserManager(local_db)
     try:
         remote_url = getinivaluefromcloud("joplinai", "joplinai_center_url")
         if not remote_url:
@@ -977,7 +976,7 @@ def _create_remote_first_manager():
     except Exception as e:
         log.warning(f"用户管理器远程客户端初始化失败: {e}")
     log.info("用户管理器: 使用本地模式")
-    return local_mgr
+    return UserManager(local_db)
 
 
 USER_DB_PATH = getdirmain() / "data" / "joplinai_users.db"
