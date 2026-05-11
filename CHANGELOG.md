@@ -2,6 +2,26 @@
 
 ## 2026-05-11
 
+### user_manager.py 重构
+
+**代码质量改进**，不影响对外接口和前端：
+
+- **P0 死代码**：删除空的 `update_user_role` 空壳方法（已有正确实现在后）
+- **P1 角色校验修复**：`update_user_role` 白名单 `["admin", "colleague"]` → `["admin", "team_leader", "team_member"]`，与 DB CHECK 约束一致
+- **P2 审计日志模板抽取**：`reset_user_password`、`update_user_active_status`、`update_user_role`、`update_user_display_name`、`delete_user` 五个方法的重复审计模式抽为 `_audit_admin_action()` 辅助方法
+- **P3 命名统一**：
+  - `change_user_display_name` → `update_user_display_name`（与类内其他 `update_*` 方法风格一致）
+  - `_get_user_by_username` → `get_user_by_username`（去下划线，正式公开，3 个 web_app 路由直接调用）
+- **P4 方法拆分**：`get_active_chat_session` 中 `web_{username}` 旧格式迁移逻辑抽为 `_migrate_legacy_chat_session()`
+- **P5 一致性**：`get_qa_history_by_session` 返回格式统一含 `metadata` 字段；数据库连接管理统一为 `with` 语句
+
+影响文件：`src/user_manager.py`、`aimod/center_client.py`、`joplin_web_app.py`（净减 76 行）。所有 Flask 路由路径、前端模板/JS 均不受影响。
+
+### 部署架构确认
+
+- **腾讯云**：Joplin Server、ChromaDB 向量库、`joplinai_center_api`（0.0.0.0:5003）— 数据核心
+- **恒创云**：Ollama LLM、`joplin_qa_api`（127.0.0.1:5000）、`joplin_web_app`（127.0.0.1:5001）— 推理+门户
+
 ### 集中式数据中心（joplinai_center_api）
 
 **重大架构变更**：将原 `joplinai_cache_api` 扩展为统一数据中心 `joplinai_center_api`，所有主机共享同一份数据。

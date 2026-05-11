@@ -6,20 +6,34 @@ Guidance for Claude Code when working in this repository.
 
 Joplinai is an AI-powered knowledge retrieval and Q&A system for [Joplin](https://joplinapp.org/) notes. It vectorizes Joplin notes into ChromaDB, enables semantic search, and provides a multi-user web chat interface with admin management.
 
+## Deployment — Two Servers
+
+| Server | Hostname | Role |
+|--------|----------|------|
+| 腾讯云 (TC) | `tc` (122.51.102.233:2202) | Joplin Server, 向量数据库 (ChromaDB), 数据中心 (center_api), 用户管理 |
+| 恒创云 (HCX) | long9.org | Ollama LLM 推理, Q&A API, Web 门户 |
+
+TC 是数据核心，HCX 是推理+门户。HCX 的 Web 门户通过 HTTP API Key 认证远程调用 TC 的 center_api 和 Q&A API。
+
 ## Architecture — Four Independent Services
 
-All services are Flask apps run directly with `python <file>`. No Docker/containerization.
+All services are Flask apps。No Docker/containerization。
 
-| Service | File | Port | Purpose |
-|---------|------|------|---------|
-| Web Portal | `joplin_web_app.py` | 127.0.0.1:5001 | User login, Q&A chat UI, admin panel |
-| Q&A API | `joplin_qa_api.py` | dynamic (from config) | Internal HTTP API for vector search + LLM Q&A |
-| Center API | `joplinai_center_api.py` | 127.0.0.1:5003 | Centralized data service (DeepSeek cache + probe cache + history DB) for multi-host sharing |
-| Vectorization CLI | `joplinai.py` | — | Chunks Joplin notes, generates embeddings, stores in ChromaDB |
+| Service | File | Port | Host | Purpose |
+|---------|------|------|------|---------|
+| Web Portal | `joplin_web_app.py` | 127.0.0.1:5001 | HCX | User login, Q&A chat UI, admin panel |
+| Q&A API | `joplin_qa_api.py` | 127.0.0.1:5000 | HCX | Internal HTTP API for vector search + LLM Q&A |
+| Center API | `joplinai_center_api.py` | 0.0.0.0:5003 | TC | Centralized data service for multi-host sharing |
+| Vectorization CLI | `joplinai.py` | — | HCX | Chunks Joplin notes, generates embeddings, stores in ChromaDB |
 
-Data flow: `joplinai.py` → `deepseek_enhancer.py` / `embedding_generator.py` / `aitaskreporter.py` → `DeepSeekCacheClient` / `ProbeCacheClient` / `HistoryClient` (HTTP + API key auth) → `joplinai_center_api.py` → `data/joplinai_center.db`（4张表：`deepseek_cache`、`probe_cache`、`notebook_history`、`global_run_history`）
+Data flow: `joplinai.py` → `deepseek_enhancer.py` / `embedding_generator.py` / `aitaskreporter.py` → `DeepSeekCacheClient` / `ProbeCacheClient` / `HistoryClient` / `ProcessStateClient` (HTTP + API key auth) → `joplinai_center_api.py` → `data/joplinai_center.db`
 
-Center client (`aimod/center_client.py`) provides `DeepSeekCacheClient`, `ProbeCacheClient`, and `HistoryClient`, all remote-first with local fallback. URL 发现逻辑：云端 `joplinai_center_url` 未配置则本机为生产主机走 `127.0.0.1:5003`。
+`joplinai_center.db` 包含 10 张表：
+- 缓存与历史：`deepseek_cache`、`probe_cache`、`notebook_history`、`global_run_history`
+- 笔记状态：`note_process_state`
+- 用户管理：`users`、`sessions`、`audit_log`、`qa_history`、`chat_sessions`
+
+Center client (`aimod/center_client.py`) provides `DeepSeekCacheClient`, `ProbeCacheClient`, `HistoryClient`, `ProcessStateClient`, `UserManagerClient` — all remote-first with local fallback. URL 发现逻辑：云端 `joplinai_center_url` 未配置则本机为生产主机走 `127.0.0.1:5003`。
 
 ### Source Layout
 
@@ -31,12 +45,11 @@ src/              # .py source files (jupytext paired with .ipynb in same dir)
 └── pathmagic.py         + pathmagic.ipynb
 joplinai.py            # Vectorization CLI     + joplinai.ipynb
 joplin_qa_api.py       # Q&A API service      + joplin_qa_api.ipynb
-joplin_web_app.py           # Web portal           + joplin_web_app.ipynb
-joplinai_center_api.py       # Center API service   + joplinai_center_api.ipynb
-pathmagic.py                 # Root path context    + pathmagic.ipynb
-deploy/                      # systemd service files
-├── joplinai-center-api.service
-aimod/                       # AI core modules
+joplin_web_app.py      # Web portal           + joplin_web_app.ipynb
+joplinai_center_api.py # Center API service   + joplinai_center_api.ipynb
+pathmagic.py           # Root path context    + pathmagic.ipynb
+deploy/                # systemd service files (TC: center-api; HCX: web-app, qa-api)
+aimod/                 # AI core modules
 ├── center_client.py         # 数据中心客户端 (DeepSeek + Probe + History)
 func/                 # Utility submodule (heart5/func)
 static/               # Frontend assets
@@ -50,7 +63,7 @@ log/                  # Logs (gitignored)
 - `embedding_generator.py` — Text chunking + embedding via Ollama models
 - `vector_db_manager.py` — ChromaDB CRUD operations
 - `cache_manager.py` — SQLite-based LRU cache for AI calls (本地回退用)
-- `center_client.py` — 数据中心客户端 (`DeepSeekCacheClient` + `ProbeCacheClient` + `HistoryClient`), remote-first
+- `center_client.py` — 数据中心客户端 (`DeepSeekCacheClient` + `ProbeCacheClient` + `HistoryClient` + `ProcessStateClient` + `UserManagerClient`), 全部 remote-first + local fallback
 - `deepseek_enhancer.py` — Optional DeepSeek API for enhanced summaries/tags
 - `aitaskreporter.py` — Vectorization run reports and trend analytics (远程优先，本地回退)
 
@@ -65,7 +78,9 @@ Proper git submodule registered in `.gitmodules` pointing to `heart5/func`. Clon
 
 ### User System (`src/user_manager.py`)
 
-SQLite-based (`data/joplinai_users.db`). Three roles: `admin`, `team_leader`, `team_member`. Notebook-level access control via `allowed_notebooks` JSON field.
+Remote-first + local SQLite fallback. Three roles: `admin`, `team_leader`, `team_member`. Notebook-level access control via `allowed_notebooks` JSON field. The module-level `USER_MANAGER` singleton auto-detects remote availability and returns either `UserManagerClient` (remote) or `UserManager` (local).
+
+User data is centralized in TC's `joplinai_center_db` and accessed remotely via HTTP API Key auth. Local `data/joplinai_users.db` serves as fallback.
 
 ## How to Run
 
