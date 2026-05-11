@@ -122,6 +122,13 @@ class DeepSeekCacheClient:
             return resp.json()
         return self.local.get_stats(cache_key=cache_key)
 
+    def get_report(self) -> Dict[str, Any]:
+        resp = self._request("GET", "/cache/deepseek/report")
+        if resp is not None:
+            return resp.json()
+        log.warning("远程获取缓存报告失败，返回空报告")
+        return {}
+
 
 # %% [markdown]
 # # ProbeCacheClient

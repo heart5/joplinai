@@ -26,7 +26,7 @@ All services are Flask apps。No Docker/containerization。
 | Center API | `joplinai_center_api.py` | 0.0.0.0:5003 | TC | Centralized data service for multi-host sharing |
 | Vectorization CLI | `joplinai.py` | — | HCX | Chunks Joplin notes, generates embeddings, stores in ChromaDB |
 
-Data flow: `joplinai.py` → `deepseek_enhancer.py` / `embedding_generator.py` / `aitaskreporter.py` → `DeepSeekCacheClient` / `ProbeCacheClient` / `HistoryClient` / `ProcessStateClient` (HTTP + API key auth) → `joplinai_center_api.py` → `data/joplinai_center.db`
+Data flow: `joplinai.py` → `deepseek_enhancer.py` / `embedding_generator.py` / `run_tracker.py` / `report_writer.py` → `DeepSeekCacheClient` / `ProbeCacheClient` / `HistoryClient` / `ProcessStateClient` (HTTP + API key auth) → `joplinai_center_api.py` → `data/joplinai_center.db`
 
 `joplinai_center.db` 包含 10 张表：
 - 缓存与历史：`deepseek_cache`、`probe_cache`、`notebook_history`、`global_run_history`
@@ -42,7 +42,8 @@ src/              # .py source files (jupytext paired with .ipynb in same dir)
 ├── config_manager.py    + config_manager.ipynb
 ├── queryanswer.py       + queryanswer.ipynb
 ├── user_manager.py      + user_manager.ipynb
-└── pathmagic.py         + pathmagic.ipynb
+├── pathmagic.py         + pathmagic.ipynb
+└── report_writer.py     # Unified report module
 joplinai.py            # Vectorization CLI     + joplinai.ipynb
 joplin_qa_api.py       # Q&A API service      + joplin_qa_api.ipynb
 joplin_web_app.py      # Web portal           + joplin_web_app.ipynb
@@ -65,7 +66,8 @@ log/                  # Logs (gitignored)
 - `cache_manager.py` — SQLite-based LRU cache for AI calls (本地回退用)
 - `center_client.py` — 数据中心客户端 (`DeepSeekCacheClient` + `ProbeCacheClient` + `HistoryClient` + `ProcessStateClient` + `UserManagerClient`), 全部 remote-first + local fallback
 - `deepseek_enhancer.py` — Optional DeepSeek API for enhanced summaries/tags
-- `aitaskreporter.py` — Vectorization run reports and trend analytics (远程优先，本地回退)
+- `run_tracker.py` — Vectorization run data collector and history recorder (remote-first, local fallback)
+- `report_writer.py` — Unified report generation from center_api stats endpoints (in `src/`)
 
 ### Utility Submodule (`func/`)
 

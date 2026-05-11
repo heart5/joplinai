@@ -66,7 +66,8 @@ python joplin_web_app.py
 
 ## 关键模块
 
-- `aimod/` — AI 核心：文本分块与嵌入（`embedding_generator.py`）、ChromaDB 操作（`vector_db_manager.py`）、AI 缓存（`cache_manager.py`）、DeepSeek 增强（`deepseek_enhancer.py`）、向量化报告（`aitaskreporter.py`）
+- `aimod/` — AI 核心：文本分块与嵌入（`embedding_generator.py`）、ChromaDB 操作（`vector_db_manager.py`）、AI 缓存（`cache_manager.py`）、DeepSeek 增强（`deepseek_enhancer.py`）、运行追踪（`run_tracker.py`）
+- `src/` — 核心模块：用户管理（`user_manager.py`）、配置管理（`config_manager.py`）、统一报告（`report_writer.py`）
 - `func/` — 工具子模块（git submodule `heart5/func`）：Joplin API 封装、配置读取、日志、路径检测
 - `src/user_manager.py` — SQLite 用户系统，三角色权限（admin / team_leader / team_member），笔记本级访问控制
 - `src/config_manager.py` — 云端配置热更新单例，定时从 Joplin 笔记拉取配置

@@ -49,7 +49,7 @@ import pathmagic
 
 with pathmagic.context():
     try:
-        from aimod.aitaskreporter import JoplinAITaskReporter
+        from aimod.run_tracker import JoplinAIRunTracker
         from aimod.center_client import HistoryClient
         from aimod.embedding_generator import EmbeddingGenerator
         from aimod.vector_db_manager import VectorDBManager
@@ -1049,8 +1049,8 @@ def main():
         pass
     dynamic_config["state_client"] = state_client
 
-    # 初始化任务报告器
-    task_reporter = JoplinAITaskReporter(dynamic_config, history_client=history_client)
+    # 初始化任务追踪器
+    task_reporter = JoplinAIRunTracker(dynamic_config, history_client=history_client)
 
     log.info("===== 启动Joplin笔记向量化处理 =====")
     notebook_titles = [
@@ -1160,13 +1160,13 @@ def main():
                     f"分批处理检查点已保存: 下次运行将从第 {new_index + 1} 个笔记本继续"
                 )
 
-        # 生成并保存报告到Joplin
-        # 关键步骤：通知报告器本次运行结束，保存全局记录
+        # 结束运行追踪，生成并保存报告
         task_reporter.finalize_run(success=True)
-
-        # 生成并保存报告到joplin
-        report_content = task_reporter.generate_markdown_report()
-        success = task_reporter.update_joplin_note(report_content)
+        from src.report_writer import ReportWriter
+        writer = ReportWriter(dynamic_config, history_client, cache_client=None)
+        snapshot = task_reporter.get_snapshot()
+        report_content = writer.generate_vectorization_report(snapshot)
+        success = writer.write_to_joplin(report_content, "JoplinAI向量化处理报告（历史分析版）")
         if success:
             log.info("处理统计报告已成功更新至Joplin笔记。")
         else:

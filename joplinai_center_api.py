@@ -332,6 +332,128 @@ def deepseek_cache_stats(cache_key: str = None) -> dict:
     return {"total": row[0], "total_hits": row[1], "current_hits": row[2]}
 
 
+def deepseek_cache_report() -> dict:
+    """综合缓存报告数据（5维度统计）"""
+    conn = _init_db()
+    report = {}
+
+    # basic_stats
+    row = conn.execute("SELECT COUNT(*) as total FROM deepseek_cache").fetchone()
+    total_entries = row[0] if row else 0
+    row = conn.execute("SELECT COALESCE(SUM(total_hits),0) as total_hits FROM deepseek_cache").fetchone()
+    total_hits = row[0] if row else 0
+    row = conn.execute("SELECT COALESCE(SUM(hit_count),0) as current_hits FROM deepseek_cache").fetchone()
+    current_hits = row[0] if row else 0
+    avg_hits = total_hits / total_entries if total_entries > 0 else 0
+    tasks = [dict(r) for r in conn.execute("""
+        SELECT task, COUNT(*) as count, COALESCE(SUM(total_hits),0) as hits,
+               AVG(total_hits) as avg_hits
+        FROM deepseek_cache GROUP BY task ORDER BY count DESC
+    """).fetchall()]
+    report["basic_stats"] = {
+        "total_entries": total_entries, "total_hits": total_hits,
+        "current_hits": current_hits, "avg_hits_per_entry": avg_hits,
+        "task_distribution": tasks,
+    }
+
+    # time_analysis
+    creation_by_day = [dict(r) for r in conn.execute("""
+        SELECT DATE(created_at) as date, COUNT(*) as count
+        FROM deepseek_cache GROUP BY DATE(created_at) ORDER BY date DESC LIMIT 30
+    """).fetchall()]
+    access_by_day = [dict(r) for r in conn.execute("""
+        SELECT DATE(last_accessed) as date, COUNT(*) as count
+        FROM deepseek_cache GROUP BY DATE(last_accessed) ORDER BY date DESC LIMIT 30
+    """).fetchall()]
+    age_dist = [dict(r) for r in conn.execute("""
+        SELECT CASE
+            WHEN julianday('now') - julianday(created_at) <= 1 THEN '1天内'
+            WHEN julianday('now') - julianday(created_at) <= 7 THEN '7天内'
+            WHEN julianday('now') - julianday(created_at) <= 30 THEN '30天内'
+            WHEN julianday('now') - julianday(created_at) <= 90 THEN '90天内'
+            ELSE '超过90天'
+        END as age_group, COUNT(*) as count,
+        AVG(total_hits) as avg_hits
+        FROM deepseek_cache GROUP BY age_group
+        ORDER BY CASE age_group
+            WHEN '1天内' THEN 1 WHEN '7天内' THEN 2 WHEN '30天内' THEN 3
+            WHEN '90天内' THEN 4 ELSE 5 END
+    """).fetchall()]
+    row = conn.execute("""
+        SELECT COUNT(*) FROM deepseek_cache
+        WHERE julianday('now') - julianday(last_accessed) <= 7
+    """).fetchone()
+    recent_active = row[0] if row else 0
+    report["time_analysis"] = {
+        "creation_by_day": creation_by_day, "access_by_day": access_by_day,
+        "age_distribution": age_dist, "recent_active": recent_active,
+    }
+
+    # validation_analysis
+    val_states = [dict(r) for r in conn.execute("""
+        SELECT COALESCE(validation_result,'not_validated') as validation_state,
+               COUNT(*) as count, AVG(total_hits) as avg_hits,
+               AVG(julianday('now') - julianday(created_at)) as avg_age_days
+        FROM deepseek_cache GROUP BY validation_state ORDER BY count DESC
+    """).fetchall()]
+    row = conn.execute("SELECT COUNT(*) FROM deepseek_cache WHERE hit_count >= ?", (4000,)).fetchone()
+    nearing = row[0] if row else 0
+    row = conn.execute("""
+        SELECT MAX(last_validated_at) FROM deepseek_cache WHERE last_validated_at IS NOT NULL
+    """).fetchone()
+    last_val = row[0] if row else None
+    report["validation_analysis"] = {
+        "validation_states": val_states, "nearing_validation": nearing,
+        "last_validation_time": last_val,
+    }
+
+    # performance_metrics
+    top = [dict(r) for r in conn.execute("""
+        SELECT cache_key, task, total_hits, hit_count, created_at, last_accessed,
+               substr(result, 1, 30) as result_preview
+        FROM deepseek_cache ORDER BY total_hits DESC LIMIT 10
+    """).fetchall()]
+    row = conn.execute("""
+        SELECT COUNT(*) FROM deepseek_cache
+        WHERE julianday('now') - julianday(last_accessed) > 30 AND total_hits = 0
+    """).fetchone()
+    stale = row[0] if row else 0
+    # 不调用 _fetch_scalar，直接 COUNT
+    count_row = conn.execute("SELECT COUNT(*) FROM deepseek_cache").fetchone()
+    count_val = count_row[0] if count_row else 0
+    access_by_hour = [dict(r) for r in conn.execute("""
+        SELECT strftime('%H', last_accessed) as hour, COUNT(*) as access_count
+        FROM deepseek_cache WHERE last_accessed IS NOT NULL
+        GROUP BY hour ORDER BY hour
+    """).fetchall()]
+    report["performance_metrics"] = {
+        "top_hitters": top, "stale_entries": stale,
+        "estimated_size_mb": round(count_val * 2 / 1024, 2),
+        "access_by_hour": access_by_hour,
+    }
+
+    # growth_trends
+    daily = [dict(r) for r in conn.execute("""
+        SELECT DATE(created_at) as date, COUNT(*) as new_entries
+        FROM deepseek_cache WHERE DATE(created_at) >= DATE('now', '-30 days')
+        GROUP BY DATE(created_at) ORDER BY date
+    """).fetchall()]
+    cum = [dict(r) for r in conn.execute("""
+        SELECT DATE(created_at) as date,
+               SUM(COUNT(*)) OVER (ORDER BY DATE(created_at)) as cumulative
+        FROM deepseek_cache WHERE DATE(created_at) >= DATE('now', '-30 days')
+        GROUP BY DATE(created_at) ORDER BY date
+    """).fetchall()]
+    avg_daily = sum(d["new_entries"] for d in daily) / len(daily) if daily else 0
+    report["growth_trends"] = {
+        "daily_growth": daily, "cumulative_growth": cum,
+        "predicted_weekly_growth": round(avg_daily * 7, 1),
+    }
+
+    conn.close()
+    return report
+
+
 # %% [markdown]
 # # 探测缓存操作
 
@@ -689,6 +811,12 @@ def api_ds_cache_validate():
 def api_ds_cache_stats():
     key = request.args.get("cache_key")
     return jsonify(deepseek_cache_stats(cache_key=key))
+
+
+@app.route("/cache/deepseek/report")
+@require_auth
+def api_ds_cache_report():
+    return jsonify(deepseek_cache_report())
 
 
 # %% [markdown]
