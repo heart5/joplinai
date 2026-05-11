@@ -416,30 +416,18 @@ def activate_chat_session(session_id):
 def restore_history_for_session(session_id: str):
     """从 qa_history 数据库加载该会话的历史记录，并恢复到 QA API 内存"""
     try:
-        import sqlite3
-
-        # 从数据库获取历史（最新50条）
-        conn = sqlite3.connect(USER_DB_PATH)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT question, answer, created_at FROM qa_history WHERE session_id = ? ORDER BY created_at ASC",
-            (session_id,),
-        )
-        rows = cursor.fetchall()
-        conn.close()
+        rows = USER_MANAGER.get_qa_history_by_session(session_id)
         if not rows:
             return
         history = []
         for row in rows:
             entry = {
-                "timestamp": row["created_at"],
+                "timestamp": row["timestamp"],
                 "question": row["question"],
                 "answer": row["answer"],
                 "metadata": {},
             }
             history.append(entry)
-        # 调用 QA API 的 restroe 端点
         requests.post(
             f"{QA_API_URL}/restore_history",
             json={"session_id": session_id, "history": history},

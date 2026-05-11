@@ -1017,17 +1017,54 @@ class UserManager:
         conn.close()
         return [row[0] for row in rows]
 
+    def get_qa_history_by_session(self, session_id: str) -> List[Dict]:
+        """按 session_id 查询历史（用于 restore_history）"""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT question, answer, created_at FROM qa_history "
+            "WHERE session_id=? ORDER BY created_at ASC",
+            (session_id,),
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        return [{"timestamp": r["created_at"], "question": r["question"], "answer": r["answer"]} for r in rows]
+
 
 # %% [markdown]
-# # 全局实例化
+# # 全局实例化（远程优先 + 本地回退）
+
 
 # %%
-# 全局实例化
-USER_DB_PATH = getdirmain() / "data" / "joplinai_users.db"
-USER_MANAGER = UserManager(USER_DB_PATH)
+def _create_remote_first_manager():
+    """创建远程优先的用户管理器，失败时回退到本地 SQLite。"""
+    local_db = str(getdirmain() / "data" / "joplinai_users.db")
+    local_mgr = UserManager(local_db)
+    try:
+        remote_url = getinivaluefromcloud("joplinai", "joplinai_center_url")
+        if not remote_url:
+            remote_url = "http://127.0.0.1:5003"
+        api_key = getinivaluefromcloud("joplinai", "joplinai_center_api_key")
+        if remote_url and api_key:
+            from aimod.center_client import UserManagerClient
+            log.info("用户管理器: 启用远程优先模式")
+            return UserManagerClient(remote_url, api_key, local_db)
+    except Exception as e:
+        log.warning(f"用户管理器远程客户端初始化失败: {e}")
+    log.info("用户管理器: 使用本地模式")
+    return local_mgr
 
-# 初始化默认管理员用户（如果不存在）
-if not (admin_pw := getinivaluefromcloud("joplinai", "admin_pw")):
-    admin_pw = "your_default_admin_password"
-if not USER_MANAGER.verify_user("baiyefeng", admin_pw):
-    USER_MANAGER.create_user("baiyefeng", admin_pw, "白晔峰", "admin")
+
+USER_DB_PATH = getdirmain() / "data" / "joplinai_users.db"
+USER_MANAGER = _create_remote_first_manager()
+
+# 初始化默认管理员用户（仅在本地模式下执行，远程模式由中心数据库管理）
+if isinstance(USER_MANAGER, UserManager):
+    if not (admin_pw := getinivaluefromcloud("joplinai", "admin_pw")):
+        admin_pw = "your_default_admin_password"
+    try:
+        if not USER_MANAGER.verify_user("baiyefeng", admin_pw):
+            USER_MANAGER.create_user("baiyefeng", admin_pw, "白晔峰", "admin")
+    except Exception:
+        pass

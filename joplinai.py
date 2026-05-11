@@ -489,8 +489,13 @@ def process_notes_incremental(notebook_title: str, config: Dict, note_ids: List[
 
     embedding_gen = process_notes_incremental.embedding_gen
 
-    # 加载处理状态
-    process_state = load_process_state(config["state_path"])
+    # 加载处理状态（远程优先 + 本地回退）
+    state_client = config.get("state_client")
+    if state_client:
+        model_name_str = config["embedding_model"].replace(":", "_").replace("/", "_").replace("-", "_")
+        process_state = state_client.batch_load(model_name_str, Path(config["state_path"]))
+    else:
+        process_state = load_process_state(config["state_path"])
     # 获取强制更新配置
     force_update = config.get("force_update", False)
 
@@ -642,8 +647,13 @@ def process_notes_incremental(notebook_title: str, config: Dict, note_ids: List[
             except Exception as e:
                 log.error(f"并发处理笔记 《{note_title}》 异常: {e}")
                 failed_notes.append(note_title)
-    # 保存状态
-    save_process_state(process_state, config["state_path"])
+    # 保存状态（远程优先 + 本地回退）
+    state_client = config.get("state_client")
+    if state_client:
+        model_name_str = config["embedding_model"].replace(":", "_").replace("/", "_").replace("-", "_")
+        state_client.batch_save(model_name_str, process_state, Path(config["state_path"]))
+    else:
+        save_process_state(process_state, config["state_path"])
     log.info(
         f"增量处理笔记本【{notebook_title}】中的笔记完成情况小结："
         f"新日期需要更新 {len(new_time_notes)} 条，"
@@ -1024,6 +1034,20 @@ def main():
             history_client = HistoryClient(remote_url, api_key)
     except Exception:
         pass
+
+    # 初始化笔记状态客户端（远程优先）
+    state_client = None
+    try:
+        remote_url = getinivaluefromcloud("joplinai", "joplinai_center_url")
+        if not remote_url:
+            remote_url = "http://127.0.0.1:5003"
+        api_key = getinivaluefromcloud("joplinai", "joplinai_center_api_key")
+        if remote_url and api_key:
+            from aimod.center_client import ProcessStateClient
+            state_client = ProcessStateClient(remote_url, api_key)
+    except Exception:
+        pass
+    dynamic_config["state_client"] = state_client
 
     # 初始化任务报告器
     task_reporter = JoplinAITaskReporter(dynamic_config, history_client=history_client)
