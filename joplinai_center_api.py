@@ -335,6 +335,7 @@ def deepseek_cache_stats(cache_key: str = None) -> dict:
 def deepseek_cache_report() -> dict:
     """综合缓存报告数据（5维度统计）"""
     conn = _init_db()
+    conn.row_factory = sqlite3.Row
     report = {}
 
     # basic_stats
