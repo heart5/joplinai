@@ -509,7 +509,7 @@ def api_admin_delete_user():
 
     # 可选：防止删除最后一个管理员（根据业务需求决定）
     # 这里简单检查用户角色，如果是管理员且是最后一个，则阻止
-    target_user = USER_MANAGER._get_user_by_username(target_username)
+    target_user = USER_MANAGER.get_user_by_username(target_username)
     if target_user and target_user["role"] == "admin":
         # 检查是否还有其他管理员
         all_users = USER_MANAGER.get_all_users()
@@ -719,7 +719,7 @@ def api_admin_update_display_name():
     if not target_username or not new_display_name or not new_display_name.strip():
         return jsonify({"success": False, "error": "显示名称不能为空"}), 400
 
-    success = USER_MANAGER.change_user_display_name(
+    success = USER_MANAGER.update_user_display_name(
         target_username, new_display_name, admin_username=session["user"]["username"]
     )
     if success:
@@ -798,7 +798,7 @@ def admin_user_edit(username):
 @admin_required
 def admin_user_history(username):
     """用户对话历史列表页面"""
-    user = USER_MANAGER._get_user_by_username(username)
+    user = USER_MANAGER.get_user_by_username(username)
     if not user:
         abort(404)
     sessions = USER_MANAGER.get_user_chat_sessions(user["id"])
@@ -814,7 +814,7 @@ def admin_user_history(username):
 @admin_required
 def api_admin_user_session_history(username, session_id):
     """获取指定用户某会话的详细问答历史"""
-    user = USER_MANAGER._get_user_by_username(username)
+    user = USER_MANAGER.get_user_by_username(username)
     if not user:
         return jsonify({"success": False, "error": "用户不存在"}), 404
     limit = request.args.get("limit", 50, type=int)

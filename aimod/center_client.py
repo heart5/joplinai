@@ -614,12 +614,12 @@ class UserManagerClient:
             return resp.json()["users"]
         return self.local.get_all_users()
 
-    def _get_user_by_username(self, username: str) -> Optional[Dict]:
+    def get_user_by_username(self, username: str) -> Optional[Dict]:
         resp = self._request("GET", f"/users/{username}")
         if resp is not None:
             data = resp.json()
             return data["user"] if data.get("found") else None
-        return self.local._get_user_by_username(username)
+        return self.local.get_user_by_username(username)
 
     def get_user_with_notebooks(self, username: str) -> Optional[Dict]:
         resp = self._request("GET", f"/users/{username}")
@@ -691,7 +691,7 @@ class UserManagerClient:
             return resp.json().get("ok", False)
         return self.local.update_user_active_status(target_username, is_active, admin_username)
 
-    def change_user_display_name(self, target_username: str, new_display_name: str,
+    def update_user_display_name(self, target_username: str, new_display_name: str,
                                  admin_username: str) -> bool:
         resp = self._request("POST", "/users/update_display_name", json={
             "target_username": target_username,
@@ -700,7 +700,7 @@ class UserManagerClient:
         })
         if resp is not None:
             return resp.json().get("ok", False)
-        return self.local.change_user_display_name(target_username, new_display_name, admin_username)
+        return self.local.update_user_display_name(target_username, new_display_name, admin_username)
 
     # ---- 聊天会话 ----
 

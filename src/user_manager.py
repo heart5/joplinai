@@ -151,20 +151,17 @@ class UserManager:
     def verify_user(self, username: str, password: str) -> Optional[Dict]:
         """验证用户凭据，返回用户信息字典"""
         password_hash = self._hash_password(password)
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row  # 返回字典样式的行
-        cursor = conn.cursor()
-
-        cursor.execute(
-            """
-            SELECT id, username, display_name, role FROM users
-            WHERE username = ? AND password_hash = ? AND is_active = 1
-        """,
-            (username, password_hash),
-        )
-
-        row = cursor.fetchone()
-        conn.close()
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT id, username, display_name, role FROM users
+                WHERE username = ? AND password_hash = ? AND is_active = 1
+            """,
+                (username, password_hash),
+            )
+            row = cursor.fetchone()
 
         if row:
             user = dict(row)
@@ -178,13 +175,10 @@ class UserManager:
     # %%
     def _update_last_login(self, user_id: int):
         """更新用户最后登录时间"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        cursor.execute(
-            "UPDATE users SET last_login = ? WHERE id = ?", (datetime.now(), user_id)
-        )
-        conn.commit()
-        conn.close()
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                "UPDATE users SET last_login = ? WHERE id = ?", (datetime.now(), user_id)
+            )
 
 # %% [markdown]
 # ## create_session(self, user_id: int, duration_hours: int = 24) -> str
@@ -214,22 +208,19 @@ class UserManager:
     # %%
     def validate_session(self, session_id: str) -> Optional[Dict]:
         """验证session_id是否有效并返回关联的用户信息"""
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-
-        cursor.execute(
-            """
-            SELECT u.id, u.username, u.display_name, u.role
-            FROM sessions s
-            JOIN users u ON s.user_id = u.id
-            WHERE s.session_id = ? AND s.expires_at > ? AND u.is_active = 1
-        """,
-            (session_id, datetime.now()),
-        )
-
-        row = cursor.fetchone()
-        conn.close()
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT u.id, u.username, u.display_name, u.role
+                FROM sessions s
+                JOIN users u ON s.user_id = u.id
+                WHERE s.session_id = ? AND s.expires_at > ? AND u.is_active = 1
+            """,
+                (session_id, datetime.now()),
+            )
+            row = cursor.fetchone()
 
         if row:
             return dict(row)
@@ -264,17 +255,6 @@ class UserManager:
         return [dict(row) for row in rows]
 
 # %% [markdown]
-# ## update_user_role(self, target_username: str, new_role: str, admin_username: str)
-
-    # %%
-    def update_user_role(
-        self, target_username: str, new_role: str, admin_username: str
-    ):
-        """更新用户角色（仅管理员）并记录审计日志"""
-        # 实现略，包含事务和审计日志插入
-        pass
-
-# %% [markdown]
 # ## log_audit(self,user_id: Optional[int],action: str,details: str = "",ip_address: str = "",)
 
     # %%
@@ -297,6 +277,13 @@ class UserManager:
         )
         conn.commit()
         conn.close()
+
+    def _audit_admin_action(self, admin_username: str, action: str, details: str):
+        """管理员操作的审计日志快捷方法"""
+        admin_user = self.get_user_by_username(admin_username)
+        if admin_user:
+            self.log_audit(admin_user["id"], action, details=details, ip_address="")
+        log.info(f"管理员 {admin_username} {details}")
 
 # %% [markdown]
 # ## save_qa_history(self, user_id: int, session_id: str, question: str, answer: str, metadata: dict = None,)
@@ -388,27 +375,16 @@ class UserManager:
         """
         password_hash = self._hash_password(new_password)
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            cursor.execute(
-                "UPDATE users SET password_hash = ? WHERE username = ?",
-                (password_hash, target_username),
-            )
-            if cursor.rowcount == 0:
-                conn.close()
-                return False
-            conn.commit()
-            conn.close()
-            # 记录审计日志（需要先查出admin_user_id，这里简化，可根据实际情况调整）
-            admin_user = self._get_user_by_username(admin_username)
-            if admin_user:
-                self.log_audit(
-                    admin_user["id"],
-                    "RESET_PASSWORD",
-                    details=f"重置用户 [{target_username}] 的密码",
-                    ip_address="",  # IP可在web层补充
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE users SET password_hash = ? WHERE username = ?",
+                    (password_hash, target_username),
                 )
-            log.info(f"管理员 {admin_username} 重置了用户 {target_username} 的密码")
+                if cursor.rowcount == 0:
+                    return False
+            self._audit_admin_action(admin_username, "RESET_PASSWORD",
+                f"重置用户 [{target_username}] 的密码")
             return True
         except Exception as e:
             log.error(f"重置密码失败: {e}")
@@ -425,28 +401,16 @@ class UserManager:
         启用/禁用用户账户
         """
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            cursor.execute(
-                "UPDATE users SET is_active = ? WHERE username = ?",
-                (1 if is_active else 0, target_username),
-            )
-            if cursor.rowcount == 0:
-                conn.close()
-                return False
-            conn.commit()
-            conn.close()
-            admin_user = self._get_user_by_username(admin_username)
-            if admin_user:
-                self.log_audit(
-                    admin_user["id"],
-                    "UPDATE_USER_STATUS",
-                    details=f"将用户 [{target_username}] 状态设为 {'活跃' if is_active else '禁用'}",
-                    ip_address="",
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE users SET is_active = ? WHERE username = ?",
+                    (1 if is_active else 0, target_username),
                 )
-            log.info(
-                f"管理员 {admin_username} 将用户 {target_username} 状态设为 {'活跃' if is_active else '禁用'}"
-            )
+                if cursor.rowcount == 0:
+                    return False
+            self._audit_admin_action(admin_username, "UPDATE_USER_STATUS",
+                f"将用户 [{target_username}] 状态设为 {'活跃' if is_active else '禁用'}")
             return True
         except Exception as e:
             log.error(f"更新用户状态失败: {e}")
@@ -460,43 +424,31 @@ class UserManager:
         self, target_username: str, new_role: str, admin_username: str
     ) -> bool:
         """
-        更新用户角色（admin/colleague）
+        更新用户角色（admin/team_leader/team_member）
         """
-        if new_role not in ["admin", "colleague"]:
+        if new_role not in ["admin", "team_leader", "team_member"]:
             return False
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            cursor.execute(
-                "UPDATE users SET role = ? WHERE username = ?",
-                (new_role, target_username),
-            )
-            if cursor.rowcount == 0:
-                conn.close()
-                return False
-            conn.commit()
-            conn.close()
-            admin_user = self._get_user_by_username(admin_username)
-            if admin_user:
-                self.log_audit(
-                    admin_user["id"],
-                    "UPDATE_USER_ROLE",
-                    details=f"将用户 [{target_username}] 角色改为 {new_role}",
-                    ip_address="",
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE users SET role = ? WHERE username = ?",
+                    (new_role, target_username),
                 )
-            log.info(
-                f"管理员 {admin_username} 将用户 {target_username} 角色改为 {new_role}"
-            )
+                if cursor.rowcount == 0:
+                    return False
+            self._audit_admin_action(admin_username, "UPDATE_USER_ROLE",
+                f"将用户 [{target_username}] 角色改为 {new_role}")
             return True
         except Exception as e:
             log.error(f"更新用户角色失败: {e}")
             return False
 
 # %% [markdown]
-# ## change_user_display_name(self, target_username: str, new_display_name: str, admin_username: str) -> bool
+# ## update_user_display_name(self, target_username: str, new_display_name: str, admin_username: str) -> bool
 
     # %%
-    def change_user_display_name(
+    def update_user_display_name(
         self, target_username: str, new_display_name: str, admin_username: str
     ) -> bool:
         """
@@ -505,47 +457,36 @@ class UserManager:
         if not new_display_name.strip():
             return False
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            cursor.execute(
-                "UPDATE users SET display_name = ? WHERE username = ?",
-                (new_display_name.strip(), target_username),
-            )
-            if cursor.rowcount == 0:
-                conn.close()
-                return False
-            conn.commit()
-            conn.close()
-            admin_user = self._get_user_by_username(admin_username)
-            if admin_user:
-                self.log_audit(
-                    admin_user["id"],
-                    "UPDATE_DISPLAY_NAME",
-                    details=f"将用户 [{target_username}] 显示名改为 {new_display_name}",
-                    ip_address="",
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE users SET display_name = ? WHERE username = ?",
+                    (new_display_name.strip(), target_username),
                 )
-            log.info(f"管理员 {admin_username} 修改了用户 {target_username} 的显示名")
+                if cursor.rowcount == 0:
+                    return False
+            self._audit_admin_action(admin_username, "UPDATE_DISPLAY_NAME",
+                f"将用户 [{target_username}] 显示名改为 {new_display_name}")
             return True
         except Exception as e:
             log.error(f"更新用户显示名失败: {e}")
             return False
 
 # %% [markdown]
-# ## _get_user_by_username(self, username: str) -> Optional[Dict]
+# ## get_user_by_username(self, username: str) -> Optional[Dict]
 
     # %%
     # 辅助方法：根据用户名获取用户ID等信息（内部使用）
-    def _get_user_by_username(self, username: str) -> Optional[Dict]:
+    def get_user_by_username(self, username: str) -> Optional[Dict]:
         """根据用户名获取用户信息（简化版，用于审计）"""
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT id, username, display_name, role, allowed_notebooks FROM users WHERE username = ?",
-            (username,),
-        )
-        row = cursor.fetchone()
-        conn.close()
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id, username, display_name, role, allowed_notebooks FROM users WHERE username = ?",
+                (username,),
+            )
+            row = cursor.fetchone()
         return dict(row) if row else None
 
 # %% [markdown]
@@ -655,7 +596,7 @@ class UserManager:
         """
         获取用户信息（包含解析后的笔记本列表）
         """
-        user = self._get_user_by_username(username)
+        user = self.get_user_by_username(username)
         if not user:
             return None
 
@@ -763,61 +704,56 @@ class UserManager:
         conn.commit()
         conn.close()
 
+    def _migrate_legacy_chat_session(self, user_id: int) -> Optional[str]:
+        """迁移旧 web_{username} 格式的会话数据，返回迁移后的 session_id 或 None"""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT username FROM users WHERE id = ?", (user_id,))
+            row = cursor.fetchone()
+        if not row:
+            return None
+        username = row[0]
+        old_session_id = f"web_{username}"
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT COUNT(*) FROM qa_history WHERE session_id = ?",
+                (old_session_id,),
+            )
+            count = cursor.fetchone()[0]
+        if count > 0:
+            self._create_chat_session_with_id(user_id, old_session_id, "默认对话")
+            self.set_active_chat_session(user_id, old_session_id)
+            return old_session_id
+        return None
+
 # %% [markdown]
 # ## get_active_chat_session(self, user_id: int) -> Optional[str]
 
     # %%
     def get_active_chat_session(self, user_id: int) -> Optional[str]:
         """获取当前用户的最新活动会话，没有则自动迁移旧数据或创建默认会话"""
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-
-        # 先查活动会话
-        cursor.execute(
-            "SELECT session_id FROM chat_sessions WHERE user_id = ? AND is_active = 1",
-            (user_id,),
-        )
-        row = cursor.fetchone()
-        if row:
-            conn.close()
-            return row["session_id"]
-
-        # 查最近更新的会话
-        cursor.execute(
-            "SELECT session_id FROM chat_sessions WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1",
-            (user_id,),
-        )
-        row = cursor.fetchone()
-        if row:
-            conn.close()
-            return row["session_id"]
-
-        conn.close()
-
-        # ===== 全新：尝试迁移旧数据 =====
-        # 获取用户的用户名
-        qa_conn = sqlite3.connect(self.db_path)  # 需要将 DB_PATH 导入
-        qa_cursor = qa_conn.cursor()
-        qa_cursor.execute("SELECT username FROM users WHERE id = ?", (user_id,))
-        username = qa_cursor.fetchone()[0]
-        if username:
-            old_session_id = f"web_{username}"
-            # 检查 qa_history 表中是否有旧数据
-            qa_cursor.execute(
-                "SELECT COUNT(*) FROM qa_history WHERE session_id = ?",
-                (old_session_id,),
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT session_id FROM chat_sessions WHERE user_id = ? AND is_active = 1",
+                (user_id,),
             )
-            count = qa_cursor.fetchone()[0]
+            row = cursor.fetchone()
+            if row:
+                return row["session_id"]
+            cursor.execute(
+                "SELECT session_id FROM chat_sessions WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1",
+                (user_id,),
+            )
+            row = cursor.fetchone()
+            if row:
+                return row["session_id"]
 
-            if count > 0:
-                # 为旧数据创建对应的 chat_sessions 记录
-                self._create_chat_session_with_id(user_id, old_session_id, "默认对话")
-                self.set_active_chat_session(user_id, old_session_id)
-                return old_session_id
-
-        qa_conn.close()
-        # 完全没有数据，创建全新默认会话
+        migrated = self._migrate_legacy_chat_session(user_id)
+        if migrated:
+            return migrated
         return self.create_chat_session(user_id, "默认对话")
 
 # %% [markdown]
@@ -848,42 +784,22 @@ class UserManager:
         4. 记录审计日志
         """
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            # 先获取用户ID，用于后续删除
-            cursor.execute("SELECT id FROM users WHERE username = ?", (target_username,))
-            row = cursor.fetchone()
-            if not row:
-                conn.close()
-                log.warning(f"尝试删除不存在的用户: {target_username}")
-                return False
-            
-            user_id = row[0]
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT id FROM users WHERE username = ?", (target_username,))
+                row = cursor.fetchone()
+                if not row:
+                    log.warning(f"尝试删除不存在的用户: {target_username}")
+                    return False
+                user_id = row[0]
+                cursor.execute("DELETE FROM qa_history WHERE session_id IN (SELECT session_id FROM chat_sessions WHERE user_id = ?)", (user_id,))
+                cursor.execute("DELETE FROM chat_sessions WHERE user_id = ?", (user_id,))
+                cursor.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+                cursor.execute("DELETE FROM users WHERE id = ?", (user_id,))
 
-            # 1. 删除该用户的所有问答会话（chat_sessions 会级联删除 qa_history，但显式删除更可靠）
-            cursor.execute("DELETE FROM qa_history WHERE session_id IN (SELECT session_id FROM chat_sessions WHERE user_id = ?)", (user_id,))
-            cursor.execute("DELETE FROM chat_sessions WHERE user_id = ?", (user_id,))
-            
-            # 2. 删除登录会话
-            cursor.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
-            
-            # 3. 删除用户
-            cursor.execute("DELETE FROM users WHERE id = ?", (user_id,))
-            
-            conn.commit()
-            conn.close()
-            
-            # 4. 记录审计日志
-            admin_user = self._get_user_by_username(admin_username)
-            if admin_user:
-                self.log_audit(
-                    admin_user["id"],
-                    "DELETE_USER",
-                    details=f"管理员删除了用户 [{target_username}] (ID: {user_id})",
-                    ip_address="",
-                )
-            log.info(f"管理员 {admin_username} 删除了用户 {target_username}")
+            # 记录审计日志
+            self._audit_admin_action(admin_username, "DELETE_USER",
+                f"管理员删除了用户 [{target_username}] (ID: {user_id})")
             return True
         except Exception as e:
             log.error(f"删除用户失败: {e}")
@@ -1019,17 +935,25 @@ class UserManager:
 
     def get_qa_history_by_session(self, session_id: str) -> List[Dict]:
         """按 session_id 查询历史（用于 restore_history）"""
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT question, answer, created_at FROM qa_history "
-            "WHERE session_id=? ORDER BY created_at ASC",
-            (session_id,),
-        )
-        rows = cursor.fetchall()
-        conn.close()
-        return [{"timestamp": r["created_at"], "question": r["question"], "answer": r["answer"]} for r in rows]
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT question, answer, metadata, created_at FROM qa_history "
+                "WHERE session_id=? ORDER BY created_at ASC",
+                (session_id,),
+            )
+            rows = cursor.fetchall()
+        result = []
+        for r in rows:
+            item = {"timestamp": r["created_at"], "question": r["question"], "answer": r["answer"], "metadata": {}}
+            if r["metadata"]:
+                try:
+                    item["metadata"] = json.loads(r["metadata"])
+                except Exception:
+                    pass
+            result.append(item)
+        return result
 
 
 # %% [markdown]
