@@ -28,7 +28,7 @@ def migrate_one(base):
             try:
                 rows = old.execute(f"SELECT * FROM {table}").fetchall()
                 if rows:
-                    cols = [c[0] for c in old.execute(f"PRAGMA table_info({table})")]
+                    cols = [c[1] for c in old.execute(f"PRAGMA table_info({table})")]
                     ph = ",".join(["?"] * len(cols))
                     for row in rows:
                         try: conn.execute(f"INSERT OR IGNORE INTO {table} ({','.join(cols)}) VALUES ({ph})", row)
@@ -100,7 +100,7 @@ def migrate_users(base, conn):
             if not rows:
                 print(f"  {table}: 0 条（空表）")
                 continue
-            cols = [c[0] for c in old.execute(f"PRAGMA table_info({table})")]
+            cols = [c[1] for c in old.execute(f"PRAGMA table_info({table})")]
             ph = ",".join(["?"] * len(cols))
             for row in rows:
                 try:
