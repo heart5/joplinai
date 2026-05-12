@@ -41,7 +41,7 @@ import pathmagic
 with pathmagic.Context():
     # 尝试导入项目核心模块
     try:
-        from config_manager import CONFIG_MANAGER
+        from src.config_manager import CONFIG_MANAGER
         from func.datatools import getkeysfromcloud
         from func.logme import log
         from joplinai import CONFIG as CONFIG_JA

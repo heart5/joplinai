@@ -46,7 +46,7 @@ try:
         getnote,
     )
     from func.logme import log
-    from user_manager import USER_DB_PATH, USER_MANAGER
+    from src.user_manager import USER_DB_PATH, USER_MANAGER
 except ImportError:
     # 简易回退
     USER_MANAGER = None
