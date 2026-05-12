@@ -45,8 +45,8 @@ with pathmagic.Context():
         from func.datatools import getkeysfromcloud
         from func.logme import log
         from joplinai import CONFIG as CONFIG_JA
-        from queryanswer import CONFIG as CONFIG_QA
-        from queryanswer import JoplinQASystem
+        from src.qa_config import CONFIG as CONFIG_QA
+        from src.qa_system import JoplinQASystem
     except ImportError as e:
         # 降级处理：配置基础日志并定义占位类
         import logging as log_module
@@ -58,7 +58,7 @@ with pathmagic.Context():
         log = logging.getLogger(__name__)
         log.warning(f"部分模块导入失败，API基础功能可能受限: {e}")
 
-        # 占位类，实际使用时请确保queryanswer.py可用
+        # 占位类，实际使用时请确保qa_system.py可用
         class JoplinQASystem:
             def __init__(self, config=None):
                 pass

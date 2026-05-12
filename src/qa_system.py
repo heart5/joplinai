@@ -37,55 +37,20 @@ import ollama
 # ### 项目模块导入
 
 # %%
-try:
-    from aimod.vector_db_manager import VectorDBManager
-    from func.datatools import compute_content_hash
-    from func.first import getdirmain
-    from func.jpfuncs import getinivaluefromcloud
-    from func.logme import log
-except ImportError as e:
-    logging.basicConfig(level=logging.INFO)
-    log = logging.getLogger(__name__)
-    log.error(f"导入项目模块失败: {e}")
+import pathmagic
 
-# %% [markdown]
-# ## 配置设置
-
-# %%
-CONFIG = {
-    "embedding_model": "dengcao/bge-large-zh-v1.5",  # 嵌入模型（与joplinai.py保持一致）
-    # "embedding_model": "qwen:1.8b",  # 嵌入模型（与joplinai.py保持一致）
-    "chat_model": chat_model
-    if (chat_model := getinivaluefromcloud("joplinai", "chat_model"))
-    else "qwen:1.8b",  # 聊天模型（用于问答）
-    "db_path": getdirmain() / "data" / "joplin_vector_db",  # ChromaDB存储路径
-    "max_retrieved_notes": 10,  # 最大检索笔记数量
-    # 最大检索文本块数，默认20
-    "max_retrieved_chunks": max_retrieved_chunks
-    if (
-        max_retrieved_chunks := getinivaluefromcloud("joplinai", "max_retrieved_chunks")
-    )
-    else 20,
-    "similarity_threshold": 0.5,  # 相似度阈值
-    # 是否使用DeepSeek进行问答，默认为False
-    "enable_deepseek": enable_deepseek
-    if (enable_deepseek := getinivaluefromcloud("joplinai", "enable_deepseek"))
-    else False,
-    "deepseek_api_key": getinivaluefromcloud("joplinai", "deepseek_token"),
-    "deepseek_chat_model": "deepseek-chat",
-    # 上下文最大长度（字符），默认为4000
-    "context_max_length": context_max_length
-    if (context_max_length := getinivaluefromcloud("joplinai", "context_max_length"))
-    else 4000,
-    "min_answer_length": 50,  # 添加最小答案长度要求
-}
-
-# %%
-# 根据嵌入模型生成状态文件路径
-model_name = (
-    CONFIG.get("embedding_model").replace(":", "_").replace("/", "_").replace("-", "_")
-)
-CONFIG["collection_name"] = f"joplin_{model_name}"
+with pathmagic.Context():
+    try:
+        from aimod.vector_db_manager import VectorDBManager
+        from func.datatools import compute_content_hash
+        from func.jpfuncs import getinivaluefromcloud
+        from func.logme import log
+        from src.prompt_manager import PromptManager
+        from src.qa_config import CONFIG
+    except ImportError as e:
+        logging.basicConfig(level=logging.INFO)
+        log = logging.getLogger(__name__)
+        log.error(f"导入项目模块失败: {e}")
 
 # %% [markdown]
 # ## 问答系统核心
@@ -101,7 +66,7 @@ class JoplinQASystem:
     # %%
     def __init__(self, config: Dict = None):
         from joplinai import CONFIG as CONFIG_JA
-        from queryanswer import CONFIG as CONFIG_QA
+        from src.qa_config import CONFIG as CONFIG_QA
         config_all = {**CONFIG_JA, **CONFIG_QA}
         if config:
             config_all.update(config)
@@ -635,79 +600,6 @@ class JoplinQASystem:
 
 
 # %% [markdown]
-# ## PromptManager类
-
-# %%
-class PromptManager:
-    """集中管理从云端获取的系统提示词，杜绝硬编码。"""
-
-    @staticmethod
-    def get_sys_prompt_for_role(user_identity: Optional[Dict]) -> str:
-        """
-        根据用户身份，从云端获取对应的系统提示词。
-        如果云端未配置，则返回一个极简的、安全的通用提示。
-        """
-        from func.jpfuncs import getinivaluefromcloud
-
-        if not user_identity:
-            # 如果没有身份信息，使用最基础的提示
-            base_prompt = getinivaluefromcloud("joplinai", "sys_prompt_base")
-            if base_prompt:
-                return base_prompt
-            else:
-                # 终极后备：一个完全不涉及具体业务的中性提示
-                return "请根据提供的笔记内容回答问题。如果笔记中没有相关信息，请说明。"
-
-        user_role = user_identity.get("role")
-        user_display_name = user_identity.get("display_name", "")
-
-        # 从云端获取默认个人作者和同事列表（这些也是配置）
-        default_personal_author = (
-            getinivaluefromcloud("joplinai", "default_personal_author") or "用户"
-        )
-
-        import re
-
-        split_ptn = re.compile(r"[,，]")
-        if colleague_str := getinivaluefromcloud("joplinai", "colleague"):
-            colleagues = [title.strip() for title in split_ptn.split(colleague_str)]
-        else:
-            colleagues = []
-        colleague_str_for_prompt = "，".join([f"“{person}”" for person in colleagues])
-
-        # 根据角色获取对应的提示词配置键
-        prompt_key = ""
-        if user_role == "admin":
-            prompt_key = "sys_prompt"
-        elif user_role == "colleague":
-            prompt_key = "sys_colleague_prompt"
-        else:
-            # 未知角色，使用基础提示
-            prompt_key = "sys_prompt_base"
-
-        # 核心：从云端获取提示词模板
-        prompt_template = getinivaluefromcloud("joplinai", prompt_key)
-
-        if prompt_template:
-            # 如果模板中存在占位符，进行动态替换
-            # 例如，模板中可能有 {default_personal_author}、{colleague_str}、{user_display_name} 等占位符
-            prompt = prompt_template.replace(
-                "{default_personal_author}", default_personal_author
-            )
-            prompt = prompt.replace("{colleague_str}", colleague_str_for_prompt)
-            prompt = prompt.replace("{user_display_name}", user_display_name)
-            return prompt
-        else:
-            # 云端未配置对应提示词，根据角色返回一个结构化的默认提示
-            log.warning(f"云端未配置提示词键: {prompt_key}，将使用内置通用模板。")
-            if user_role == "admin":
-                return f"""你是我（{default_personal_author}）的笔记助手，基于笔记回答问题。笔记可能包含个人记录、团队共享信息或收藏文章。请根据笔记片段的【类型】和【作者】元数据，客观、准确地回答。如果笔记中没有相关信息，请说明。"""
-            elif user_role == "colleague":
-                return f"""你是{user_display_name}的笔记助手，基于共享笔记库回答问题。你只能访问作者为“团队_共同维护”或“同事_{user_display_name}”的笔记片段。请基于这些内容回答，如果无相关信息，请说明。"""
-            else:
-                return "请根据提供的笔记内容回答问题。如果笔记中没有相关信息，请说明。"
-
-# %% [markdown]
 # ## 命令行界面
 
 
@@ -746,10 +638,6 @@ def parse_args():
     parser.add_argument("--stats", action="store_true", help="显示系统统计信息")
 
     return parser.parse_args()
-
-
-# %% [markdown]
-# ## 交互式界面
 
 
 # %%
@@ -839,7 +727,6 @@ def interactive_mode(qa_system: JoplinQASystem):
 
 
 # %%
-@timethis
 def main():
     """主函数"""
     args = parse_args()

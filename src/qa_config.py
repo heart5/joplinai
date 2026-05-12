@@ -1,0 +1,67 @@
+# ---
+# jupyter:
+#   jupytext:
+#     formats: ipynb,py:percent
+#     text_representation:
+#       extension: .py
+#       format_name: percent
+#       format_version: '1.3'
+#       jupytext_version: 1.19.1
+#   kernelspec:
+#     display_name: Python 3 (ipykernel)
+#     language: python
+#     name: python3
+# ---
+
+# %% [markdown]
+# # QA 配置
+
+# %% [markdown]
+# ## 导入库
+
+# %%
+import logging
+
+import pathmagic
+
+with pathmagic.Context():
+    try:
+        from func.first import getdirmain
+        from func.jpfuncs import getinivaluefromcloud
+    except ImportError as e:
+        logging.basicConfig(level=logging.INFO)
+        getinivaluefromcloud = lambda s, k: None
+        getdirmain = lambda: None
+        logging.error(f"导入项目模块失败: {e}")
+
+
+# %%
+CONFIG = {
+    "embedding_model": "dengcao/bge-large-zh-v1.5",
+    "chat_model": chat_model
+    if (chat_model := getinivaluefromcloud("joplinai", "chat_model"))
+    else "qwen:1.8b",
+    "db_path": getdirmain() / "data" / "joplin_vector_db",
+    "max_retrieved_notes": 10,
+    "max_retrieved_chunks": max_retrieved_chunks
+    if (
+        max_retrieved_chunks := getinivaluefromcloud("joplinai", "max_retrieved_chunks")
+    )
+    else 20,
+    "similarity_threshold": 0.5,
+    "enable_deepseek": enable_deepseek
+    if (enable_deepseek := getinivaluefromcloud("joplinai", "enable_deepseek"))
+    else False,
+    "deepseek_api_key": getinivaluefromcloud("joplinai", "deepseek_token"),
+    "deepseek_chat_model": "deepseek-chat",
+    "context_max_length": context_max_length
+    if (context_max_length := getinivaluefromcloud("joplinai", "context_max_length"))
+    else 4000,
+    "min_answer_length": 50,
+}
+
+# %%
+model_name = (
+    CONFIG.get("embedding_model").replace(":", "_").replace("/", "_").replace("-", "_")
+)
+CONFIG["collection_name"] = f"joplin_{model_name}"
