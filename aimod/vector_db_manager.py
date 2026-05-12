@@ -461,60 +461,6 @@ class VectorDBManager:
         return 0
 
 # %% [markdown]
-# ### migrate_content_hash(self,)
-
-    # %%
-    def migrate_content_hash(
-        self,
-    ):
-        """为所有文档添加content_hash字段"""
-        # 获取所有文档
-        results = self.collection.get(include=["metadatas", "documents"])
-
-        for i, (chunk_id, metadata, document) in enumerate(
-            zip(results["ids"], results["metadatas"], results["documents"])
-        ):
-            if "content_hash" not in metadata or not metadata["content_hash"]:
-                # 计算content_hash
-                new_hash = hashlib.md5(document.encode("utf-8")).hexdigest()
-
-                # 更新元数据
-                updated_metadata = {**metadata, "content_hash": new_hash}
-                self.collection.update(ids=[chunk_id], metadatas=[updated_metadata])
-
-                if i % 100 == 0:
-                    log.info(f"已为 {i} 个文档重新生成 content_hash 字段")
-
-# %% [markdown]
-# ### refresh_estimated_date(self,)
-
-    # %%
-    def refresh_estimated_date(
-        self,
-    ):
-        """为所有文档添加content_hash字段"""
-        # 获取所有文档
-        results = self.collection.get(include=["metadatas", "documents"])
-
-        for i, (chunk_id, metadata, document) in enumerate(
-            zip(results["ids"], results["metadatas"], results["documents"]),
-            1
-        ):
-            if "estimated_date" not in metadata or not metadata["estimated_date"]:
-                unified_date_pattern_for_chunk = re.compile(
-                    r"(\d{4}[-年/]\d{1,2}[-月/]\d{1,2}[日号])\s*", re.MULTILINE
-                )
-                date_in_chunk = unified_date_pattern_for_chunk.search(document.strip())
-                if date_in_chunk:
-                    estimated_date = date_in_chunk.group(1).replace("号", "日")
-                    # 更新元数据
-                    updated_metadata = {**metadata, "estimated_date": estimated_date}
-                    self.collection.update(ids=[chunk_id], metadatas=[updated_metadata])
-
-                    if i % 100 == 0:
-                        log.info(f"已为 {i} 个文本块重新生成 estimated_date 字段或者更新其值")
-
-# %% [markdown]
 # ### get_existing_chunk_hashes_for_note(self, note_id: str) -> Dict[str, Dict[str, str]]
 
     # %%
@@ -561,56 +507,6 @@ class VectorDBManager:
         #             metadatas=[updated_metadata]
         #         )
         #     log.info(f"修复了 {len(needs_update)} 个文档的content_hash或meta_hash字段")
-
-        return hash_map
-
-# %% [markdown]
-# ### get_existing_chunk_hashes_for_note_other(self, note_id: str) -> Dict[str, Dict[str, str]]
-
-    # %%
-    def get_existing_chunk_hashes_for_note_other(self, note_id: str) -> Dict[str, Dict[str, str]]:
-        """
-        提取指定笔记的块hash_map并返回
-        查询并修复缺失的content_hash和meta_hash，惰性修复，仅针对content_hash和meta_hash字段
-        """
-        if not self.collection:
-            return {}
-
-        results = self.collection.get(where={"source_note_id": note_id})
-        if not results or not results['ids']:
-            return {}
-
-        hash_map = {}
-        needs_update = []
-
-        for chunk_id, metadata, document in zip(
-            results['ids'], results['metadatas'], results.get('documents', [])
-        ):
-            content_hash = metadata.get("content_hash", "")
-            meta_hash = metadata.get("meta_hash", "")
-
-            # 如果content_hash缺失或为空，计算并标记需要更新
-            if (not content_hash or not meta_hash) and document:
-                current_content_hash = compute_content_hash(document)
-                local_tags = metadata.get("tags", "")
-                tags_str = ",".join(sorted(local_tags.split(','))) if local_tags else ""  # 排序保证一致性
-                current_notebook_title = metadata.get("source_notebook_title", "")
-                current_meta_hash = compute_content_hash(f"{tags_str}{current_notebook_title}")
-                needs_update.append((chunk_id, metadata, current_content_hash, current_meta_hash))
-                # content_hash = current_content_hash
-                # meta_hash = current_meta_hash
-
-            hash_map[chunk_id] = {"content_hash": content_hash, "meta_hash": meta_hash}
-
-        # 批量更新需要修复的文档
-        if needs_update:
-            for chunk_id, metadata, content_hash, meta_hash in needs_update:
-                updated_metadata = {**metadata, "content_hash": content_hash, "meta_hash": meta_hash}
-                self.collection.update(
-                    ids=[chunk_id],
-                    metadatas=[updated_metadata]
-                )
-            log.info(f"修复了 {len(needs_update)} 个文档的content_hash或meta_hash字段")
 
         return hash_map
 

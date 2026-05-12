@@ -1042,22 +1042,6 @@ def api_state_delete_model():
 
 
 # %% [markdown]
-# # 用户管理端点
-
-
-# %%
-def _get_user_by_username(conn, username: str) -> Optional[dict]:
-    row = conn.execute(
-        "SELECT id, username, display_name, role, allowed_notebooks, is_active FROM users WHERE username=?",
-        (username,),
-    ).fetchone()
-    if not row:
-        return None
-    return {"id": row[0], "username": row[1], "display_name": row[2], "role": row[3],
-            "allowed_notebooks": row[4], "is_active": row[5]}
-
-
-# %% [markdown]
 # ## 认证端点
 
 

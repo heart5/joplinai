@@ -1483,18 +1483,6 @@ class EmbeddingGenerator:
         return chunks
 
 # %% [markdown]
-# ## get_ollama_embedding_other(self, text: str) -> List[float]
-    # %%
-    def get_ollama_embedding_other(self, text: str) -> List[float]:
-        """
-        调用 Ollama 生成文本嵌入。
-        注意：传入的 text 应是已分块的适当长度文本。
-        直接调用模型，不加try包裹，方便探测，错误处理由调用方负责
-        """
-        response = ollama.embeddings(model=self.model_name, prompt=text)
-        return response["embedding"]
-
-# %% [markdown]
 # ## get_ollama_embedding(self, text: str, host: str = "10.9.0.2", port: int = 11434)
 
     # %%

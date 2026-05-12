@@ -129,26 +129,6 @@ app = Flask(__name__)
 # # 函数库
 
 # %% [markdown]
-# ## sanitize_config(obj)
-
-# %%
-def sanitize_config(obj):
-    """递归地将配置中的 Path 等对象转换为字符串"""
-    # +++ 新增：关键修复 - 确保配置可JSON序列化 +++
-    if isinstance(obj, dict):
-        return {k: sanitize_config(v) for k, v in obj.items()}
-    elif isinstance(obj, list):
-        return [sanitize_config(item) for item in obj]
-    elif isinstance(obj, Path):
-        return str(obj)  # 将 Path 转换为字符串
-    elif isinstance(obj, (str, int, float, bool, type(None))):
-        return obj
-    else:
-        # 对于其他不可序列化类型，尝试转换为字符串表示
-        return str(obj)
-
-
-# %% [markdown]
 # ## get_qa_system_for_session(session_id: str, config_overrides: Optional[Dict] = None,) -> JoplinQASystem
 
 # %%

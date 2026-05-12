@@ -122,64 +122,8 @@ def get_cache_manager():
 
 
 # %% [markdown]
-# # 增强功能1：DeepSeek嵌入（提升向量质量）
-
 # %% [markdown]
-# ## get_deepseek_embedding(text: str, max_retries: int = 3) -> Optional[List[float]]
-
-# %%
-@timethis
-def get_deepseek_embedding(text: str, max_retries: int = 3) -> Optional[List[float]]:
-    """
-    DeepSeek嵌入API调用
-    此函数用于手动生成DeepSeek嵌入，适用于实验或处理本地模型无法胜任的超长文本。
-    请注意，其生成的嵌入维度与本地模型不同，不能直接混合存入主向量库
-    """
-    if not DEEPSEEK_API_KEY:
-        log.warning("未配置DeepSeek API Key")
-        return None
-
-    headers = {
-        "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
-        "Content-Type": "application/json",
-    }
-    MAX_TEXT_LEN = 12000
-    chunks = (
-        [text[i : i + MAX_TEXT_LEN] for i in range(0, len(text), MAX_TEXT_LEN)]
-        if len(text) > MAX_TEXT_LEN
-        else [text]
-    )
-
-    all_embeddings = []
-    for chunk in chunks:
-        payload = {"model": model, "input": chunk, "encoding_format": "float"}
-        for attempt in range(max_retries):
-            try:
-                response = requests.post(
-                    DEEPSEEK_EMBED_URL, headers=headers, json=payload, timeout=30
-                )
-                if response.status_code == 400:
-                    log.error(f"嵌入API 400错误: {response.text}")
-                    return None
-                response.raise_for_status()
-                embedding = response.json()["data"]["embedding"]
-                all_embeddings.append(embedding)
-                break
-            except Exception as e:
-                log.warning(f"嵌入失败({attempt + 1}/{max_retries}): {str(e)[:100]}")
-                time.sleep(2**attempt)
-        else:
-            return None
-
-    return (
-        [sum(dim) / len(all_embeddings) for dim in zip(*all_embeddings)]
-        if all_embeddings
-        else None
-    )
-
-
-# %% [markdown]
-# # 增强功能2：DeepSeek大模型（笔记智能加工）
+# # DeepSeek大模型（笔记智能加工）
 
 # %% [markdown]
 # ## deepseek_process_note(text: str, task: str = "summary", model: str = DEFAULT_CHAT_MODEL, max_retries: int = 3, use_cache: bool = True,) -> Optional[str]

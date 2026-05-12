@@ -594,50 +594,6 @@ class JoplinQASystem:
             return f"抱歉，生成答案时出现错误: {str(e)}"
 
 # %% [markdown]
-# ### _generate_answer_with_deepseek(self, question: str, context: str) -> str
-
-    # %%
-    def _generate_answer_with_deepseek(self, question: str, context: str) -> str:
-        """使用DeepSeek API生成答案"""
-        try:
-            import requests
-
-            headers = {
-                "Authorization": f"Bearer {self.config['deepseek_api_key']}",
-                "Content-Type": "application/json",
-            }
-
-            payload = {
-                "model": self.config["deepseek_chat_model"],
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": "你是一个专业的笔记助手，基于用户笔记回答问题。",
-                    },
-                    {"role": "user", "content": context},
-                ],
-                "temperature": 0.3,
-                "max_tokens": 1000,
-            }
-
-            response = requests.post(
-                "https://api.deepseek.com/v1/chat/completions",
-                headers=headers,
-                json=payload,
-                timeout=30,
-            )
-            response.raise_for_status()
-
-            answer = response.json()["choices"][0]["message"]["content"]
-            log.info(f"使用DeepSeek生成答案，长度: {len(answer)}")
-            return answer
-
-        except Exception as e:
-            log.error(f"DeepSeek生成答案失败: {e}")
-            # 回退到Ollama
-            return self._generate_answer_with_ollama(question, context)
-
-# %% [markdown]
 # ### _extract_sources(self, notes: List[Dict]) -> List[Dict]
 
     # %%
@@ -765,21 +721,6 @@ class PromptManager:
                 return f"""你是{user_display_name}的笔记助手，基于共享笔记库回答问题。你只能访问作者为“团队_共同维护”或“同事_{user_display_name}”的笔记片段。请基于这些内容回答，如果无相关信息，请说明。"""
             else:
                 return "请根据提供的笔记内容回答问题。如果笔记中没有相关信息，请说明。"
-
-    @staticmethod
-    def get_common_prompt_variants():
-        """获取其他可能需要从云端获取的常用提示词变体（如摘要、标签生成提示）。"""
-        from func.jpfuncs import getinivaluefromcloud
-
-        variants = {}
-        variant_keys = [
-            "prompt_for_summarization",
-            "prompt_for_tag_extraction",
-            "prompt_for_answer_refinement",
-        ]
-        for key in variant_keys:
-            variants[key] = getinivaluefromcloud("joplinai", key)
-        return variants
 
 # %% [markdown]
 # ## 命令行界面
