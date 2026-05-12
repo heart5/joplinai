@@ -532,6 +532,63 @@ def probe_cache_stats() -> dict:
     return {"count": row[0], "limit": _get_probe_cache_limit()}
 
 
+def probe_cache_report() -> dict:
+    """探测缓存综合报告数据"""
+    conn = _init_db()
+    conn.row_factory = sqlite3.Row
+
+    row = conn.execute("SELECT COUNT(*) as count FROM probe_cache").fetchone()
+    total = row["count"] if row else 0
+
+    # 按模型分布
+    by_model = [dict(r) for r in conn.execute("""
+        SELECT model_name, COUNT(*) as count,
+               AVG(safe_len) as avg_safe_len,
+               AVG(chunk_size) as avg_chunk_size,
+               MAX(last_accessed) as last_used
+        FROM probe_cache GROUP BY model_name ORDER BY count DESC
+    """).fetchall()]
+
+    # 按块大小分布
+    by_chunk = [dict(r) for r in conn.execute("""
+        SELECT chunk_size, COUNT(*) as count, AVG(safe_len) as avg_safe_len
+        FROM probe_cache GROUP BY chunk_size ORDER BY chunk_size
+    """).fetchall()]
+
+    # 安全长度统计
+    row = conn.execute("""
+        SELECT MIN(safe_len) as min_len, MAX(safe_len) as max_len,
+               AVG(safe_len) as avg_len
+        FROM probe_cache
+    """).fetchone()
+    len_stats = dict(row) if row else {}
+
+    # 最近活跃
+    row = conn.execute("""
+        SELECT COUNT(*) as cnt FROM probe_cache
+        WHERE last_accessed >= datetime('now', '-7 days')
+    """).fetchone()
+    recent = row["cnt"] if row else 0
+
+    # 新增趋势（最近30天）
+    daily_new = [dict(r) for r in conn.execute("""
+        SELECT DATE(created_at) as date, COUNT(*) as new_entries
+        FROM probe_cache WHERE DATE(created_at) >= DATE('now', '-30 days')
+        GROUP BY DATE(created_at) ORDER BY date
+    """).fetchall()]
+
+    conn.close()
+    return {
+        "total": total,
+        "limit": _get_probe_cache_limit(),
+        "by_model": by_model,
+        "by_chunk_size": by_chunk,
+        "safe_len_stats": len_stats,
+        "recent_active": recent,
+        "daily_new": daily_new,
+    }
+
+
 # %% [markdown]
 # # 历史数据库操作
 
@@ -851,6 +908,12 @@ def api_probe_cache_set():
 @require_auth
 def api_probe_cache_stats():
     return jsonify(probe_cache_stats())
+
+
+@app.route("/cache/probe/report")
+@require_auth
+def api_probe_cache_report():
+    return jsonify(probe_cache_report())
 
 
 # %% [markdown]

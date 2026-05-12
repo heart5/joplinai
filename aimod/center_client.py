@@ -180,6 +180,19 @@ class ProbeCacheClient:
         except Exception:
             pass
 
+    def get_report(self) -> Dict[str, Any]:
+        try:
+            resp = requests.get(
+                f"{self.remote_url}/cache/probe/report",
+                headers=self.auth_headers,
+                timeout=10,
+            )
+            if resp.ok:
+                return resp.json()
+        except Exception as e:
+            log.warning(f"远程获取探测缓存报告失败: {e}")
+        return {}
+
 
 # %% [markdown]
 # # HistoryClient

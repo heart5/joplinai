@@ -19,10 +19,11 @@ from func.logme import log
 class ReportWriter:
     """统一报告生成器 — 从 stats 端点取数据，格式化后写入 Joplin"""
 
-    def __init__(self, config: Dict, history_client=None, cache_client=None):
+    def __init__(self, config: Dict, history_client=None, cache_client=None, probe_client=None):
         self.config = config
         self.history = history_client
-        self.cache = cache_client
+        self.cache = cache_client      # DeepSeekCacheClient
+        self.probe = probe_client      # ProbeCacheClient
 
     # %% [markdown]
     # ## generate_vectorization_report
@@ -342,19 +343,87 @@ class ReportWriter:
         return "\n".join(md_lines)
 
     # %% [markdown]
+    # ## generate_probe_report
+
+    # %%
+    def generate_probe_report(self) -> str:
+        """生成文本块长度探测缓存报告"""
+        if not self.probe:
+            return "*探测缓存报告：probe_client 未配置*\n"
+
+        report = self.probe.get_report()
+        if not report:
+            return "*探测缓存报告数据暂不可用*\n"
+
+        md_lines = ["# 📊 文本块长度探测缓存报告"]
+        md_lines.append(f"**生成时间**: {datetime.now().isoformat()}")
+        md_lines.append("")
+
+        md_lines.append("## 📈 基础统计")
+        md_lines.append(f"- **总条目数**: {report.get('total', 0)}")
+        md_lines.append(f"- **上限**: {report.get('limit', 0)}")
+        md_lines.append(f"- **近期活跃（7天）**: {report.get('recent_active', 0)}")
+
+        len_stats = report.get("safe_len_stats", {})
+        if len_stats:
+            md_lines.append(f"- **安全长度范围**: {len_stats.get('min_len', '?')} ~ {len_stats.get('max_len', '?')} 字符")
+            md_lines.append(f"- **平均安全长度**: {len_stats.get('avg_len', 0):.0f} 字符")
+        md_lines.append("")
+
+        # 按模型分布
+        by_model = report.get("by_model", [])
+        if by_model:
+            md_lines.append("## 🤖 按模型分布")
+            md_lines.append("| 模型 | 条目数 | 平均安全长度 | 平均块大小 | 最后使用 |")
+            md_lines.append("|------|--------|-------------|-----------|---------|")
+            for m in by_model:
+                last = (m.get("last_used") or "")[:10]
+                md_lines.append(
+                    f"| {m['model_name']} | {m['count']} | "
+                    f"{m.get('avg_safe_len', 0):.0f} | {m.get('avg_chunk_size', 0):.0f} | {last} |"
+                )
+            md_lines.append("")
+
+        # 按块大小分布
+        by_chunk = report.get("by_chunk_size", [])
+        if by_chunk:
+            md_lines.append("## 📐 按块大小分布")
+            md_lines.append("| 块大小 | 条目数 | 平均安全长度 |")
+            md_lines.append("|--------|--------|-------------|")
+            for c in by_chunk:
+                md_lines.append(f"| {c['chunk_size']} | {c['count']} | {c.get('avg_safe_len', 0):.0f} |")
+            md_lines.append("")
+
+        # 增长趋势
+        daily = report.get("daily_new", [])
+        if daily:
+            md_lines.append("## 📊 每日新增（最近30天）")
+            md_lines.append("| 日期 | 新增条目 |")
+            md_lines.append("|------|----------|")
+            for d in reversed(daily[-10:]):
+                md_lines.append(f"| {d['date']} | {d['new_entries']} |")
+            md_lines.append("")
+
+        return "\n".join(md_lines)
+
+    # %% [markdown]
     # ## write_to_joplin
 
     # %%
     def write_to_joplin(self, content: str, note_title: str,
-                        notebook: str = "ewmobile") -> bool:
-        """将报告写入 Joplin 笔记"""
+                        notebook: str = "ewmobile", config_key: str = "vectorization_report") -> bool:
+        """将报告写入 Joplin 笔记
+
+        config_key 用于区分不同报告类型，避免 note_id 缓存冲突。
+        默认 "vectorization_report"，缓存报告用 "deepseek_cache_report" / "probe_cache_report"。
+        """
         try:
             from func.jpfuncs import (
                 createnote, searchnotes, updatenote_body,
                 searchnotebook, getcfpoptionvalue, setcfpoptionvalue,
             )
             # 检查是否已缓存 note_id
-            note_id = getcfpoptionvalue("joplinai", "aitaskreport", "note_id")
+            note_id = getcfpoptionvalue("joplinai", f"report_{config_key}", "note_id")
             if note_id:
                 updatenote_body(note_id, content)
                 log.info(f"已更新 Joplin 报告笔记: {note_title}")
@@ -370,7 +439,7 @@ class ReportWriter:
                 updatenote_body(note_id, content)
             else:
                 note_id = createnote(title=note_title, body=content, parent_id=notebook_id)
-            setcfpoptionvalue("joplinai", "aitaskreport", "note_id", note_id)
+            setcfpoptionvalue("joplinai", f"report_{config_key}", "note_id", note_id)
             log.info(f"报告已写入 Joplin 笔记: {note_title}")
             return True
         except Exception as e:
@@ -394,3 +463,83 @@ class ReportWriter:
         except Exception as e:
             log.warning(f"调用 {method} 失败: {e}")
             return None
+
+
+# %% [markdown]
+# # CLI 入口 — 生成缓存报告并写入 Joplin
+
+# %%
+def _init_clients():
+    """初始化 data center 客户端（从云端配置读取 URL/Key）"""
+    import pathmagic
+    with pathmagic.context():
+        from func.configpr import getinivaluefromcloud
+        from aimod.center_client import DeepSeekCacheClient, ProbeCacheClient
+
+    remote_url = getinivaluefromcloud("joplinai", "joplinai_center_url")
+    if not remote_url:
+        remote_url = "http://127.0.0.1:5003"
+    api_key = getinivaluefromcloud("joplinai", "joplinai_center_api_key")
+    if not api_key:
+        raise RuntimeError("未配置 joplinai_center_api_key")
+
+    cache_client = DeepSeekCacheClient(remote_url, api_key)
+    probe_client = ProbeCacheClient(remote_url, api_key)
+    return cache_client, probe_client
+
+
+def main():
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Joplinai 缓存报告生成器")
+    parser.add_argument(
+        "--type", type=str, default="all",
+        choices=["deepseek_cache", "probe_cache", "all"],
+        help="报告类型 (default: all)",
+    )
+    parser.add_argument(
+        "--output", type=str, default="joplin",
+        choices=["joplin", "stdout"],
+        help="输出目标 (default: joplin)",
+    )
+    args = parser.parse_args()
+
+    import pathmagic
+    with pathmagic.context():
+        from func.configpr import getinivaluefromcloud
+        from func.logme import log
+
+    cache_client, probe_client = _init_clients()
+    config = {}
+    writer = ReportWriter(config, cache_client=cache_client, probe_client=probe_client)
+
+    report_types = (
+        ["deepseek_cache", "probe_cache"] if args.type == "all" else [args.type]
+    )
+
+    for rtype in report_types:
+        if rtype == "deepseek_cache":
+            log.info("生成 DeepSeek 缓存报告...")
+            content = writer.generate_cache_report()
+            title = "DeepSeek缓存分析报告"
+            config_key = "deepseek_cache_report"
+        else:
+            log.info("生成探测缓存报告...")
+            content = writer.generate_probe_report()
+            title = "文本块长度探测缓存报告"
+            config_key = "probe_cache_report"
+
+        if args.output == "stdout":
+            print(content)
+        else:
+            ok = writer.write_to_joplin(content, title, config_key=config_key)
+            if ok:
+                log.info(f"《{title}》已写入 Joplin")
+            else:
+                log.error(f"《{title}》写入 Joplin 失败")
+
+    log.info("缓存报告生成完成")
+
+
+if __name__ == "__main__":
+    main()
