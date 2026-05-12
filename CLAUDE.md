@@ -104,7 +104,7 @@ python joplin_web_app.py
 ## Key Code Patterns
 
 - **`pathmagic.context()`**: All modules use `with pathmagic.context():` to ensure both the project root and `src/` are on `sys.path` before importing project-local modules. Always wrap project imports in this context manager.
-- **Jupytext paired notebooks** (`.py` → `.ipynb`): 编辑 `.py` 文件后，jupytext 自动生成/更新同目录同名 `.ipynb` 文件供 Jupyter Notebook 阅览。`.py` 是唯一代码源，`.ipynb` 永不入库。配置：`jupytext.toml`（`formats = "ipynb,py:percent"`）+ `.git/hooks/pre-commit`（staged .py 自动 `jupytext --sync`）。手动同步：`jupytext --sync <file>.py`。
+- **Jupytext paired notebooks**：编辑 `.py`/`.md` 源文件后，jupytext 自动生成/更新同目录同名 `.ipynb` 供 Jupyter Notebook 阅览。`.py` → `ipynb`（percent 格式）、`.md` → `ipynb`（markdown 格式），两种独立配对互不干扰。`.ipynb` 永不入库。配置：`jupytext.toml`（默认 `formats = "ipynb,py:percent"`）+ `.git/hooks/pre-commit`（staged .py/.md 自动 `jupytext --sync`）。手动同步：`jupytext --sync <file>`。
 - **Cloud config**: Configuration is fetched dynamically via `getinivaluefromcloud()` from an INI stored in a Joplin note. The `ConfigManager` singleton in `src/config_manager.py` handles hot-reloading (5-minute check interval). Key cloud items: `imp_nbs` (notebook titles), `imp_note_ids` (specific note IDs as virtual notebook), both comma-separated.
 - **Inter-service auth**: `joplin_web_app.py` calls `joplin_qa_api.py` using an API key from the shared cloud config (`X-API-Key` header).
 - **No tests directory**: No formal test framework. Test-adjacent files are scratchpad notebooks.
