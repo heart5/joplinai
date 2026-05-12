@@ -1,0 +1,53 @@
+# Joplinai 开发环境编排
+# 生产部署走 deploy/deploy.sh (rsync + systemd)，此文件仅供本地开发/新成员加入。
+version: "3.9"
+
+services:
+  center_api:
+    build:
+      context: .
+      dockerfile: Dockerfile.center
+    ports:
+      - "5003:5003"
+    volumes:
+      - .:/app
+      - ./data:/app/data
+    environment:
+      - FLASK_DEBUG=1
+    command: python -m aimod.center_api --host 0.0.0.0 --port 5003
+
+  qa_api:
+    build:
+      context: .
+      dockerfile: Dockerfile.qa
+    ports:
+      - "5000:5000"
+    volumes:
+      - .:/app
+      - ./data:/app/data
+    environment:
+      - FLASK_DEBUG=1
+    command: python joplin_qa_api.py
+
+  web_app:
+    build:
+      context: .
+      dockerfile: Dockerfile.qa
+    ports:
+      - "5001:5001"
+    volumes:
+      - .:/app
+      - ./data:/app/data
+    environment:
+      - FLASK_DEBUG=1
+    command: python joplin_web_app.py
+
+  chromadb:
+    image: chromadb/chroma:latest
+    ports:
+      - "8000:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+
+volumes:
+  chroma_data:
