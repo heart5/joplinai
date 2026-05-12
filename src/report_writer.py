@@ -9,7 +9,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional
 
-from func.logme import log
+import pathmagic
+
+with pathmagic.context():
+    from func.logme import log
 
 
 # %% [markdown]
@@ -418,10 +421,11 @@ class ReportWriter:
         默认 "vectorization_report"，缓存报告用 "deepseek_cache_report" / "probe_cache_report"。
         """
         try:
-            from func.jpfuncs import (
-                createnote, searchnotes, updatenote_body,
-                searchnotebook, getcfpoptionvalue, setcfpoptionvalue,
-            )
+            with pathmagic.context():
+                from func.jpfuncs import (
+                    createnote, searchnotes, updatenote_body,
+                    searchnotebook, getcfpoptionvalue, setcfpoptionvalue,
+                )
             # 检查是否已缓存 note_id
             note_id = getcfpoptionvalue("joplinai", f"report_{config_key}", "note_id")
             if note_id:
@@ -431,7 +435,8 @@ class ReportWriter:
 
             # 搜索或创建
             if not (notebook_id := searchnotebook(notebook)):
-                from func.jpfuncs import jpapi
+                with pathmagic.context():
+                    from func.jpfuncs import jpapi
                 notebook_id = jpapi.add_notebook(title=notebook)
             existing = searchnotes(note_title, parent_id=notebook_id)
             if existing:
