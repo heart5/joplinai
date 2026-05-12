@@ -37,6 +37,14 @@
 - git filter-branch：从历史中清除全部 ipynb 文件，避免调试信息泄露
 - 工作流：编辑 `.py` → 自动生成 `.ipynb`（仅本地阅览，不入库）
 
+**代码大清理（5批次）** — 删函数/清导入/去注释/移迁移/正命名：
+
+- 删除 8 个零引用死函数（484 行）：`cleanup_old_entries`、`get_deepseek_embedding`、`get_ollama_embedding_other`、`migrate_content_hash`、`refresh_estimated_date`、`get_existing_chunk_hashes_for_note_other`、`_get_user_by_username`、`_generate_answer_with_deepseek`、`sanitize_config`、`get_common_prompt_variants`
+- 清理 7 个文件 50+ 个未使用导入（83 行），如 `argparse`、`hashlib`、`chromadb`、大量未用 `jpfuncs`/`configpr`/`getid` 导入
+- 清理 10 处注释掉的无效代码块（40 行），含 PersistentClient、hash 修复逻辑、旧正则、孤立方法引用
+- 移除一次性迁移代码（294 行）：删除 `_migrate_db.py`、`migrate_add_notebook_id()`、`migrate_all_chunks_with_author()` 及 joplinai.py 中注释迁移块
+- `_generate_answer_with_deepseek_optimized` → `_generate_answer_with_deepseek`（原非优化版已删）
+
 ### 2026年5月11日
 
 **user_manager.py 重构** — 代码质量改进，不影响对外接口和前端：
