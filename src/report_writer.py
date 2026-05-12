@@ -478,7 +478,7 @@ def _init_clients():
     """初始化 data center 客户端（从云端配置读取 URL/Key）"""
     import pathmagic
     with pathmagic.context():
-        from func.configpr import getinivaluefromcloud
+        from func.jpfuncs import getinivaluefromcloud
         from aimod.center_client import DeepSeekCacheClient, ProbeCacheClient
 
     remote_url = getinivaluefromcloud("joplinai", "joplinai_center_url")
@@ -511,7 +511,7 @@ def main():
 
     import pathmagic
     with pathmagic.context():
-        from func.configpr import getinivaluefromcloud
+        from func.jpfuncs import getinivaluefromcloud
         from func.logme import log
 
     cache_client, probe_client = _init_clients()
