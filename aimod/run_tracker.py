@@ -337,9 +337,9 @@ class RunTracker:
             return {}
 
 # %% [markdown]
-# ### get_change_analysis(self, notebook_title: str = None, days: int = 30) -> Dict
+# ### get_change_analysis(self, notebook_title: str = None, days: int = None) -> Dict
     # %%
-    def get_change_analysis(self, notebook_title: str = None, days: int = 30) -> Dict:
+    def get_change_analysis(self, notebook_title: str = None, days: int = None) -> Dict:
         """分析指定笔记本或全局的笔记动态变化（远程优先）"""
         if self.history_client:
             result = self.history_client.get_change_analysis(notebook_title, days)
@@ -349,16 +349,22 @@ class RunTracker:
             conn = sqlite3.connect(self.history_db_path)
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            where_conditions = ["timestamp >= datetime('now', ?)"]
-            params = [f"-{days} days"]
+            where_conditions = []
+            params = []
+            if days:
+                where_conditions.append("timestamp >= datetime('now', ?)")
+                params.append(f"-{days} days")
             if notebook_title:
                 where_conditions.append("notebook_title = ?")
                 params.append(notebook_title)
-            where_clause = " AND ".join(where_conditions)
+            if where_conditions:
+                where_clause = " WHERE " + " AND ".join(where_conditions)
+            else:
+                where_clause = ""
             cursor.execute(
                 f"""
                 SELECT notes_added_list, notes_removed_list
-                FROM notebook_history WHERE {where_clause}
+                FROM notebook_history{where_clause}
                 """,
                 params,
             )
@@ -388,9 +394,9 @@ class RunTracker:
             return {}
 
 # %% [markdown]
-# ### get_efficiency_metrics(self, days: int = 30) -> Dict
+# ### get_efficiency_metrics(self, days: int = None) -> Dict
     # %%
-    def get_efficiency_metrics(self, days: int = 30) -> Dict:
+    def get_efficiency_metrics(self, days: int = None) -> Dict:
         """获取处理效率指标（远程优先）"""
         if self.history_client:
             result = self.history_client.get_efficiency_metrics(days)
@@ -413,9 +419,8 @@ class RunTracker:
                     COUNT(DISTINCT run_id) as total_runs,
                     COUNT(DISTINCT run_id) * 1.0 / NULLIF(COUNT(DISTINCT DATE(timestamp)), 1) as avg_runs_per_day
                 FROM notebook_history
-                WHERE timestamp >= datetime('now', ?)
-                """,
-                [f"-{days} days"],
+                """ + ("WHERE timestamp >= datetime('now', ?)" if days else ""),
+                [f"-{days} days"] if days else [],
             )
             metrics = dict(cursor.fetchone())
             cursor.execute(
@@ -424,9 +429,8 @@ class RunTracker:
                     COUNT(*) as total_runs,
                     SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) as successful_runs
                 FROM global_run_history
-                WHERE timestamp >= datetime('now', ?)
-                """,
-                [f"-{days} days"],
+                """ + ("WHERE timestamp >= datetime('now', ?)" if days else ""),
+                [f"-{days} days"] if days else [],
             )
             run_stats = cursor.fetchone()
             if run_stats and run_stats['total_runs'] > 0:

@@ -143,7 +143,7 @@ def deepseek_process_note(
             )
             # 重要：这里可以同步验证，但为了不阻塞当前请求，建议异步或后台执行。
             # 以下是同步验证的示例（可能会增加本次请求的延迟）：
-            _validate_cache_entry_in_background(
+            _validate_cache_entry_async(
                 original_text=text[:8000],
                 task=task,
                 cache_key=cache_result.cache_key,
@@ -151,7 +151,7 @@ def deepseek_process_note(
                 model=model,
                 max_retries=max_retries,
             )
-            # 注意：_validate_cache_entry_in_background 函数应立即返回，实际验证在后台线程进行。
+            # 注意：_validate_cache_entry_async 函数应立即返回，实际验证在后台线程进行。
 
         # 3. 无论是否需要验证，都先返回当前缓存的内容
         return cache_result.content
@@ -169,10 +169,10 @@ def deepseek_process_note(
 
 
 # %% [markdown]
-# ## _validate_cache_entry_in_background(original_text: str, task: str, cache_key: str, cached_content: str, model: str, max_retries: int)
+# ## _validate_cache_entry_async(original_text: str, task: str, cache_key: str, cached_content: str, model: str, max_retries: int)
 
 # %%
-def _validate_cache_entry_in_background(
+def _validate_cache_entry_async(
     original_text: str,
     task: str,
     cache_key: str,

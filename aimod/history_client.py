@@ -129,8 +129,10 @@ class HistoryClient:
             return resp.json()
         return self._local_get_cumulative_stats(days)
 
-    def get_change_analysis(self, notebook_title: str = None, days: int = 30) -> Dict:
-        params = {"days": days}
+    def get_change_analysis(self, notebook_title: str = None, days: int = None) -> Dict:
+        params = {}
+        if days:
+            params["days"] = days
         if notebook_title:
             params["notebook"] = notebook_title
         resp = self._request("GET", "/history/change_analysis", params=params)
@@ -138,8 +140,9 @@ class HistoryClient:
             return resp.json()
         return self._local_get_change_analysis(notebook_title, days)
 
-    def get_efficiency_metrics(self, days: int = 30) -> Dict:
-        resp = self._request("GET", "/history/efficiency_metrics", params={"days": days})
+    def get_efficiency_metrics(self, days: int = None) -> Dict:
+        params = {"days": days} if days else {}
+        resp = self._request("GET", "/history/efficiency_metrics", params=params)
         if resp is not None:
             return resp.json()
         return self._local_get_efficiency_metrics(days)
@@ -235,18 +238,22 @@ class HistoryClient:
             log.error(f"本地累积统计失败: {e}")
             return {}
 
-    def _local_get_change_analysis(self, notebook_title: str = None, days: int = 30) -> Dict:
+    def _local_get_change_analysis(self, notebook_title: str = None, days: int = None) -> Dict:
         try:
             conn = sqlite3.connect(self._local_db)
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            where = ["timestamp >= datetime('now', ?)"]
-            params = [f"-{days} days"]
+            where = []
+            params = []
+            if days:
+                where.append("timestamp >= datetime('now', ?)")
+                params.append(f"-{days} days")
             if notebook_title:
                 where.append("notebook_title = ?")
                 params.append(notebook_title)
             cursor.execute(
-                f"SELECT notes_added_list, notes_removed_list FROM notebook_history WHERE {' AND '.join(where)}",
+                f"SELECT notes_added_list, notes_removed_list FROM notebook_history WHERE {' AND '.join(where)}" if where else
+                "SELECT notes_added_list, notes_removed_list FROM notebook_history",
                 params)
             all_added, all_removed = [], []
             for row in cursor.fetchall():
@@ -272,25 +279,42 @@ class HistoryClient:
             log.error(f"本地变动分析失败: {e}")
             return {}
 
-    def _local_get_efficiency_metrics(self, days: int = 30) -> Dict:
+    def _local_get_efficiency_metrics(self, days: int = None) -> Dict:
         try:
             conn = sqlite3.connect(self._local_db)
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            cursor.execute("""SELECT
-                AVG(total_notes) as avg_notes_per_run, AVG(total_chunks) as avg_chunks_per_run,
-                SUM(chunks_upserted)*100.0/NULLIF(SUM(total_chunks),0) as avg_update_rate_percent,
-                SUM(chunks_skipped)*100.0/NULLIF(SUM(total_chunks),0) as avg_skip_rate_percent,
-                SUM(notes_added_count)*100.0/NULLIF(SUM(total_notes),0) as avg_addition_rate_percent,
-                SUM(notes_removed_count)*100.0/NULLIF(SUM(total_notes),0) as avg_removal_rate_percent,
-                COUNT(DISTINCT DATE(timestamp)) as active_days,
-                COUNT(DISTINCT run_id) as total_runs,
-                COUNT(DISTINCT run_id)*1.0/NULLIF(COUNT(DISTINCT DATE(timestamp)),1) as avg_runs_per_day
-            FROM notebook_history WHERE timestamp >= datetime('now', ?)""", [f"-{days} days"])
+            if days:
+                cursor.execute("""SELECT
+                    AVG(total_notes) as avg_notes_per_run, AVG(total_chunks) as avg_chunks_per_run,
+                    SUM(chunks_upserted)*100.0/NULLIF(SUM(total_chunks),0) as avg_update_rate_percent,
+                    SUM(chunks_skipped)*100.0/NULLIF(SUM(total_chunks),0) as avg_skip_rate_percent,
+                    SUM(notes_added_count)*100.0/NULLIF(SUM(total_notes),0) as avg_addition_rate_percent,
+                    SUM(notes_removed_count)*100.0/NULLIF(SUM(total_notes),0) as avg_removal_rate_percent,
+                    COUNT(DISTINCT DATE(timestamp)) as active_days,
+                    COUNT(DISTINCT run_id) as total_runs,
+                    COUNT(DISTINCT run_id)*1.0/NULLIF(COUNT(DISTINCT DATE(timestamp)),1) as avg_runs_per_day
+                FROM notebook_history WHERE timestamp >= datetime('now', ?)""", [f"-{days} days"])
+            else:
+                cursor.execute("""SELECT
+                    AVG(total_notes) as avg_notes_per_run, AVG(total_chunks) as avg_chunks_per_run,
+                    SUM(chunks_upserted)*100.0/NULLIF(SUM(total_chunks),0) as avg_update_rate_percent,
+                    SUM(chunks_skipped)*100.0/NULLIF(SUM(total_chunks),0) as avg_skip_rate_percent,
+                    SUM(notes_added_count)*100.0/NULLIF(SUM(total_notes),0) as avg_addition_rate_percent,
+                    SUM(notes_removed_count)*100.0/NULLIF(SUM(total_notes),0) as avg_removal_rate_percent,
+                    COUNT(DISTINCT DATE(timestamp)) as active_days,
+                    COUNT(DISTINCT run_id) as total_runs,
+                    COUNT(DISTINCT run_id)*1.0/NULLIF(COUNT(DISTINCT DATE(timestamp)),1) as avg_runs_per_day
+                FROM notebook_history""")
             metrics = dict(cursor.fetchone())
-            cursor.execute("""SELECT COUNT(*) as total_runs,
-                SUM(CASE WHEN success=1 THEN 1 ELSE 0 END) as successful_runs
-            FROM global_run_history WHERE timestamp >= datetime('now', ?)""", [f"-{days} days"])
+            if days:
+                cursor.execute("""SELECT COUNT(*) as total_runs,
+                    SUM(CASE WHEN success=1 THEN 1 ELSE 0 END) as successful_runs
+                FROM global_run_history WHERE timestamp >= datetime('now', ?)""", [f"-{days} days"])
+            else:
+                cursor.execute("""SELECT COUNT(*) as total_runs,
+                    SUM(CASE WHEN success=1 THEN 1 ELSE 0 END) as successful_runs
+                FROM global_run_history""")
             rs = cursor.fetchone()
             metrics["success_rate_percent"] = (rs["successful_runs"]*100.0/rs["total_runs"]) if rs and rs["total_runs"]>0 else 0.0
             conn.close()
