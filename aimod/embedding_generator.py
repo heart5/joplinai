@@ -24,7 +24,6 @@
 import hashlib
 import logging
 import re
-import time
 from functools import lru_cache
 from typing import Dict, List, Optional, Tuple
 
@@ -36,21 +35,9 @@ import requests
 # %%
 with pathmagic.context():
     try:
-        from aimod.deepseek_enhancer import deepseek_process_note, get_cache_manager
+        from aimod.deepseek_enhancer import deepseek_process_note
         from func.datatools import compute_content_hash
-        from func.jpfuncs import (
-            createnote,
-            get_notebook_ids_for_note,
-            get_notes_in_notebook_by_title,
-            get_tag_titles,
-            getinivaluefromcloud,
-            getnote,
-            jpapi,
-            searchnotebook,
-            searchnotes,
-            updatenote_body,
-            updatenote_title,
-        )
+        from func.jpfuncs import getinivaluefromcloud
         from func.logme import log
     except ImportError as e:
         logging.basicConfig(level=logging.INFO)

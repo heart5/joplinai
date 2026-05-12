@@ -31,7 +31,7 @@ import time
 from datetime import datetime
 from functools import wraps
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from flask import Flask, jsonify, request
 
@@ -43,7 +43,6 @@ with pathmagic.context():
     try:
         from config_manager import CONFIG_MANAGER
         from func.datatools import getkeysfromcloud
-        from func.jpfuncs import getinivaluefromcloud
         from func.logme import log
         from joplinai import CONFIG as CONFIG_JA
         from queryanswer import CONFIG as CONFIG_QA

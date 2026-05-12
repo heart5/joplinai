@@ -26,16 +26,12 @@
 import argparse
 import json
 import logging
-import os
 import re
 import time
 from datetime import datetime
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
-import chromadb
 import ollama
-from chromadb.config import Settings
 
 # %% [markdown]
 # ### 项目模块导入
@@ -43,21 +39,10 @@ from chromadb.config import Settings
 # %%
 try:
     from aimod.vector_db_manager import VectorDBManager
-    from func.configpr import (
-        findvaluebykeyinsection,
-        getcfpoptionvalue,
-        setcfpoptionvalue,
-    )
     from func.datatools import compute_content_hash
-    from func.first import dirmainpath, getdirmain
-    from func.getid import getdeviceid, getdevicename, gethostuser
-    from func.jpfuncs import (
-        getinivaluefromcloud,
-        getnote,
-    )
+    from func.first import getdirmain
+    from func.jpfuncs import getinivaluefromcloud
     from func.logme import log
-    from func.sysfunc import execcmd, not_IPython
-    from func.wrapfuncs import timethis
 except ImportError as e:
     logging.basicConfig(level=logging.INFO)
     log = logging.getLogger(__name__)

@@ -29,7 +29,7 @@ import sqlite3
 from datetime import datetime, timedelta
 from functools import wraps
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Optional
 
 from flask import Flask, jsonify, request
 

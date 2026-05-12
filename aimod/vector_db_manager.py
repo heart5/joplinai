@@ -21,13 +21,10 @@
 # ## 引入重要库
 
 # %%
-import json
 import logging
-import re
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 import chromadb
 import ollama
@@ -38,10 +35,8 @@ import pathmagic
 with pathmagic.context():
     try:
         from aimod.embedding_generator import EmbeddingGenerator  # 用于调用提取函数
-        from func.datatools import compute_content_hash
         from func.first import getdirmain
         from func.jpfuncs import (
-            get_notebook_ids_for_note,
             get_tag_titles,
             getnote,
         )

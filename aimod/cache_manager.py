@@ -26,17 +26,11 @@
 # ### 系统库
 
 # %%
-import argparse
-import hashlib
-import json
 import logging
-import os
 import sqlite3
-import sys
 from dataclasses import dataclass
-from datetime import datetime, timedelta
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from datetime import datetime
+from typing import Any, Dict, Optional
 
 # %% [markdown]
 # ### func库
@@ -46,16 +40,8 @@ import pathmagic
 
 with pathmagic.context():
     try:
-        from func.first import getdirmain
-        from func.jpfuncs import (
-            createnote,
-            getinivaluefromcloud,
-            searchnotes,
-            updatenote_body,
-        )
+        from func.jpfuncs import getinivaluefromcloud
         from func.logme import log
-        from func.sysfunc import execcmd, not_IPython
-        from func.wrapfuncs import timethis
     except ImportError as e:
         logging.basicConfig(level=logging.INFO)
         log = logging.getLogger(__name__)

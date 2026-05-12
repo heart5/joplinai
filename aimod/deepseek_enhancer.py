@@ -20,11 +20,9 @@
 # # 导入库
 
 # %%
-import json
 import os
 import time
-from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Optional
 
 import requests
 
@@ -34,29 +32,10 @@ import pathmagic
 with pathmagic.context():
     try:
         from aimod.cache_manager import SQLiteCacheManager
-        from func.configpr import (
-            findvaluebykeyinsection,
-            getcfpoptionvalue,
-            setcfpoptionvalue,
-        )
         from func.datatools import compute_content_hash
-        from func.first import dirmainpath, getdirmain
-        from func.getid import getdeviceid, getdevicename, gethostuser
-        from func.jpfuncs import (
-            createnote,
-            get_notes_in_notebook_by_title,
-            get_tag_titles,
-            getinivaluefromcloud,
-            getnote,
-            jpapi,
-            searchnotebook,
-            searchnotes,
-            updatenote_body,
-            updatenote_title,
-        )
+        from func.first import getdirmain
+        from func.jpfuncs import getinivaluefromcloud
         from func.logme import log
-        from func.sysfunc import execcmd, not_IPython
-        from func.wrapfuncs import timethis
     except ImportError as e:
         logging.basicConfig(level=logging.INFO)
         log = logging.getLogger(__name__)
@@ -122,6 +101,7 @@ def get_cache_manager():
 
 
 # %% [markdown]
+#
 # %% [markdown]
 # # DeepSeek大模型（笔记智能加工）
 
