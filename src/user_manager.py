@@ -31,7 +31,7 @@ from typing import Dict, List, Optional
 
 import pathmagic
 
-with pathmagic.context():
+with pathmagic.Context():
     from func.first import getdirmain
     from func.jpfuncs import getinivaluefromcloud
     from func.logme import log

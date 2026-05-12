@@ -47,7 +47,7 @@ from chromadb.config import Settings
 # %%
 import pathmagic
 
-with pathmagic.context():
+with pathmagic.Context():
     try:
         from aimod.run_tracker import JoplinAIRunTracker
         from aimod.center_client import HistoryClient

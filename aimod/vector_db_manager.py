@@ -32,7 +32,7 @@ import ollama
 # %%
 import pathmagic
 
-with pathmagic.context():
+with pathmagic.Context():
     try:
         from aimod.embedding_generator import EmbeddingGenerator  # 用于调用提取函数
         from func.first import getdirmain
@@ -62,7 +62,7 @@ class VectorDBManager:
     def __init__(self, db_path: Path, embedding_model: str, for_creation: bool = False):
         """初始化向量数据库管理器"""
         try:
-            with pathmagic.context():
+            with pathmagic.Context():
                 from joplinai import CONFIG as CONFIG_JA
             config = CONFIG_JA
             # print(config)

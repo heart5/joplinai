@@ -11,7 +11,7 @@ from typing import Dict, Any, Optional
 
 import pathmagic
 
-with pathmagic.context():
+with pathmagic.Context():
     from func.logme import log
 
 
@@ -421,7 +421,7 @@ class ReportWriter:
         默认 "vectorization_report"，缓存报告用 "deepseek_cache_report" / "probe_cache_report"。
         """
         try:
-            with pathmagic.context():
+            with pathmagic.Context():
                 from func.jpfuncs import (
                     createnote, searchnotes, updatenote_body,
                     searchnotebook, getcfpoptionvalue, setcfpoptionvalue,
@@ -435,7 +435,7 @@ class ReportWriter:
 
             # 搜索或创建
             if not (notebook_id := searchnotebook(notebook)):
-                with pathmagic.context():
+                with pathmagic.Context():
                     from func.jpfuncs import jpapi
                 notebook_id = jpapi.add_notebook(title=notebook)
             existing = searchnotes(note_title, parent_id=notebook_id)
@@ -477,7 +477,7 @@ class ReportWriter:
 def _init_clients():
     """初始化 data center 客户端（从云端配置读取 URL/Key）"""
     import pathmagic
-    with pathmagic.context():
+    with pathmagic.Context():
         from func.jpfuncs import getinivaluefromcloud
         from aimod.center_client import DeepSeekCacheClient, ProbeCacheClient
 
@@ -510,7 +510,7 @@ def main():
     args = parser.parse_args()
 
     import pathmagic
-    with pathmagic.context():
+    with pathmagic.Context():
         from func.jpfuncs import getinivaluefromcloud
         from func.logme import log
 

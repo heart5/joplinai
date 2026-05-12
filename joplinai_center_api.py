@@ -57,7 +57,7 @@ def _get_api_key() -> Optional[str]:
         return env_key
     try:
         import pathmagic
-        with pathmagic.context():
+        with pathmagic.Context():
             from func.jpfuncs import getinivaluefromcloud  # noqa: E402
         key = getinivaluefromcloud("joplinai", "joplinai_center_api_key")
         if key:
@@ -462,7 +462,7 @@ def deepseek_cache_report() -> dict:
 def _get_probe_cache_limit() -> int:
     try:
         import pathmagic
-        with pathmagic.context():
+        with pathmagic.Context():
             from func.jpfuncs import getinivaluefromcloud
         val = getinivaluefromcloud("joplinai", "probe_cache_limit")
         return int(val) if val else 10000

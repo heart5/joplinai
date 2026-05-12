@@ -38,7 +38,7 @@ from typing import Any, Dict, Optional
 # %%
 import pathmagic
 
-with pathmagic.context():
+with pathmagic.Context():
     try:
         from func.jpfuncs import getinivaluefromcloud
         from func.logme import log

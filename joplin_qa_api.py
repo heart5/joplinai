@@ -38,7 +38,7 @@ from flask import Flask, jsonify, request
 # %%
 import pathmagic
 
-with pathmagic.context():
+with pathmagic.Context():
     # 尝试导入项目核心模块
     try:
         from config_manager import CONFIG_MANAGER

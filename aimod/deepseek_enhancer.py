@@ -29,7 +29,7 @@ import requests
 # %%
 import pathmagic
 
-with pathmagic.context():
+with pathmagic.Context():
     try:
         from aimod.cache_manager import SQLiteCacheManager
         from func.datatools import compute_content_hash

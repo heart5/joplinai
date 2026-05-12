@@ -30,7 +30,7 @@ import requests
 # %%
 import pathmagic
 
-with pathmagic.context():
+with pathmagic.Context():
     try:
         from aimod.cache_manager import CacheResult, SQLiteCacheManager
         from func.first import getdirmain

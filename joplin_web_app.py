@@ -53,7 +53,7 @@ except ImportError:
     print("警告: user_manager 导入失败，将使用占位符")
 import pathmagic
 
-with pathmagic.context():
+with pathmagic.Context():
     from func.datatools import getkeysfromcloud
     from func.first import getdirmain
     from func.getid import getdeviceid, getdevicename, gethostuser

@@ -33,7 +33,7 @@ import requests
 
 
 # %%
-with pathmagic.context():
+with pathmagic.Context():
     try:
         from aimod.deepseek_enhancer import deepseek_process_note
         from func.datatools import compute_content_hash

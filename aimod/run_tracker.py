@@ -32,7 +32,7 @@ from typing import Any, Dict, List, Optional, Tuple
 # %%
 import pathmagic
 
-with pathmagic.context():
+with pathmagic.Context():
     try:
         from func.logme import log
         from func.first import getdirmain
