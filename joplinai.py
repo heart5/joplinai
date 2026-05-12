@@ -146,7 +146,7 @@ def load_process_state(state_path: Path) -> Dict[str, Dict]:
 # %% [markdown]
 # ### save_process_state(state: Dict, state_path: Path)
 # %%
-def save_process_state(state: Dict, state_path: Path):
+def save_process_state(state: Dict, state_path: Path) -> None:
     """保存处理状态（增强序列化）"""
 
     def serialize(obj):
@@ -172,7 +172,7 @@ def save_process_state(state: Dict, state_path: Path):
 # ### filter_notes(notes: List[Any]) -> List[Any]
 
 # %%
-def filter_notes(notes):
+def filter_notes(notes) -> List:
     """根据云端配置过滤需要排除的笔记"""
     try:
         if filter_notes_titles := getinivaluefromcloud(
@@ -796,7 +796,7 @@ def process_notes_incremental(notebook_title: str, config: Dict, note_ids: List[
 # %%
 def add_file_lock(
     model_name: str, lock_name: str = "joplinai.lock", timeout: int = 3600
-):
+) -> Tuple[Optional[str], bool]:
     """在脚本入口创建文件锁，防止多实例并发运行。
 
     Args:
@@ -929,7 +929,7 @@ def parse_args():
 
 # %%
 @timethis
-def main():
+def main() -> None:
     """主函数：执行增量处理"""
     args = parse_args()
     # 动态覆盖配置

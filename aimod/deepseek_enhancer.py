@@ -68,7 +68,7 @@ CACHE_FILE = CACHE_DIR / "joplinai_center.db"
 # ## _ensure_cache_dir()
 
 # %%
-def _ensure_cache_dir():
+def _ensure_cache_dir() -> None:
     """确保缓存目录存在"""
     if not os.path.exists(CACHE_DIR):
         os.makedirs(CACHE_DIR, exist_ok=True)
@@ -179,7 +179,7 @@ def _validate_cache_entry_async(
     cached_content: str,
     model: str,
     max_retries: int,
-):
+) -> None:
     """
     在后台执行验证的逻辑。
     实际部署时，可以将此函数放入线程池、任务队列或异步框架中。
