@@ -45,7 +45,6 @@ with pathmagic.context():
 # # DeepSeek配置
 
 # %%
-# DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")  # 从环境变量读取（安全）
 DEEPSEEK_API_KEY = getinivaluefromcloud("joplinai", "deepseek_token")
 DEEPSEEK_EMBED_URL = "https://api.deepseek.com/v1/embeddings"  # 嵌入API端点
 DEEPSEEK_CHAT_URL = "https://api.deepseek.com/v1/chat/completions"  # 大模型API端点

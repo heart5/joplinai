@@ -730,7 +730,6 @@ def parse_args():
     parser.add_argument(
         "--use-deepseek",
         action="store_true",
-        # default=CONFIG["enable_deepseek"],
         default=False,
         help=f"使用DeepSeek API（默认：{CONFIG['enable_deepseek']}）",
     )

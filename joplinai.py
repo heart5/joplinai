@@ -451,10 +451,6 @@ def process_notes_incremental(notebook_title: str, config: Dict, note_ids: List[
         config: 配置字典
         note_ids: 可选，直接指定笔记ID列表，作为虚拟笔记集处理。为None时按物理笔记本处理。
     """
-    model_name = config["embedding_model"]
-    # 动态获取模型最大上下文
-    # chunk_size = EmbeddingGenerator(config["embedding_model"]).chunk_size
-    # log.info(f"使用模型"{model_name}"")
 
 
 # %% [markdown]

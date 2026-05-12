@@ -70,9 +70,6 @@ class VectorDBManager:
                 host=config.get("chroma_server_host", "10.9.0.1"),
                 port=config.get("chroma_server_port", 8000)
             )
-            # self.client = chromadb.PersistentClient(
-            #     path=str(db_path),
-            # )
             self._model_dimension_cache = {}  # 添加这行：初始化缓存字典
             self.embedding_model = embedding_model
             self.collection_name = f"joplin_{embedding_model.replace(':', '_').replace('/', '_').replace('-', '_')}"
@@ -472,7 +469,6 @@ class VectorDBManager:
             return {}
 
         hash_map = {}
-        # needs_update = []
 
         for chunk_id, metadata, document in zip(
             results['ids'], results['metadatas'], results.get('documents', [])
@@ -480,28 +476,7 @@ class VectorDBManager:
             content_hash = metadata.get("content_hash", "")
             meta_hash = metadata.get("meta_hash", "")
 
-            # # 如果content_hash缺失或为空，计算并标记需要更新
-            # if (not content_hash or not meta_hash) and document:
-            #     current_content_hash = compute_content_hash(document)
-            #     local_tags = metadata.get("tags", "")
-            #     tags_str = ",".join(sorted(local_tags.split(','))) if local_tags else ""  # 排序保证一致性
-            #     current_notebook_title = metadata.get("source_notebook_title", "")
-            #     current_meta_hash = compute_content_hash(f"{tags_str}{current_notebook_title}")
-            #     needs_update.append((chunk_id, metadata, current_content_hash, current_meta_hash))
-            #     # content_hash = current_content_hash
-            #     # meta_hash = current_meta_hash
-
             hash_map[chunk_id] = {"content_hash": content_hash, "meta_hash": meta_hash}
-
-        # # 批量更新需要修复的文档
-        # if needs_update:
-        #     for chunk_id, metadata, content_hash, meta_hash in needs_update:
-        #         updated_metadata = {**metadata, "content_hash": content_hash, "meta_hash": meta_hash}
-        #         self.collection.update(
-        #             ids=[chunk_id],
-        #             metadatas=[updated_metadata]
-        #         )
-        #     log.info(f"修复了 {len(needs_update)} 个文档的content_hash或meta_hash字段")
 
         return hash_map
 

@@ -444,10 +444,6 @@ class EmbeddingGenerator:
     DATE_IN_CONTEXT_PATTERN = re.compile(
         r"(\d{4}[-年/]\d{1,2}[-月/]\d{1,2}[日号])", re.MULTILINE
     )
-    # 用于从注入上下文的块中提取日期：匹配 "日期：2026年4月14日"
-    # DATE_IN_CONTEXT_PATTERN = re.compile(
-    #     r"日期[：:]\s*(\d{4}[-年/]\d{1,2}[-月/]\d{1,2}[日号])", re.MULTILINE
-    # )
     # 通用章节分割模式：优先匹配分隔符 (***, ---)，其次匹配 # 标题
     GENERAL_SECTION_PATTERN = re.compile(
         r"\n(?:\*{3,}|\-{3,}|#{1,3}\s+.*?)\n", re.MULTILINE
@@ -1349,7 +1345,6 @@ class EmbeddingGenerator:
                     f"（长度：{len(chunk_content)}字符）: {e}",
                     exc_info=True,
                 )
-            # tags = list(set([t.strip() for t in note_tags] + [t.strip() for t in enhanced_metadata.get("tags", "")]))
             tags = [t.strip() for t in note_tags.split(",") if t.strip()]
             tags_str = ",".join(sorted(tags)) if tags else ""  # 排序保证一致性
             meta_hash = compute_content_hash(f"{tags_str}{source_notebook_title}")
@@ -1543,8 +1538,6 @@ class EmbeddingGenerator:
         max_retries = 5
         for attempt in range(1, max_retries + 1):
             try:
-                # 调用安全的嵌入生成
-                # embedding = self.get_ollama_embedding_safe(processed_text)
                 embedding = self.get_ollama_embedding(processed_text)
                 if embedding:
                     break

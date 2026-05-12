@@ -298,7 +298,6 @@ def api_ask():
         user_identity = data.get("user_identity")
 
         # 3. 调用核心问答功能
-        # result = qa_system.ask(question, use_history=use_history)
         result = qa_system.ask(
             question, use_history=use_history, user_identity=user_identity
         )

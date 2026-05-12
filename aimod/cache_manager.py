@@ -284,7 +284,6 @@ class SQLiteCacheManager:
         count_result = cursor.fetchone()
         # 从元组中提取第一个元素（即计数值），如果结果为None则默认为0
         count = count_result[0] if count_result else 0
-        # count = cursor.fetchone()
         if not (cache_limit := getinivaluefromcloud("joplinai", "cache_limit")):
             cache_limit = 50000
         if count > cache_limit:
