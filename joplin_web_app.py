@@ -20,12 +20,10 @@
 # 实际实现在 `src/web_app/` 包中。
 
 # %%
-if __name__ == "__main__":
-    import pathmagic
-    with pathmagic.Context():
-        from func.first import getdirmain
-    template_dir = getdirmain() / "templates"
-    template_dir.mkdir(exist_ok=True)
+import pathmagic
+with pathmagic.Context():
     from src.web_app import create_app
-    app = create_app()
+app = create_app()
+
+if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5001, debug=False)
