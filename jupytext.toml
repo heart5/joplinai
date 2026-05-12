@@ -1,0 +1,2 @@
+# Default format for jupytext pairs: .ipynb ↔ .py (percent format)
+formats = "ipynb,py:percent"

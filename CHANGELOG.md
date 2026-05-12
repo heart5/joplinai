@@ -10,6 +10,33 @@
 
 本文档记录 Claude Code 协助下的所有项目变更。
 
+### 2026年5月12日
+
+**报告生成统一化** — 将所有缓存/探测报告迁移至 center_api stats 端点，消除本地数据库依赖：
+
+- 新增 `/cache/deepseek/report` 端点（5 维度缓存统计：按模型/操作/日期/命中率/趋势）
+- 新增 `/cache/probe/report` 端点（按模型/块大小/安全长度/趋势 4 维度统计）
+- 新建 `src/report_writer.py` 统一报告模块（格式化 + Joplin 写入 + CLI 入口）
+- `aitaskreporter.py` → `run_tracker.py`，`JoplinAIRunTracker` 回归数据采集本职
+- 删除 `CacheStatsAnalyzer` + `CacheReportGenerator`（~800 行），净减 1500+ 行
+- `write_to_joplin()` 支持 `config_key` 参数，不同报告类型独立缓存 note_id
+- CLI 用法：`python src/report_writer.py [--type deepseek_cache|probe_cache|all] [--output joplin|stdout]`
+- 缓存报告不再依赖本地 `deepseek_cache.db`，完全 remote-first
+
+**Bug 修复**：
+
+- `deepseek_cache_report` 连接未设 `row_factory=sqlite3.Row`，导致 `dict()` 转换失败
+- `report_writer.py` 中 `func` 子模块导入缺少 `pathmagic.context()` 包裹，子目录/systemd 下找不到模块
+- `getinivaluefromcloud` 应从 `func.jpfuncs` 导入而非 `func.configpr`
+
+**jupytext 工作流规范化**：
+
+- 新建 `jupytext.toml`：`formats = "ipynb,py:percent"`，py 与 ipynb 同目录配对
+- `.gitignore`：`*.ipynb` 全面屏蔽，ipynb 永不再入库
+- git pre-commit hook：staged `.py` 文件自动 `jupytext --sync` 生成对应 ipynb
+- git filter-branch：从历史中清除全部 ipynb 文件，避免调试信息泄露
+- 工作流：编辑 `.py` → 自动生成 `.ipynb`（仅本地阅览，不入库）
+
 ### 2026年5月11日
 
 **user_manager.py 重构** — 代码质量改进，不影响对外接口和前端：
