@@ -1005,17 +1005,6 @@ def main():
     # ==== 文件锁结束 ====
 
 # %% [markdown]
-# #### 给向量库项目的metadata添加两个字段
-
-# %%
-# ！！！一次性运行，给向量库项目的metadata添加notebook_id和notebook_title字段。
-# vector_db = VectorDBManager(
-#     dynamic_config["db_path"], dynamic_config["embedding_model"], True
-# )
-# vector_db.migrate_add_notebook_id(get_notebook_ids_for_note)
-# ！！！运行结束！！！请注释掉上面两行代码
-
-# %% [markdown]
 # #### 初始化任务报告器并启动处理传入的笔记本列表
 
     # %%
