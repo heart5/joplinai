@@ -45,10 +45,10 @@ with pathmagic.Context():
 
 
 # %% [markdown]
-# # JoplinAIRunTracker
+# # RunTracker
 
 # %%
-class JoplinAIRunTracker:
+class RunTracker:
     """Joplin AI任务运行追踪器
     核心功能：
     1. 采集每次运行的逐笔记本处理数据。

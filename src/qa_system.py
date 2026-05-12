@@ -57,7 +57,7 @@ with pathmagic.Context():
 
 
 # %%
-class JoplinQASystem:
+class QASystem:
     """Joplin笔记问答系统"""
 
 # %% [markdown]
@@ -82,7 +82,7 @@ class JoplinQASystem:
             model_name=self.config["embedding_model"],
         )
         log.info(
-            f"JoplinQASystem 初始化完成，已加载 embedding_generator，"
+            f"QASystem 初始化完成，已加载 embedding_generator，"
             f"嵌入模型为：{self.config['embedding_model']}"
         )
 
@@ -641,7 +641,7 @@ def parse_args():
 
 
 # %%
-def interactive_mode(qa_system: JoplinQASystem):
+def interactive_mode(qa_system: QASystem):
     """交互式问答模式"""
     print("\n" + "=" * 60)
     print("Joplin笔记智能问答系统 - 交互模式")
@@ -741,7 +741,7 @@ def main():
 
     # 初始化问答系统
     log.info("初始化Joplin问答系统...")
-    qa_system = JoplinQASystem(dynamic_config)
+    qa_system = QASystem(dynamic_config)
 
     # 检查向量数据库
     if not qa_system.vector_db.collection:

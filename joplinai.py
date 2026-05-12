@@ -49,7 +49,7 @@ import pathmagic
 
 with pathmagic.Context():
     try:
-        from aimod.run_tracker import JoplinAIRunTracker
+        from aimod.run_tracker import RunTracker
         from aimod.history_client import HistoryClient
         from aimod.embedding_generator import EmbeddingGenerator
         from aimod.vector_db_manager import VectorDBManager
@@ -1035,7 +1035,7 @@ def main():
     dynamic_config["state_client"] = state_client
 
     # 初始化任务追踪器
-    task_reporter = JoplinAIRunTracker(dynamic_config, history_client=history_client)
+    task_reporter = RunTracker(dynamic_config, history_client=history_client)
 
     log.info("===== 启动Joplin笔记向量化处理 =====")
     notebook_titles = [

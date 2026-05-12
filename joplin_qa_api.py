@@ -46,7 +46,7 @@ with pathmagic.Context():
         from func.logme import log
         from joplinai import CONFIG as CONFIG_JA
         from src.qa_config import CONFIG as CONFIG_QA
-        from src.qa_system import JoplinQASystem
+        from src.qa_system import QASystem
     except ImportError as e:
         # 降级处理：配置基础日志并定义占位类
         import logging as log_module
@@ -59,7 +59,7 @@ with pathmagic.Context():
         log.warning(f"部分模块导入失败，API基础功能可能受限: {e}")
 
         # 占位类，实际使用时请确保qa_system.py可用
-        class JoplinQASystem:
+        class QASystem:
             def __init__(self, config=None):
                 pass
 
@@ -128,12 +128,12 @@ app = Flask(__name__)
 # # 函数库
 
 # %% [markdown]
-# ## get_qa_system_for_session(session_id: str, config_overrides: Optional[Dict] = None,) -> JoplinQASystem
+# ## get_qa_system_for_session(session_id: str, config_overrides: Optional[Dict] = None,) -> QASystem
 
 # %%
 def get_qa_system_for_session(
     session_id: str, config_overrides: Optional[Dict] = None
-) -> JoplinQASystem:
+) -> QASystem:
     """获取或创建指定会话的问答系统实例（支持云端配置热更新）"""
     global _qa_system_instances
 
@@ -182,7 +182,7 @@ def get_qa_system_for_session(
                 )
 
                 try:
-                    qa_instance = JoplinQASystem(effective_config)
+                    qa_instance = QASystem(effective_config)
                     # 存储实例及其关联的云端配置指纹
                     _qa_system_instances[session_id] = {
                         "instance": qa_instance,
