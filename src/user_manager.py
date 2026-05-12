@@ -970,7 +970,7 @@ def _create_remote_first_manager():
             remote_url = "http://127.0.0.1:5003"
         api_key = getinivaluefromcloud("joplinai", "joplinai_center_api_key")
         if remote_url and api_key:
-            from aimod.center_client import UserManagerClient
+            from aimod.user_client import UserManagerClient
             log.info("用户管理器: 启用远程优先模式")
             return UserManagerClient(remote_url, api_key, local_db)
     except Exception as e:

@@ -89,7 +89,7 @@ def get_cache_manager():
         remote_url = "http://127.0.0.1:5003"
     api_key = getinivaluefromcloud("joplinai", "joplinai_center_api_key")
     if remote_url and api_key:
-        from aimod.center_client import DeepSeekCacheClient
+        from aimod.deepseek_client import DeepSeekCacheClient
 
         _CACHE_MANAGER = DeepSeekCacheClient(remote_url, api_key)
         return _CACHE_MANAGER

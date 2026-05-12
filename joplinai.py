@@ -50,7 +50,7 @@ import pathmagic
 with pathmagic.Context():
     try:
         from aimod.run_tracker import JoplinAIRunTracker
-        from aimod.center_client import HistoryClient
+        from aimod.history_client import HistoryClient
         from aimod.embedding_generator import EmbeddingGenerator
         from aimod.vector_db_manager import VectorDBManager
         from func.configpr import (
@@ -1028,7 +1028,7 @@ def main():
             remote_url = "http://127.0.0.1:5003"
         api_key = getinivaluefromcloud("joplinai", "joplinai_center_api_key")
         if remote_url and api_key:
-            from aimod.center_client import ProcessStateClient
+            from aimod.state_client import ProcessStateClient
             state_client = ProcessStateClient(remote_url, api_key)
     except Exception:
         pass

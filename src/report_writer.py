@@ -479,7 +479,8 @@ def _init_clients():
     import pathmagic
     with pathmagic.Context():
         from func.jpfuncs import getinivaluefromcloud
-        from aimod.center_client import DeepSeekCacheClient, ProbeCacheClient
+        from aimod.deepseek_client import DeepSeekCacheClient
+        from aimod.probe_client import ProbeCacheClient
 
     remote_url = getinivaluefromcloud("joplinai", "joplinai_center_url")
     if not remote_url:

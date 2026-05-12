@@ -479,7 +479,7 @@ class EmbeddingGenerator:
                 remote_url = "http://127.0.0.1:5003"
             api_key = getinivaluefromcloud("joplinai", "joplinai_center_api_key")
             if remote_url and api_key:
-                from aimod.center_client import ProbeCacheClient
+                from aimod.probe_client import ProbeCacheClient
                 probe_client = ProbeCacheClient(remote_url, api_key)
                 log.info("[自适应探测] 远程缓存客户端已连接")
         except Exception:
