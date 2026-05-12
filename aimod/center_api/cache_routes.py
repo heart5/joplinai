@@ -308,72 +308,73 @@ def probe_cache_report() -> dict:
         "daily_new": daily_new,
     }
 
+
 # %% [markdown]
 # # Flask 端点
-#
-# @cache_bp.route("/cache/deepseek/get", methods=["POST"])
-# @require_auth
-# def api_ds_cache_get():
-#     data = request.get_json(force=True)
-#     return jsonify(deepseek_cache_get(data["content_hash"], data["task"]))
-#
-#
-# @cache_bp.route("/cache/deepseek/set", methods=["POST"])
-# @require_auth
-# def api_ds_cache_set():
-#     data = request.get_json(force=True)
-#     deepseek_cache_set(data["content_hash"], data["task"], data["result"])
-#     return jsonify({"ok": True})
-#
-#
-# @cache_bp.route("/cache/deepseek/validate", methods=["POST"])
-# @require_auth
-# def api_ds_cache_validate():
-#     data = request.get_json(force=True)
-#     deepseek_cache_validate(data["cache_key"], data.get("new_result"), data["success"])
-#     return jsonify({"ok": True})
-#
-#
-# @cache_bp.route("/cache/deepseek/stats")
-# @require_auth
-# def api_ds_cache_stats():
-#     cache_key = request.args.get("cache_key")
-#     return jsonify(deepseek_cache_stats(cache_key))
-#
-#
-# @cache_bp.route("/cache/deepseek/report")
-# @require_auth
-# def api_ds_cache_report():
-#     return jsonify(deepseek_cache_report())
-#
-#
-# @cache_bp.route("/cache/probe/get/<text_md5>", methods=["GET"])
-# @require_auth
-# def api_probe_cache_get(text_md5: str):
-#     result = probe_cache_get(text_md5)
-#     if result:
-#         return jsonify(result)
-#     return jsonify({"found": False}), 404
-#
-#
-# @cache_bp.route("/cache/probe/set", methods=["POST"])
-# @require_auth
-# def api_probe_cache_set():
-#     data = request.get_json(force=True)
-#     probe_cache_set(
-#         data["text_md5"], data["safe_len"], data["snippet"],
-#         data["model_name"], data["chunk_size"],
-#     )
-#     return jsonify({"ok": True})
-#
-#
-# @cache_bp.route("/cache/probe/stats")
-# @require_auth
-# def api_probe_cache_stats():
-#     return jsonify(probe_cache_stats())
-#
-#
-# @cache_bp.route("/cache/probe/report")
-# @require_auth
-# def api_probe_cache_report():
-#     return jsonify(probe_cache_report())
+
+@cache_bp.route("/cache/deepseek/get", methods=["POST"])
+@require_auth
+def api_ds_cache_get():
+    data = request.get_json(force=True)
+    return jsonify(deepseek_cache_get(data["content_hash"], data["task"]))
+
+
+@cache_bp.route("/cache/deepseek/set", methods=["POST"])
+@require_auth
+def api_ds_cache_set():
+    data = request.get_json(force=True)
+    deepseek_cache_set(data["content_hash"], data["task"], data["result"])
+    return jsonify({"ok": True})
+
+
+@cache_bp.route("/cache/deepseek/validate", methods=["POST"])
+@require_auth
+def api_ds_cache_validate():
+    data = request.get_json(force=True)
+    deepseek_cache_validate(data["cache_key"], data.get("new_result"), data["success"])
+    return jsonify({"ok": True})
+
+
+@cache_bp.route("/cache/deepseek/stats")
+@require_auth
+def api_ds_cache_stats():
+    cache_key = request.args.get("cache_key")
+    return jsonify(deepseek_cache_stats(cache_key))
+
+
+@cache_bp.route("/cache/deepseek/report")
+@require_auth
+def api_ds_cache_report():
+    return jsonify(deepseek_cache_report())
+
+
+@cache_bp.route("/cache/probe/get/<text_md5>", methods=["GET"])
+@require_auth
+def api_probe_cache_get(text_md5: str):
+    result = probe_cache_get(text_md5)
+    if result:
+        return jsonify(result)
+    return jsonify({"found": False}), 404
+
+
+@cache_bp.route("/cache/probe/set", methods=["POST"])
+@require_auth
+def api_probe_cache_set():
+    data = request.get_json(force=True)
+    probe_cache_set(
+        data["text_md5"], data["safe_len"], data["snippet"],
+        data["model_name"], data["chunk_size"],
+    )
+    return jsonify({"ok": True})
+
+
+@cache_bp.route("/cache/probe/stats")
+@require_auth
+def api_probe_cache_stats():
+    return jsonify(probe_cache_stats())
+
+
+@cache_bp.route("/cache/probe/report")
+@require_auth
+def api_probe_cache_report():
+    return jsonify(probe_cache_report())

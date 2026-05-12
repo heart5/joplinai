@@ -29,84 +29,85 @@ __all__ = ["state_bp"]
 
 state_bp = Blueprint("state", __name__)
 
+
 # %% [markdown]
 # # Flask 端点
-#
-# @state_bp.route("/state/batch_load", methods=["POST"])
-# @require_auth
-# def api_state_batch_load():
-#     data = request.get_json(force=True)
-#     model_name = data["model_name"]
-#     conn = _init_db()
-#     rows = conn.execute(
-#         "SELECT note_id, state_json FROM note_process_state WHERE model_name=?",
-#         (model_name,),
-#     ).fetchall()
-#     conn.close()
-#     states = {}
-#     virtual_collections = {}
-#     for note_id, state_json in rows:
-#         state = json.loads(state_json)
-#         if note_id == "__virtual_collections__":
-#             virtual_collections = state
-#         else:
-#             states[note_id] = state
-#     result = {"states": states}
-#     if virtual_collections:
-#         result["virtual_collections"] = virtual_collections
-#     return jsonify(result)
-#
-#
-# @state_bp.route("/state/batch_save", methods=["POST"])
-# @require_auth
-# def api_state_batch_save():
-#     data = request.get_json(force=True)
-#     model_name = data["model_name"]
-#     states = data.get("states", {})
-#     virtual_collections = data.get("virtual_collections", {})
-#     now = datetime.now().isoformat()
-#     conn = _init_db()
-#     conn.execute("DELETE FROM note_process_state WHERE model_name=?", (model_name,))
-#     count = 0
-#     for note_id, note_state in states.items():
-#         conn.execute(
-#             "INSERT INTO note_process_state (model_name, note_id, state_json, updated_at) VALUES (?,?,?,?)",
-#             (model_name, note_id, json.dumps(note_state, ensure_ascii=False), now),
-#         )
-#         count += 1
-#     if virtual_collections:
-#         conn.execute(
-#             "INSERT INTO note_process_state (model_name, note_id, state_json, updated_at) VALUES (?,?,?,?)",
-#             (model_name, "__virtual_collections__", json.dumps(virtual_collections, ensure_ascii=False), now),
-#         )
-#         count += 1
-#     conn.commit()
-#     conn.close()
-#     return jsonify({"ok": True, "count": count})
-#
-#
-# @state_bp.route("/state/<model_name>/<note_id>", methods=["GET"])
-# @require_auth
-# def api_state_get_note(model_name: str, note_id: str):
-#     conn = _init_db()
-#     row = conn.execute(
-#         "SELECT state_json FROM note_process_state WHERE model_name=? AND note_id=?",
-#         (model_name, note_id),
-#     ).fetchone()
-#     conn.close()
-#     if row:
-#         return jsonify({"found": True, "state": json.loads(row[0])})
-#     return jsonify({"found": False}), 404
-#
-#
-# @state_bp.route("/state/delete_model", methods=["POST"])
-# @require_auth
-# def api_state_delete_model():
-#     data = request.get_json(force=True)
-#     model_name = data["model_name"]
-#     conn = _init_db()
-#     cursor = conn.execute("DELETE FROM note_process_state WHERE model_name=?", (model_name,))
-#     deleted = cursor.rowcount
-#     conn.commit()
-#     conn.close()
-#     return jsonify({"ok": True, "deleted": deleted})
+
+@state_bp.route("/state/batch_load", methods=["POST"])
+@require_auth
+def api_state_batch_load():
+    data = request.get_json(force=True)
+    model_name = data["model_name"]
+    conn = _init_db()
+    rows = conn.execute(
+        "SELECT note_id, state_json FROM note_process_state WHERE model_name=?",
+        (model_name,),
+    ).fetchall()
+    conn.close()
+    states = {}
+    virtual_collections = {}
+    for note_id, state_json in rows:
+        state = json.loads(state_json)
+        if note_id == "__virtual_collections__":
+            virtual_collections = state
+        else:
+            states[note_id] = state
+    result = {"states": states}
+    if virtual_collections:
+        result["virtual_collections"] = virtual_collections
+    return jsonify(result)
+
+
+@state_bp.route("/state/batch_save", methods=["POST"])
+@require_auth
+def api_state_batch_save():
+    data = request.get_json(force=True)
+    model_name = data["model_name"]
+    states = data.get("states", {})
+    virtual_collections = data.get("virtual_collections", {})
+    now = datetime.now().isoformat()
+    conn = _init_db()
+    conn.execute("DELETE FROM note_process_state WHERE model_name=?", (model_name,))
+    count = 0
+    for note_id, note_state in states.items():
+        conn.execute(
+            "INSERT INTO note_process_state (model_name, note_id, state_json, updated_at) VALUES (?,?,?,?)",
+            (model_name, note_id, json.dumps(note_state, ensure_ascii=False), now),
+        )
+        count += 1
+    if virtual_collections:
+        conn.execute(
+            "INSERT INTO note_process_state (model_name, note_id, state_json, updated_at) VALUES (?,?,?,?)",
+            (model_name, "__virtual_collections__", json.dumps(virtual_collections, ensure_ascii=False), now),
+        )
+        count += 1
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True, "count": count})
+
+
+@state_bp.route("/state/<model_name>/<note_id>", methods=["GET"])
+@require_auth
+def api_state_get_note(model_name: str, note_id: str):
+    conn = _init_db()
+    row = conn.execute(
+        "SELECT state_json FROM note_process_state WHERE model_name=? AND note_id=?",
+        (model_name, note_id),
+    ).fetchone()
+    conn.close()
+    if row:
+        return jsonify({"found": True, "state": json.loads(row[0])})
+    return jsonify({"found": False}), 404
+
+
+@state_bp.route("/state/delete_model", methods=["POST"])
+@require_auth
+def api_state_delete_model():
+    data = request.get_json(force=True)
+    model_name = data["model_name"]
+    conn = _init_db()
+    cursor = conn.execute("DELETE FROM note_process_state WHERE model_name=?", (model_name,))
+    deleted = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True, "deleted": deleted})

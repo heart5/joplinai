@@ -235,42 +235,43 @@ def history_efficiency_metrics(days: int = 30) -> dict:
 
     return metrics
 
+
 # %% [markdown]
 # # Flask 端点
-#
-# @history_bp.route("/history/notebook_record", methods=["POST"])
-# @require_auth
-# def api_history_notebook_record():
-#     data = request.get_json(force=True)
-#     history_add_notebook_record(data)
-#     return jsonify({"ok": True})
-#
-#
-# @history_bp.route("/history/finalize_run", methods=["POST"])
-# @require_auth
-# def api_history_finalize_run():
-#     data = request.get_json(force=True)
-#     history_finalize_run(data)
-#     return jsonify({"ok": True})
-#
-#
-# @history_bp.route("/history/cumulative_stats", methods=["GET"])
-# @require_auth
-# def api_history_cumulative_stats():
-#     days = request.args.get("days", type=int)
-#     return jsonify(history_cumulative_stats(days))
-#
-#
-# @history_bp.route("/history/change_analysis", methods=["GET"])
-# @require_auth
-# def api_history_change_analysis():
-#     notebook_title = request.args.get("notebook_title")
-#     days = request.args.get("days", 30, type=int)
-#     return jsonify(history_change_analysis(notebook_title, days))
-#
-#
-# @history_bp.route("/history/efficiency_metrics", methods=["GET"])
-# @require_auth
-# def api_history_efficiency_metrics():
-#     days = request.args.get("days", 30, type=int)
-#     return jsonify(history_efficiency_metrics(days))
+
+@history_bp.route("/history/notebook_record", methods=["POST"])
+@require_auth
+def api_history_notebook_record():
+    data = request.get_json(force=True)
+    history_add_notebook_record(data)
+    return jsonify({"ok": True})
+
+
+@history_bp.route("/history/finalize_run", methods=["POST"])
+@require_auth
+def api_history_finalize_run():
+    data = request.get_json(force=True)
+    history_finalize_run(data)
+    return jsonify({"ok": True})
+
+
+@history_bp.route("/history/cumulative_stats", methods=["GET"])
+@require_auth
+def api_history_cumulative_stats():
+    days = request.args.get("days", type=int)
+    return jsonify(history_cumulative_stats(days))
+
+
+@history_bp.route("/history/change_analysis", methods=["GET"])
+@require_auth
+def api_history_change_analysis():
+    notebook_title = request.args.get("notebook_title")
+    days = request.args.get("days", 30, type=int)
+    return jsonify(history_change_analysis(notebook_title, days))
+
+
+@history_bp.route("/history/efficiency_metrics", methods=["GET"])
+@require_auth
+def api_history_efficiency_metrics():
+    days = request.args.get("days", 30, type=int)
+    return jsonify(history_efficiency_metrics(days))
