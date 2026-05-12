@@ -432,16 +432,16 @@ class JoplinQASystem:
         """生成优化答案"""
         if self.config["enable_deepseek"] and self.config["deepseek_api_key"]:
             log.info(f"启用deepseek聊天模式")
-            return self._generate_answer_with_deepseek_optimized(question, context)
+            return self._generate_answer_with_deepseek(question, context)
         else:
             log.info(f"启用本地ollama调用的聊天大模型{self.config['chat_model']}")
             return self._generate_answer_with_ollama(question, context)
 
 # %% [markdown]
-# ### _generate_answer_with_deepseek_optimized(self, question: str, context: str) -> str
+# ### _generate_answer_with_deepseek(self, question: str, context: str) -> str
 
     # %%
-    def _generate_answer_with_deepseek_optimized(
+    def _generate_answer_with_deepseek(
         self, question: str, context: str
     ) -> str:
         """优化版的DeepSeek答案生成"""
