@@ -19,6 +19,8 @@ with pathmagic.Context():
 # # ReportWriter
 
 # %%
+__all__ = ["ReportWriter", "main"]
+
 class ReportWriter:
     """统一报告生成器 — 从 stats 端点取数据，格式化后写入 Joplin"""
 

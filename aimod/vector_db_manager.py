@@ -51,6 +51,8 @@ with pathmagic.Context():
 # ## VectorDBManager类
 
 # %%
+__all__ = ["VectorDBManager"]
+
 class VectorDBManager:
     """统一的ChromaDB向量数据库管理器"""
 
@@ -147,6 +149,13 @@ class VectorDBManager:
                 )
         except Exception as e:
             log.error(f"初始化向量数据库时出错：{e}")
+
+    def __repr__(self):
+        try:
+            count = self.collection.count()
+        except Exception:
+            count = "?"
+        return f"VectorDBManager(model={self.embedding_model!r}, collection={self.collection_name!r}, docs={count})"
 
 # %% [markdown]
 # ### _ensure_collection(self)

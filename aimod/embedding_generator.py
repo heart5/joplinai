@@ -37,6 +37,7 @@ with pathmagic.Context():
     try:
         from aimod.chunk_optimizer import AdaptiveChunkOptimizer
         from aimod.deepseek_enhancer import deepseek_process_note
+        from aimod.text_preprocessor import TextPreprocessor
         from aimod.text_splitter import ContextAwareSplitter
         from func.datatools import compute_content_hash
         from func.jpfuncs import getinivaluefromcloud
@@ -52,6 +53,8 @@ with pathmagic.Context():
 
 
 # %%
+__all__ = ["EmbeddingGenerator"]
+
 class EmbeddingGenerator:
     """嵌入生成器，支持长文本分块处理"""
 
@@ -115,6 +118,10 @@ class EmbeddingGenerator:
             probe_client=probe_client,
         )
         self.enable_adaptive_chunking = enable_adaptive_chunking
+        self.text_prep = TextPreprocessor(chunk_size=self.chunk_size)
+
+    def __repr__(self):
+        return f"EmbeddingGenerator(model={self.model_name!r}, dim={self.embedding_dim}, chunk_size={self.chunk_size})"
 
     @property
     def _safe_net_chars(self) -> int:
@@ -136,7 +143,7 @@ class EmbeddingGenerator:
         if key in self._chunk_embedding_cache:
             return
         try:
-            processed = self._preprocess_text_for_embedding(chunk_text)
+            processed = self.text_prep.preprocess_for_embedding(chunk_text)
             self._chunk_embedding_cache[key] = self.get_ollama_embedding(processed)
         except Exception:
             pass
@@ -184,15 +191,16 @@ class EmbeddingGenerator:
         """精确获取模型上下文限制（token→字符转换）"""
         # 特殊处理已知模型
         if self.model_name == "nomic-embed-text":
-            self.chunk_size = 1850  # 字符: 768token × 3字符/token × 0.8 ≈ 1850字符
+            self.chunk_size = 1850
+            self.text_prep.chunk_size = self.chunk_size
             return
         elif self.model_name == "dengcao/bge-large-zh-v1.5":
-            self.chunk_size = (
-                512  # 字符: bge中文模型 512token上下文, 中文≈1token/字符
-            )
+            self.chunk_size = 512
+            self.text_prep.chunk_size = self.chunk_size
             return
         elif self.model_name == "qwen:1.8b":
-            self.chunk_size = 4000  # 字符: 2048token上下文 × 3字符/token × 0.8 ≈ 4916字符, 取4000字符
+            self.chunk_size = 4000
+            self.text_prep.chunk_size = self.chunk_size
             return
 
         # 通用模型处理
@@ -243,36 +251,7 @@ class EmbeddingGenerator:
             )
             self.chunk_size = 1024
 
-# %% [markdown]
-# ## clean_text(text: str) -> str
-    # %%
-    def clean_text(self, text: str) -> str:
-        """
-        清理笔记文本：移除图片、格式符号、多余换行
-        一般用于分块之后净化文本
-        """
-        if not text:
-            return ""
-
-        # 1. 移除图片链接：![alt](url)
-        text = re.sub(r"!\[.*?\]\(.*?\)", "", text)
-
-        # 2. 特别处理：移除图片链接后的多余空行
-        # 将3个以上连续换行减少为2个
-        text = re.sub(r"\n{3,}", "\n\n", text)
-
-        # 3. 移除Markdown格式符号（保留必要的标点）
-        # 注意：不要移除中文标点符号
-        text = re.sub(r"[#*`>~\-]", "", text)
-
-        # 4. 移除开头和结尾的空白行
-        text = text.strip()
-
-        # 5. 如果清理后文本过短，记录警告
-        if len(text) < 10:  # 少于10个字符
-            log.warning(f"清理后文本过短，不到10个字符。清理前为: {text[:50]}...")
-
-        return text
+        self.text_prep.chunk_size = self.chunk_size
 
 # %% [markdown]
 # ## enhance_by_deepseek_for_summary_tags(chunk_content: str, note_tags: str, config: Dict)
@@ -316,282 +295,6 @@ class EmbeddingGenerator:
 
         return enhanced_metadata
 
-# %% [markdown]
-# ## _is_valid_chunk(self, text: str, min_length: int = 10) -> bool
-
-    # %%
-    def _is_valid_chunk(self, text: str, min_length: int = 10) -> bool:
-        """检查文本块是否有效（非空、非极短、非纯符号）"""
-        if not text or len(text.strip()) < min_length:
-            return False
-        # 可选：检查是否仅为符号、数字或空格
-        if re.match(r"^[\s\\d\\W]+$", text):
-            return False
-        return True
-
-# %% [markdown]
-# ## _preprocess_text_for_embedding(self, text: str) -> str
-
-    # %%
-    def _preprocess_text_for_embedding(self, text: str) -> str:
-        """专门为嵌入模型设计的文本预处理"""
-        import re
-
-        # 1. 移除或替换可能引起问题的特殊字符和模式
-        # 例如：过多的换行符合并
-        text = re.sub(r"\n{3,}", "\n\n", text)
-        # 例如：将多个连续相同字符缩减（针对“哈哈哈...”）
-        text = re.sub(r"(.)\1{4,}", r"\1\1\1", text)  # 5个以上相同字符保留3个
-
-        # 2. 移除或替换无语义的极端口语词（可选，根据需求调整）
-        # 这里示例移除一些可能无实际语义的强感叹词，避免影响核心语义
-        strong_interjections = [r"我操\s*", r"他妈\s*的", r"哈哈哈\s*"]
-        for pattern in strong_interjections:
-            text = re.sub(pattern, "", text)
-
-        # 3. 确保文本两端无多余空格
-        text = text.strip()
-
-        return text
-
-# %% [markdown]
-# ## _convert_health_data_to_text(self, raw_content: str) -> str
-
-    # %%
-    def _convert_health_data_to_text(self, raw_content: str) -> str:
-        """
-        将健康笔记中的结构化数据行转换为自然语言描述。
-        示例输入: "110，4：14" -> "今日步数110步，睡眠时长4小时14分钟。"
-        示例输入: "799，7：44，1" -> "今日步数799步，睡眠时长7小时44分钟，喝啤酒1瓶。"
-        """
-        lines = [line for line in raw_content.strip().split("\n") if line]
-        converted_lines = []
-
-        for line in lines:
-            line = line.strip()
-            # 匹配数字模式：如 "110，4：14" 或 "11033，4：7，4"
-            if re.match(r"^\d+[，,]\s*\d+[:：]\d+([，,]\s*\d+)?$", line):
-                parts = re.split(r"[，,]\s*", line)
-                if len(parts) >= 2:
-                    # 解析步数
-                    steps = parts[0]
-                    desc = f"今日步数{steps}步，"
-
-                    # 解析睡眠时间（格式如 4:14 或 4：14）
-                    sleep_time = parts[1].replace("：", ":")
-                    if ":" in sleep_time:
-                        sleep_parts = sleep_time.split(":")
-                        if len(sleep_parts) == 2:
-                            desc += f"睡眠时长{sleep_parts[0]}小时{sleep_parts[1]}分钟"
-
-                    # 解析啤酒数量（如果有）
-                    if len(parts) >= 3 and parts[2].isdigit():
-                        beer_count = parts[2]
-                        desc += f"，喝啤酒{beer_count}瓶"
-
-                    line = desc + "。"
-            converted_lines.append(line)
-
-        return "\n".join(converted_lines)
-
-# %% [markdown]
-# ## _condense_dense_lists(self, text: str) -> str
-
-    # %%
-    def _condense_dense_lists(self, text: str) -> str:
-        """
-        尝试浓缩密集的列表文本，减少token数量但保留关键信息。
-        例如：将“A、B、C、D、E”浓缩为“A等5人”。
-        """
-        import re
-
-        # 匹配中文顿号分隔的列表模式，如“张三、李四、王五”
-        pattern = r"([\u4e00-\u9fa5]{2,4}、){3,}[\u4e00-\u9fa5]{2,4}"
-        matches = re.findall(pattern, text)
-
-        for match in matches:
-            original = match
-            # 提取所有人名
-            names = original.split("、")
-            if len(names) > 4:  # 仅对较长的列表进行浓缩
-                condensed = f"{names[0]}、{name[1]}等{len(names)}人"
-                text = text.replace(original, condensed)
-                log.debug(f"浓缩密集列表: {original[:20]}... -> {condensed}")
-        return text
-
-# %% [markdown]
-# ## _aggressive_text_reduction(self, text: str) -> str
-
-    # %%
-    def _aggressive_text_reduction(self, text: str) -> str:
-        """当模型明确报告超长时，采取更激进的文本缩减策略"""
-        # 1. 直接截取前400个字符（保证极短）
-        safe_length = 400
-        len_text = len(text)
-        if len_text > safe_length:
-            text = text[:safe_length]
-            log.debug(f"[激进缩减] 从{len_text}字符缩减至{safe_length}字符")
-
-        # 2. 【新增】针对“人名列表”的特殊处理
-        # 检测模式：包含大量顿号、冒号，且无明显段落
-        if "：" in text and "、" in text and len(text.splitlines()) < 5:
-            log.debug(
-                f"检测到密集人名列表，进行针对性清理。该文本块头为：{text[:200]} ……"
-            )
-            # 移除所有空格和换行，简化格式
-            text = text.replace("\n", "").replace(" ", "")
-            # 将顿号替换为逗号（可能token更少）
-            text = text.replace("、", ",")
-            # 如果仍然过长，只保留前N个人名
-            if len(text) > safe_length:
-                # 尝试按逗号分割，保留前一部分
-                parts = text.split(",")
-                if len(parts) > 10:
-                    text = ",".join(parts[:10]) + "...（名单截断）"
-
-        # 3. 进一步移除所有重复字符模式
-        import re
-
-        text = re.sub(r"(.)\1{2,}", r"\1", text)  # 3个以上相同字符保留1个
-
-        return text
-
-# %% [markdown]
-# ## _reduce_text_length(self, text: str, max_chars: int = 400) -> str
-
-    # %%
-    def _reduce_text_length(self, text: str, max_chars: int = 400) -> str:
-        """智能缩减文本长度，优先保留信息密度高的部分。"""
-        if len(text) <= max_chars:
-            return text
-
-        original_len = len(text)
-        log.warning(f"[智能缩减] 文本过长({original_len}字符)，启动智能缩减")
-
-        # 策略1: 移除纯格式性、低信息量的行（如空行、纯分隔符）
-        lines = text.splitlines()
-        filtered_lines = []
-        for line in lines:
-            stripped = line.strip()
-            # 保留非空行，且不是纯符号或数字编号的行
-            if stripped and not re.match(r"^[\s\-*=•·●○◆◇■□▣▢▤▥▦▧▨▩▱▰]*$", stripped):
-                filtered_lines.append(line)
-        text = "\n".join(filtered_lines)
-
-        # 策略2: 如果仍是长列表，尝试浓缩（调用上述新方法）
-        text = self._condense_dense_lists(text)
-
-        # 策略3: 若仍超长，进行关键句提取（简易版）
-        if len(text) > max_chars:
-            # 优先保留包含日期、数字、关键动词（如“总结”、“认为”、“记录”）的句子
-            sentences = re.split(r"(?<=[。！？；\n])", text)
-            important_sentences = []
-            for sent in sentences:
-                # 简单的关键词启发式规则
-                if (
-                    re.search(r"\d{4}年\d{1,2}月\d{1,2}日", sent)
-                    or re.search(r"\b(总计|合计|主要|关键|总结|认为|记录|建议)\b", sent)
-                    or re.search(r"[A-Za-z\u4e00-\u9fa5]{2,}：[^。]+", sent)
-                ):  # 包含冒号定义的项
-                    important_sentences.append(sent)
-            if important_sentences:
-                text = "".join(important_sentences)
-                log.debug(f"通过关键句提取缩减文本。")
-
-        # 策略4: 最后防线，按段落截断但添加标记
-        if len(text) > max_chars:
-            # 不是粗暴截断，而是找到最近的段落结束处
-            truncated = text[:max_chars]
-            # 尝试在段落边界处截断
-            last_para_break = truncated.rfind("\n\n")
-            if last_para_break > max_chars * 0.5:  # 如果能找到合理的段落边界
-                text = (
-                    truncated[:last_para_break]
-                    + f"\n\n【注：因长度限制，后续内容已省略。原始文本共{original_len}字符。】"
-                )
-            else:
-                text = truncated + f"...【文本截断，原始长度{original_len}字符】"
-            log.warning(f"文本经智能缩减后仍超长，已进行截断并添加标记。")
-
-        log.info(f"[智能缩减完成] {original_len}字符 -> {len(text)}字符")
-        return text
-
-# %% [markdown]
-# ## _normalize_date_string(self, date_str: str) -> str
-
-    # %%
-    def _normalize_date_string(self, date_str: str) -> str:
-        """
-        将各种格式的日期字符串规范化为统一的“YYYY年M月D日”格式。
-        支持格式：
-            - “2026年04月14日” 或 “2026年4月14日”
-            - “2026年04月14号” 或 “2026年4月14号”
-            - “2026-04-14” 或 “2026-4-14”
-            - “2026/04/14” 或 “2026/4/14”
-        输出：统一为“2026年4月14日”（数字不补零）。
-        """
-        if not date_str or not isinstance(date_str, str):
-            return ""
-
-        # 定义多种匹配模式并提取年、月、日数字
-        patterns = [
-            # 匹配“2026年04月14日”或“2026年4月14号”等
-            r'(?P<year>\d{4})年(?P<month>\d{1,2})月(?P<day>\d{1,2})[日号]',
-            # 匹配“2026-04-14”或“2026-4-14”
-            r'(?P<year>\d{4})-(?P<month>\d{1,2})-(?P<day>\d{1,2})',
-            # 匹配“2026/04/14”或“2026/4/14”
-            r'(?P<year>\d{4})/(?P<month>\d{1,2})/(?P<day>\d{1,2})',
-        ]
-
-        for pattern in patterns:
-            match = re.search(pattern, date_str)
-            if match:
-                year = match.group('year')
-                # 去除月份和日期的前导零，例如“04” -> “4”
-                month = str(int(match.group('month')))
-                day = str(int(match.group('day')))
-                # 统一格式化为“YYYY年M月D日”
-                return f"{year}年{month}月{day}日"
-
-        # 如果没有匹配到任何已知格式，返回原字符串或空字符串（根据需求）
-        return date_str
-
-# %% [markdown]
-# ## _normalize_single_date_unit(self, raw_text: str, captured_date: str) -> str
-
-    # %%
-    def _normalize_single_date_unit(self, raw_text: str, captured_date: str) -> str:
-        """
-        规范化单个日期单元的文本。
-        """
-        lines = raw_text.splitlines()
-        if not lines:
-            return ""
-
-        # 1. 规范化标题行：统一为 “### YYYY年M月D日” 格式
-        # 【核心调用】使用新的通用日期规范化函数
-        normalized_captured_date = self._normalize_date_string(captured_date)
-        normalized_header = f"### {normalized_captured_date}"
-
-        # 2. 处理主体内容：去除标题行之后的连续空行，以及单元末尾的连续空行
-        body_lines = []
-        for line in lines[1:]:  # 从标题行之后开始
-            # 跳过开头的连续空行，直到遇到第一个非空行
-            if body_lines or line.strip():
-                body_lines.append(line.rstrip())  # 同时去除每行右侧空格
-
-        # 去除末尾的连续空行
-        while body_lines and not body_lines[-1].strip():
-            body_lines.pop()
-
-        # 3. 重新组装
-        # 如果主体为空，只返回标题行；否则用两个换行符连接标题和主体（常见格式）
-        if not body_lines:
-            return normalized_header
-        else:
-            # 注意：这里保持主体内部原有的换行结构，只规范边界
-            normalized_body = "\n".join(body_lines)
-            return f"{normalized_header}\n\n{normalized_body}"
 
 # %% [markdown]
 # ## _iterative_chunking(self, text, note_title, source_date)
@@ -840,7 +543,7 @@ class EmbeddingGenerator:
 
                 # 2. 【核心】规范化此日期单元
                 # 目标：统一格式，消除因文本全局位置变化带来的边界差异
-                normalized_unit = self._normalize_single_date_unit(
+                normalized_unit = self.text_prep.normalize_single_date_unit(
                     raw_day_unit, captured_date
                 )
 
@@ -861,8 +564,8 @@ class EmbeddingGenerator:
         final_chunks = []  # 存储所有最终文本块
         for idx, raw_chunk in enumerate(chunks, 1):
             # 在分割逻辑中，对每个 raw_chunk 进行转换，当下仅针对《健康运动笔记》
-            converted_chunk = self._convert_health_data_to_text(raw_chunk)
-            converted_chunk = self._condense_dense_lists(converted_chunk)
+            converted_chunk = self.text_prep.convert_health_data_to_text(raw_chunk)
+            converted_chunk = self.text_prep.condense_dense_lists(converted_chunk)
             converted_chunk = converted_chunk.strip()
             # 1. 提取该日期单元的日期 (仍使用 UNIFIED_DATE_PATTERN 搜索当前块)
             date_match = self.UNIFIED_DATE_PATTERN.search(converted_chunk)
@@ -926,7 +629,7 @@ class EmbeddingGenerator:
             if date_in_chunk:
                 extracted_date = date_in_chunk.group(1)
                 # 【核心调用】使用相同的通用日期规范化函数
-                estimated_date = self._normalize_date_string(extracted_date)
+                estimated_date = self.text_prep.normalize_date_string(extracted_date)
             # 提取作者信息
             note_meta = self._extract_author_from_note(
                 note_title,
@@ -935,8 +638,8 @@ class EmbeddingGenerator:
             )
 
             # 清理内容格式
-            content = self.clean_text(chunk_content)
-            if not self._is_valid_chunk(content):
+            content = self.text_prep.clean_text(chunk_content)
+            if not self.text_prep.is_valid_chunk(content):
                 log.info(
                     f"跳过无效文本块（索引【{idx}/{len(final_chunks)}】，"
                     f"该文本块清理后长度{len(content)}字符）。"
@@ -1158,7 +861,7 @@ class EmbeddingGenerator:
             return cached
 
         # 在尝试本地Ollama嵌入前，对文本进行一次嵌入预处理
-        processed_text = self._preprocess_text_for_embedding(text)
+        processed_text = self.text_prep.preprocess_for_embedding(text)
         max_retries = 5
         for attempt in range(1, max_retries + 1):
             try:

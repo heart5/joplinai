@@ -41,6 +41,8 @@ CENTER_DB_PATH = getdirmain() / "data" / "joplinai_center.db"
 
 
 # %%
+__all__ = ["HistoryClient"]
+
 class HistoryClient:
     """历史数据库客户端 — 远程优先 + 本地 SQLite 回退"""
 

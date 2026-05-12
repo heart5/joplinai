@@ -35,6 +35,8 @@ with pathmagic.Context():
 
 
 # %%
+__all__ = ["PromptManager"]
+
 class PromptManager:
     """集中管理从云端获取的系统提示词，杜绝硬编码。"""
 

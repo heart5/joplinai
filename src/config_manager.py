@@ -39,6 +39,8 @@ with pathmagic.Context():
 # ## ConfigManager类
 
 # %%
+__all__ = ["ConfigManager", "CONFIG_MANAGER"]
+
 class ConfigManager:
     """
     云端配置热更新管理器（单例）。
@@ -163,6 +165,10 @@ class ConfigManager:
         with self.lock:
             # 返回一个深拷贝，防止外部修改内部状态
             return self.current_config_snapshot.copy()
+
+    def get_all(self) -> Dict[str, Any]:
+        """get_config_snapshot 的别名，语义更清晰。"""
+        return self.get_config_snapshot()
 
     def get_config_fingerprint(self) -> str:
         """获取当前配置的指纹"""

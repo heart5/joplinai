@@ -36,6 +36,8 @@ with pathmagic.Context():
 
 
 # %%
+__all__ = ["CONFIG"]
+
 CONFIG = {
     "embedding_model": "dengcao/bge-large-zh-v1.5",
     "chat_model": chat_model

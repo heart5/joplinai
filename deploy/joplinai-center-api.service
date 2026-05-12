@@ -13,7 +13,7 @@ ExecStart=/usr/miniconda3/envs/newlsp/bin/gunicorn -w 2 \
     --access-logfile /var/log/joplin-qa/cache_access.log \
     --error-logfile /var/log/joplin-qa/cache_error.log \
     --log-level info \
-    -b 0.0.0.0:5003 --timeout 30 joplinai_center_api:app
+    -b 0.0.0.0:5003 --timeout 30 "aimod.center_api:create_app()"
 
 Restart=always
 RestartSec=10

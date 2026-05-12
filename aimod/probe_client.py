@@ -36,6 +36,8 @@ with pathmagic.Context():
 
 
 # %%
+__all__ = ["ProbeCacheClient"]
+
 class ProbeCacheClient:
     """自适应探测结果缓存客户端 — 远程优先，失败降级不报错"""
 

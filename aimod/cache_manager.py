@@ -53,6 +53,8 @@ with pathmagic.Context():
 
 
 # %%
+__all__ = ["CacheResult", "SQLiteCacheManager"]
+
 # 新增：定义一个数据类来封装更丰富的返回信息
 @dataclass
 class CacheResult:
@@ -63,6 +65,10 @@ class CacheResult:
     cache_key: str
     current_hit_count: int  # 验证周期内的命中次数（触发验证后会被重置）
     total_hits: int
+
+    def __repr__(self):
+        hit = "yes" if self.content is not None else "no"
+        return f"CacheResult(key={self.cache_key!r}, hit={hit}, total_hits={self.total_hits})"
 
 
 # %% [markdown]

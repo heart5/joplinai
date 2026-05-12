@@ -40,6 +40,8 @@ CENTER_DB_PATH = getdirmain() / "data" / "joplinai_center.db"
 
 
 # %%
+__all__ = ["DeepSeekCacheClient"]
+
 class DeepSeekCacheClient:
     """DeepSeek 摘要/标签缓存客户端 — 远程优先 + 本地 SQLite 回退"""
 

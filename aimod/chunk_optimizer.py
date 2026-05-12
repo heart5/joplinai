@@ -35,6 +35,8 @@ with pathmagic.Context():
 
 
 # %%
+__all__ = ["AdaptiveChunkOptimizer"]
+
 class AdaptiveChunkOptimizer:
     """
     自适应分块优化器。

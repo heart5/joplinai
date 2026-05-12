@@ -37,6 +37,8 @@ with pathmagic.Context():
 
 
 # %%
+__all__ = ["UserManagerClient"]
+
 class UserManagerClient:
     """用户管理客户端 — 远程优先 + 本地 SQLite 回退
 

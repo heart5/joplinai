@@ -41,6 +41,8 @@ with pathmagic.Context():
 # # UserManager类
 
 # %%
+__all__ = ["UserManager", "USER_DB_PATH", "USER_MANAGER"]
+
 class UserManager:
     """基于SQLite的用户、会话及权限管理器"""
 

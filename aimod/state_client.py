@@ -38,6 +38,8 @@ with pathmagic.Context():
 
 
 # %%
+__all__ = ["ProcessStateClient"]
+
 class ProcessStateClient:
     """笔记处理状态客户端 — 远程优先 + 本地 JSON 回退"""
 

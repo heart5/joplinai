@@ -78,6 +78,8 @@ def _ensure_cache_dir() -> None:
 # ## get_cache_manager()
 
 # %%
+__all__ = ["get_cache_manager", "deepseek_process_note"]
+
 def get_cache_manager():
     """获取缓存管理器 — 云端未配 URL 则本机为生产主机走本地"""
     global _CACHE_MANAGER

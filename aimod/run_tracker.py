@@ -48,6 +48,8 @@ with pathmagic.Context():
 # # RunTracker
 
 # %%
+__all__ = ["RunTracker"]
+
 class RunTracker:
     """Joplin AI任务运行追踪器
     核心功能：
@@ -74,6 +76,9 @@ class RunTracker:
         self.history_db_path = getdirmain() / "data" / "joplinai_center.db"
         if not self.history_client:
             self._init_history_db()
+
+    def __repr__(self):
+        return f"RunTracker(db={self.history_db_path})"
 
 # %% [markdown]
 # ## _init_history_db(self)
