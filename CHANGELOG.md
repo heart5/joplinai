@@ -10,7 +10,45 @@
 
 本文档记录 Claude Code 协助下的所有项目变更。
 
+### 2026年5月13日
+
+**Bug 修复**：
+
+- `joplin_web_app.py` gunicorn 不兼容：Phase 3C 重构后 `app = create_app()` 被放入 `if __name__ == "__main__":` 块内，gunicorn 导入 `joplin_web_app:app` 时找不到 Flask 实例。修复：将 `app` 提升到模块级别。
+- jupytext hook 代码注释化：`src/cli.py`、`aimod/center_api/*_routes.py` 中 markdown cell (`# %% [markdown]`) 后缺少显式 `# %%` code cell 标记，导致 jupytext `--sync` 将后续代码识别为 markdown 并注释掉。修复：在各 markdown cell 后的代码块前补充 `# %%`，删除残留的损坏 `.ipynb`。
+
 ### 2026年5月12日
+
+**Phase 5 — CI/CD + 部署标准化**：
+
+- 新建 `.pre-commit-config.yaml`：flake8 自动检查（同 CI 参数）
+- 新建 `.github/workflows/ci.yml`：push/PR 触发 flake8 lint + pytest
+- 新建 `docker-compose.yml`：本地开发拓扑（center_api、qa_api、web_app、chromadb）
+- 新建 `deploy/deploy.sh`：统一部署脚本（`hcx` 本地重启 / `tc` rsync+远程重启，支持 `--dry-run`）
+- systemd 更新：`joplinai-center-api.service` gunicorn 命令从 `joplinai_center_api:app` 改为 `"aimod.center_api:create_app()"`
+- `.gitignore` 补充 `.env`
+
+**Phase 4 — 工程化增强**：
+
+- **`__all__` 全覆盖**：30+ 文件添加 `__all__` 明确导出列表（`aimod/`、`src/`、`aimod/center_api/`、`aimod/center_client/`）
+- **`__repr__` 关键类**：`CacheResult`、`VectorDBManager`、`EmbeddingGenerator`、`RunTracker`、`QASystem`
+- **返回类型标注**：所有公开函数补充返回类型 (`-> None` / `-> str` / `-> Optional[str]` 等)
+- **导入规范化**：全项目统一包前缀（`src.` / `aimod.` / `func.`），消除隐式相对导入
+- **日志统一**：`aimod/__init__.py` 新增 `get_logger(name)`，自动继承 `func/logme` 的 handler/level
+- **`src/config_manager.py`**：新增 `get_all()` 别名方法
+- **函数签名规范化**：`days` 参数默认值统一，部分函数重命名
+- **`.ipynb_checkpoints/`**：清理 20 个残留文件
+
+**Phase 3 — 大文件拆分收尾**：
+
+- `aimod/center_client.py` → `aimod/center_client/` 包（5 个独立客户端：`deepseek_cache.py`、`probe_cache.py`、`history.py`、`process_state.py`、`user_client.py`）
+- `aimod/embedding_generator.py` → `embedding_generator.py` + `chunk_optimizer.py` + `text_splitter.py`
+- `src/queryanswer.py` → `queryanswer.py` + `qa_config.py` + `prompt_manager.py` + `qa_system.py`
+- `joplinai_center_api.py` → `aimod/center_api/` 包（`cache_routes.py`、`history_routes.py`、`state_routes.py`、`user_routes.py`），app factory 模式 `create_app()`
+- `src/` 新增 `cli.py`（从 `joplinai.py` 拆分 CLI 参数解析）
+- 类名去 Joplin 前缀：`JoplinAIRunTracker` → `RunTracker`、`JoplinQASystem` → `QASystem`
+- `pathmagic.context()` → `pathmagic.Context()` 全项目更新，用 `rootfile` 标记定位取代 cwd 相对路径
+- `aimod/` 和 `src/` 添加 `__init__.py`，转为正则 Python 包
 
 **报告生成统一化** — 将所有缓存/探测报告迁移至 center_api stats 端点，消除本地数据库依赖：
 
