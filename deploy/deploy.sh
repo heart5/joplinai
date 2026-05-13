@@ -86,11 +86,18 @@ deploy_tc() {
             "; then
                 green "git pull (代理) 完成"
             else
-                # 3. 代理也失败 → rsync 兜底
+                # 3. 代理也失败 → rsync 兜底 + 重置 TC git
                 red "git pull (代理) 也失败，回退到 rsync..."
                 rsync -avz --delete "${RSYNC_EXCLUDE[@]}" \
                     "$PROJECT_DIR/" "$TC_HOST:$TC_PATH/"
                 green "rsync 兜底完成"
+                # rsync 后重置 TC git 对齐 origin/main，避免历史发散
+                echo "同步 TC git 历史..."
+                if ssh "$TC_HOST" "cd $TC_PATH && git fetch origin && git reset --hard origin/main && git submodule update --init"; then
+                    green "TC git 历史已对齐 origin/main"
+                else
+                    yellow "TC git 对齐失败，下次部署前需手动修复"
+                fi
             fi
         fi
     else
