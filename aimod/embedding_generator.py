@@ -96,6 +96,7 @@ class EmbeddingGenerator:
         self.embedding_dim = self._get_model_dimension()
         self.embedding_cache = {}
         self._chunk_embedding_cache = {}
+        self.text_prep = TextPreprocessor(chunk_size=self.chunk_size)
         self._set_chunk_size()
 
         # 初始化探测缓存客户端（远程优先，失败不影响运行）
@@ -118,7 +119,6 @@ class EmbeddingGenerator:
             probe_client=probe_client,
         )
         self.enable_adaptive_chunking = enable_adaptive_chunking
-        self.text_prep = TextPreprocessor(chunk_size=self.chunk_size)
 
     def __repr__(self):
         return f"EmbeddingGenerator(model={self.model_name!r}, dim={self.embedding_dim}, chunk_size={self.chunk_size})"
