@@ -102,6 +102,9 @@ class QASystem:
             'role': 'colleague'  # 'admin' 或 'colleague'
         }
         """
+        if not user_identity:
+            return {"answer": "未授权：缺少用户身份，请先登录。"}
+
         # 1. 预处理问题
         processed_question = self._preprocess_question(question)
 
