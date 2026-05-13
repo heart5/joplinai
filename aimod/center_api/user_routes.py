@@ -31,10 +31,10 @@ __all__ = ["user_bp"]
 
 user_bp = Blueprint("user", __name__)
 
-
 # %% [markdown]
 # # 认证端点
-
+#
+# %%
 @user_bp.route("/auth/verify", methods=["POST"])
 @require_auth
 def api_auth_verify():
@@ -55,8 +55,8 @@ def api_auth_verify():
     conn.close()
     log.info(f"登录失败: 用户名={data['username']} 不存在或密码错误")
     return jsonify({"found": False}), 404
-
-
+#
+#
 @user_bp.route("/auth/create_session", methods=["POST"])
 @require_auth
 def api_auth_create_session():
@@ -69,8 +69,8 @@ def api_auth_create_session():
     conn.commit()
     conn.close()
     return jsonify({"session_id": session_id})
-
-
+#
+#
 @user_bp.route("/auth/validate_session", methods=["POST"])
 @require_auth
 def api_auth_validate_session():
@@ -87,8 +87,8 @@ def api_auth_validate_session():
     if row:
         return jsonify({"valid": True, "user": dict(row)})
     return jsonify({"valid": False}), 404
-
-
+#
+#
 @user_bp.route("/auth/delete_session", methods=["POST"])
 @require_auth
 def api_auth_delete_session():
@@ -99,10 +99,10 @@ def api_auth_delete_session():
     conn.close()
     return jsonify({"ok": True})
 
-
 # %% [markdown]
 # # 用户 CRUD 端点
-
+#
+# %%
 @user_bp.route("/users", methods=["GET"])
 @require_auth
 def api_users_list():
@@ -113,8 +113,8 @@ def api_users_list():
     ).fetchall()
     conn.close()
     return jsonify({"users": [dict(r) for r in rows]})
-
-
+#
+#
 @user_bp.route("/users/<username>", methods=["GET"])
 @require_auth
 def api_users_get(username: str):
@@ -133,8 +133,8 @@ def api_users_get(username: str):
             user["allowed_notebooks"] = []
         return jsonify({"found": True, "user": user})
     return jsonify({"found": False}), 404
-
-
+#
+#
 @user_bp.route("/users/create", methods=["POST"])
 @require_auth
 def api_users_create():
@@ -154,8 +154,8 @@ def api_users_create():
         conn.close()
         log.info(f"用户创建失败(已存在): {data['username']}")
         return jsonify({"ok": False, "error": "用户名已存在"}), 409
-
-
+#
+#
 @user_bp.route("/users/delete", methods=["POST"])
 @require_auth
 def api_users_delete():
@@ -175,10 +175,10 @@ def api_users_delete():
     log.info(f"用户删除: {data['target_username']}")
     return jsonify({"ok": True})
 
-
 # %% [markdown]
 # # 用户更新端点
-
+#
+# %%
 @user_bp.route("/users/update_role", methods=["POST"])
 @require_auth
 def api_users_update_role():
@@ -191,8 +191,8 @@ def api_users_update_role():
     if ok:
         log.info(f"用户角色变更: {data['target_username']} → {data['new_role']}")
     return jsonify({"ok": ok})
-
-
+#
+#
 @user_bp.route("/users/update_permissions", methods=["POST"])
 @require_auth
 def api_users_update_permissions():
@@ -210,8 +210,8 @@ def api_users_update_permissions():
     conn.commit()
     conn.close()
     return jsonify({"ok": True})
-
-
+#
+#
 @user_bp.route("/users/reset_password", methods=["POST"])
 @require_auth
 def api_users_reset_password():
@@ -224,8 +224,8 @@ def api_users_reset_password():
     if ok:
         log.info(f"密码重置: {data['target_username']}")
     return jsonify({"ok": ok})
-
-
+#
+#
 @user_bp.route("/users/toggle_active", methods=["POST"])
 @require_auth
 def api_users_toggle_active():
@@ -236,8 +236,8 @@ def api_users_toggle_active():
     conn.commit()
     conn.close()
     return jsonify({"ok": ok})
-
-
+#
+#
 @user_bp.route("/users/update_display_name", methods=["POST"])
 @require_auth
 def api_users_update_display_name():
@@ -249,10 +249,10 @@ def api_users_update_display_name():
     conn.close()
     return jsonify({"ok": ok})
 
-
 # %% [markdown]
 # # 聊天会话端点
-
+#
+# %%
 @user_bp.route("/chat_sessions/<int:user_id>", methods=["GET"])
 @require_auth
 def api_chat_sessions_list(user_id: int):
@@ -266,8 +266,8 @@ def api_chat_sessions_list(user_id: int):
     ).fetchall()
     conn.close()
     return jsonify({"sessions": [dict(r) for r in rows]})
-
-
+#
+#
 @user_bp.route("/chat_sessions/create", methods=["POST"])
 @require_auth
 def api_chat_sessions_create():
@@ -279,8 +279,8 @@ def api_chat_sessions_create():
     conn.commit()
     conn.close()
     return jsonify({"ok": True, "session_id": session_id})
-
-
+#
+#
 @user_bp.route("/chat_sessions/create_with_id", methods=["POST"])
 @require_auth
 def api_chat_sessions_create_with_id():
@@ -291,8 +291,8 @@ def api_chat_sessions_create_with_id():
     conn.commit()
     conn.close()
     return jsonify({"ok": True})
-
-
+#
+#
 @user_bp.route("/chat_sessions/rename", methods=["POST"])
 @require_auth
 def api_chat_sessions_rename():
@@ -304,8 +304,8 @@ def api_chat_sessions_rename():
     conn.commit()
     conn.close()
     return jsonify({"ok": ok})
-
-
+#
+#
 @user_bp.route("/chat_sessions/delete", methods=["POST"])
 @require_auth
 def api_chat_sessions_delete():
@@ -316,8 +316,8 @@ def api_chat_sessions_delete():
     conn.commit()
     conn.close()
     return jsonify({"ok": ok})
-
-
+#
+#
 @user_bp.route("/chat_sessions/set_active", methods=["POST"])
 @require_auth
 def api_chat_sessions_set_active():
@@ -329,8 +329,8 @@ def api_chat_sessions_set_active():
     conn.commit()
     conn.close()
     return jsonify({"ok": True})
-
-
+#
+#
 @user_bp.route("/chat_sessions/<int:user_id>/active", methods=["GET"])
 @require_auth
 def api_chat_sessions_active(user_id: int):
@@ -343,10 +343,10 @@ def api_chat_sessions_active(user_id: int):
         return jsonify({"found": True, "session_id": row[0]})
     return jsonify({"found": False}), 404
 
-
 # %% [markdown]
 # # 问答历史端点
-
+#
+# %%
 @user_bp.route("/qa/save", methods=["POST"])
 @require_auth
 def api_qa_save():
@@ -358,8 +358,8 @@ def api_qa_save():
     conn.commit()
     conn.close()
     return jsonify({"ok": True})
-
-
+#
+#
 @user_bp.route("/qa/<int:user_id>", methods=["GET"])
 @require_auth
 def api_qa_history(user_id: int):
@@ -391,8 +391,8 @@ def api_qa_history(user_id: int):
                 item["metadata"] = {}
         history.append(item)
     return jsonify({"history": history})
-
-
+#
+#
 @user_bp.route("/qa/by_session/<session_id>", methods=["GET"])
 @require_auth
 def api_qa_by_session(session_id: str):
@@ -405,10 +405,10 @@ def api_qa_by_session(session_id: str):
     conn.close()
     return jsonify({"history": [{"timestamp": r["created_at"], "question": r["question"], "answer": r["answer"]} for r in rows]})
 
-
 # %% [markdown]
 # # 审计日志端点
-
+#
+# %%
 @user_bp.route("/audit/log", methods=["POST"])
 @require_auth
 def api_audit_log():
@@ -419,8 +419,8 @@ def api_audit_log():
     conn.commit()
     conn.close()
     return jsonify({"ok": True})
-
-
+#
+#
 @user_bp.route("/audit/logs", methods=["GET"])
 @require_auth
 def api_audit_logs():
@@ -455,8 +455,8 @@ def api_audit_logs():
     conn.close()
     return jsonify({"total": total, "logs": [dict(r) for r in rows], "page": page, "per_page": per_page,
                     "total_pages": max(1, (total + per_page - 1) // per_page)})
-
-
+#
+#
 @user_bp.route("/audit/actions", methods=["GET"])
 @require_auth
 def api_audit_actions():
@@ -464,8 +464,8 @@ def api_audit_actions():
     rows = conn.execute("SELECT DISTINCT action FROM audit_log ORDER BY action").fetchall()
     conn.close()
     return jsonify({"actions": [r[0] for r in rows]})
-
-
+#
+#
 @user_bp.route("/audit/clear", methods=["POST"])
 @require_auth
 def api_audit_clear():

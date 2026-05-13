@@ -29,10 +29,10 @@ __all__ = ["state_bp"]
 
 state_bp = Blueprint("state", __name__)
 
-
 # %% [markdown]
 # # Flask 端点
 
+# %%
 @state_bp.route("/state/batch_load", methods=["POST"])
 @require_auth
 def api_state_batch_load():
