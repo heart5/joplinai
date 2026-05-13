@@ -160,7 +160,7 @@ python joplin_web_app.py
 Production: systemd services managed via `deploy/deploy.sh`:
 ```bash
 ./deploy/deploy.sh hcx           # 恒创云：重启 QA_API + Web_App
-./deploy/deploy.sh tc            # 腾讯云：rsync + 重启 center_api
+./deploy/deploy.sh tc            # 腾讯云：git push → git pull(直连→代理→rsync兜底) → 重启 center_api
 ./deploy/deploy.sh hcx --dry-run # 仅预览
 ```
 
