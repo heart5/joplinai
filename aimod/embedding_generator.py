@@ -674,7 +674,9 @@ class EmbeddingGenerator:
                 )
             tags = [t.strip() for t in note_tags.split(",") if t.strip()]
             tags_str = ",".join(sorted(tags)) if tags else ""  # 排序保证一致性
-            meta_hash = compute_content_hash(f"{tags_str}{source_notebook_title}")
+            stored_tags = enhanced_metadata.get("tags", tags_str)
+            stored_summary = enhanced_metadata.get("chunk_summary", "")
+            meta_hash = compute_content_hash(f"{stored_tags}{source_notebook_title}{stored_summary}")
             enhanced_metadata["meta_hash"] = meta_hash
 
             metadata = {**chunk_metadata, **enhanced_metadata}
