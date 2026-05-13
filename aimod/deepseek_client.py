@@ -72,13 +72,14 @@ class DeepSeekCacheClient:
         )
         if resp is not None:
             data = resp.json()
-            return CacheResult(
-                content=data["content"],
-                requires_validation=data["requires_validation"],
-                cache_key=data["cache_key"],
-                current_hit_count=data["current_hit_count"],
-                total_hits=data["total_hits"],
-            )
+            if data.get("found"):
+                return CacheResult(
+                    content=data["content"],
+                    requires_validation=data["requires_validation"],
+                    cache_key=data["cache_key"],
+                    current_hit_count=data["current_hit_count"],
+                    total_hits=data["total_hits"],
+                )
         return self.local.get(content_hash, task)
 
     def set(self, content_hash: str, task: str, result: str):
