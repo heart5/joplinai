@@ -261,12 +261,13 @@ def process_note_chunks(
             base_metadata = chunk_info["metadata"]
             chunk_hash = base_metadata.get("content_hash", "")  # 从元数据中取出哈希
             metadata_chunk_idx_from_one = base_metadata["chunk_index"]
-            tags = base_metadata.get("source_note_tags", "")
+            tags = base_metadata.get("tags") or base_metadata.get("source_note_tags", "")
             tags_str = (
                 ",".join(sorted(tags.split(","))) if tags else ""
             )  # 排序保证一致性
             notebook_title = base_metadata.get("source_notebook_title", "")
-            meta_hash = compute_content_hash(f"{tags_str}{notebook_title}")
+            chunk_summary = base_metadata.get("chunk_summary", "")
+            meta_hash = compute_content_hash(f"{tags_str}{notebook_title}{chunk_summary}")
 
             # 构建此块预期的最终块ID (与原有逻辑保持一致)
             expected_chunk_id = f"{note.id}_chunk_{base_metadata['chunk_index']}"
