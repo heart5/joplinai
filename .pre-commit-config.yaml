@@ -1,4 +1,13 @@
 repos:
+  - repo: local
+    hooks:
+      - id: check-jupytext-comment
+        name: 检测 jupytext 误注释的 Flask 端点
+        entry: python3 tools/check_jupytext_comment.py
+        language: python
+        files: \.py$
+        always_run: true
+        pass_filenames: false
   - repo: https://github.com/PyCQA/flake8
     rev: 7.1.2
     hooks:
