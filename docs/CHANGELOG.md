@@ -51,6 +51,26 @@ jupyter:
 - 全链路验证通过：git push → TC git pull 直连 → service restart
 
 
+### 2026年5月14日
+
+
+**Bug 修复（Phase 3 重构回归）**：
+
+- `TemplateNotFound: login.html` — Phase 3 将 `Flask(__name__)` 从项目根移到 `src/web_app/__init__.py`，默认 `template_folder`/`static_folder` 变为子目录。修复：`create_app()` 显式传入绝对路径。
+- `BuildError: admin_dashboard` — Blueprint 自动前缀 `admin.`，4 个模板文件仍用旧端点名。修复：统一改为 `admin.admin_dashboard`。
+- `NameError: 'model_name' is not defined` (`joplinai.py:459`) — 变量未定义。修复：改为 `config["embedding_model"]`。
+- `AttributeError: 'text_prep'` (`embedding_generator.py`) — `_set_chunk_size()` 在 `self.text_prep` 初始化前被调用。修复：调整 `__init__` 中初始化顺序。
+- `KeyError: 'content'` (`deepseek_client.py:76`) — center_api 缓存未命中返回 `{"found": False}` 不含 `content` 键。修复：增加 `data.get("found")` 检查，远程未命中回退本地 SQLite。
+- `UnboundLocalError: 'user_role'` (`qa_system.py`) — 直接 API 调用时 `user_identity` 为 None，`user_role`/`user_display_name`/`sys_prompt` 未初始化。修复：`ask()` 和 `api_ask()` 入口校验身份，无身份拒绝请求（400）。
+- `meta_hash` 不反映增强结果 — `meta_hash` 仅含 `source_note_tags + source_notebook_title`，与 DeepSeek 增强结果无关。增强失败的 chunk 入库后，下次 meta_hash 不变被跳过，永远得不到补增强。修复：`meta_hash` 纳入 `chunk_summary` 和增强后 `tags`，增强状态变化时 hash 不同触发重处理。
+
+**服务运维**：
+
+- HCX `joplin-qa-api` / `joplin-web-app` 重启后加载最新代码（gunicorn 进程 8h+ 未重启仍运行旧版本）
+- TC git pull 直连失败时通过 `HTTPS_PROXY` 代理连接
+- 全链路验证通过：sync 25 个笔记本无 bug 报错，之前 `deepseek_missing=True` 的笔记成功重处理
+
+
 ### 2026年5月12日
 
 

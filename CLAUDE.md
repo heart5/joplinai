@@ -191,6 +191,8 @@ Pre-commit (`.pre-commit-config.yaml`): flake8，同参数。
 ## Known Issues & Technical Debt
 
 - **`static/favicon.ico*`**: 3 domain-specific favicon copies at 3.5MB each. Only the default `favicon.ico` should be tracked; the `_for_*` variants are in `.gitignore`.
+- **TC git pull 可能需要代理**: 直连偶尔失败（GnuTLS recv error），回退方案是 `HTTPS_PROXY=http://127.0.0.1:7890 git pull`。`deploy/deploy.sh` 已包含三级回退策略。
+- **HCX `joplin-qa-api`/`joplin-web-app` 代码更新后需手动重启**: gunicorn 进程不自动 reload，git pull 后必须 `sudo systemctl restart`。
 
 ## Git
 
