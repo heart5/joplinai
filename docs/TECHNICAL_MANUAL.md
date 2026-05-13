@@ -15,11 +15,14 @@ jupyter:
 
 # joplinai 技术手册
 
+
 面向维护人员的技术参考文档，覆盖部署拓扑、服务架构、数据流、数据库结构、配置链路与运维操作。
 
 ---
 
+
 ## 1. 部署拓扑
+
 
 ```mermaid
 flowchart TB
@@ -72,7 +75,9 @@ flowchart TB
 
 ---
 
+
 ## 2. 服务架构
+
 
 ```mermaid
 flowchart LR
@@ -146,7 +151,9 @@ flowchart LR
 
 ---
 
+
 ## 3. 数据流全景
+
 
 ```mermaid
 flowchart LR
@@ -194,7 +201,9 @@ flowchart LR
 
 ---
 
+
 ## 4. 核心流程序列图
+
 
 ### 4a. 向量化流程
 
@@ -283,7 +292,9 @@ flowchart TD
 
 ---
 
+
 ## 5. 数据库结构
+
 
 ### 5a. SQLite 中心数据库
 
@@ -405,7 +416,9 @@ erDiagram
 
 ---
 
+
 ## 6. 配置链路
+
 
 ```mermaid
 flowchart TD
@@ -442,7 +455,9 @@ flowchart TD
 
 ---
 
+
 ## 7. 部署流程
+
 
 ```mermaid
 flowchart TD
@@ -490,7 +505,9 @@ flowchart TD
 
 ---
 
+
 ## 8. 工程规范速查
+
 
 ### 8a. Jupytext 工作流
 
@@ -519,6 +536,7 @@ flowchart TD
 | 日志 | 所有模块 | `from aimod import get_logger; logger = get_logger(__name__)` |
 | 导入 | 全项目 | 统一包前缀 `src.` / `aimod.` / `func.` |
 | pathmagic | 任意入口 | `with pathmagic.Context():` 包裹项目导入 |
+
 
 ### 8c. 代码质量命令
 

@@ -25,14 +25,18 @@ jupyter:
 
 本文档记录 Claude Code 协助下的所有项目变更。
 
+
 ### 2026年5月13日
+
 
 **Bug 修复**：
 
 - `joplin_web_app.py` gunicorn 不兼容：Phase 3C 重构后 `app = create_app()` 被放入 `if __name__ == "__main__":` 块内，gunicorn 导入 `joplin_web_app:app` 时找不到 Flask 实例。修复：将 `app` 提升到模块级别。
 - jupytext hook 代码注释化：`src/cli.py`、`aimod/center_api/*_routes.py` 中 markdown cell (`# %% [markdown]`) 后缺少显式 `# %%` code cell 标记，导致 jupytext `--sync` 将后续代码识别为 markdown 并注释掉。修复：在各 markdown cell 后的代码块前补充 `# %%`，删除残留的损坏 `.ipynb`。
 
+
 ### 2026年5月12日
+
 
 **Phase 5 — CI/CD + 部署标准化**：
 
@@ -98,7 +102,9 @@ jupyter:
 - 移除一次性迁移代码（294 行）：删除 `_migrate_db.py`、`migrate_add_notebook_id()`、`migrate_all_chunks_with_author()` 及 joplinai.py 中注释迁移块
 - `_generate_answer_with_deepseek_optimized` → `_generate_answer_with_deepseek`（原非优化版已删）
 
+
 ### 2026年5月11日
+
 
 **user_manager.py 重构** — 代码质量改进，不影响对外接口和前端：
 
@@ -141,7 +147,9 @@ jupyter:
 
 **文档更新**：CLAUDE.md / README / CHANGELOG 同步更新部署架构与重构记录。
 
+
 ### 2026年5月10日
+
 
 **集中式缓存服务**：
 
@@ -162,7 +170,9 @@ jupyter:
 - 缓存服务完全独立于 Joplin，避免 `getapi()` 级联失败
 - 缓存服务 URL 按 deviceid 区分，与 Ollama/Chroma 配置模式一致
 
+
 ### 2026年5月9日
+
 
 **分块与嵌入优化**：
 
@@ -186,12 +196,16 @@ jupyter:
 - 移除自适应分块探测的内存+持久化缓存，简化代码
 - 分块阶段预生成嵌入并缓存复用
 
+
 ### 2026年5月8日
+
 
 - DeepSeek 增强失败时标记 `deepseek_missing`，下次运行自动重试
 - 更新 func 子模块，修复远程回退 Path 未导入问题
 
+
 ### 2026年5月7日
+
 
 **Joplin 服务连通性增强**：
 
@@ -207,7 +221,9 @@ jupyter:
 - 三个服务入口文件回迁到根目录，适配 systemd 服务路径
 - pathmagic 结构修正：根目录保留配对，src/ 独立实现，统一 func 子模块模式
 
+
 ### 2026年5月6日
+
 
 - 添加 CLAUDE.md 项目文档，完善 .gitignore 排除规则
 - 重构项目结构：.py 迁入 src/，.ipynb 迁入 notebooks/，jupytext.toml 映射
