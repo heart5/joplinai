@@ -34,6 +34,22 @@ jupyter:
 - `joplin_web_app.py` gunicorn 不兼容：Phase 3C 重构后 `app = create_app()` 被放入 `if __name__ == "__main__":` 块内，gunicorn 导入 `joplin_web_app:app` 时找不到 Flask 实例。修复：将 `app` 提升到模块级别。
 - jupytext hook 代码注释化：`src/cli.py`、`aimod/center_api/*_routes.py` 中 markdown cell (`# %% [markdown]`) 后缺少显式 `# %%` code cell 标记，导致 jupytext `--sync` 将后续代码识别为 markdown 并注释掉。修复：在各 markdown cell 后的代码块前补充 `# %%`，删除残留的损坏 `.ipynb`。
 
+**技术文档体系建设**：
+
+- 创建 `docs/TECHNICAL_MANUAL.md` 技术手册（10 张 Mermaid 图）：部署拓扑、服务架构、数据流全景、向量化/Q&A/Remote-First 序列图、数据库 ER 图、配置链路、部署流程、模块依赖
+- 修正手册中 ChromaDB 部署位置：腾讯云 Docker `8009→8000`，HCX 通过 `chromadb.HttpClient` 远程连接
+- `CLAUDE.md`、`README.md`、`CHANGELOG.md` 全面更新至 Phase 5 完成态（架构、源布局、新模块、工程规范）
+- 4 份重要 `.md` 文档（`CLAUDE.md`、`README.md`、`docs/CHANGELOG.md`、`docs/TECHNICAL_MANUAL.md`）添加 jupytext YAML frontmatter 关联 `.ipynb`，支持 JupyterLab 双向同步
+- `CHANGELOG.md` 移至 `docs/` 目录，与 TECHICAL_MANUAL.md 集中管理
+
+**TC 部署策略优化**：
+
+- TC 代码同步从 rsync 改为 git pull 优先三级策略：直连→clash 代理→rsync 兜底
+- `deploy/deploy.sh` 更新：自动 git push、TC git pull 直连/代理/rsync 回退、rsync 后重置 TC git 历史 + 子模块更新
+- GitHub Personal Access Token 补充 `workflow` scope
+- TC git 历史对齐修复（`git reset --hard origin/main` + `pull.rebase = false`）
+- 全链路验证通过：git push → TC git pull 直连 → service restart
+
 
 ### 2026年5月12日
 
