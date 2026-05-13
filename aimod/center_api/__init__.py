@@ -31,11 +31,12 @@ from flask import Flask, jsonify, request
 # %%
 __all__ = ["create_app", "main", "require_auth", "DB_PATH", "VALIDATION_THRESHOLD"]
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
 log = logging.getLogger("joplinai_center_api")
+log.propagate = False
+_log_handler = logging.StreamHandler()
+_log_handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
+log.addHandler(_log_handler)
+log.setLevel(logging.INFO)
 
 # %%
 DB_PATH = Path(__file__).parent.parent.parent / "data" / "joplinai_center.db"
