@@ -11,7 +11,7 @@ flowchart TB
     subgraph TC["腾讯云 (TC)"]
         direction TB
         TC_JOPLIN["Joplin Server<br/>端口 41184"]
-        TC_CHROMA["ChromaDB<br/>端口 8000"]
+        TC_CHROMA["ChromaDB<br/>Docker 端口 8009→8000"]
         TC_CENTER["center_api<br/>端口 5003 (0.0.0.0)"]
         TC_SQLITE[("joplinai_center.db")]
         TC_TIMER_SYNC["sync.timer (每8小时)"]
@@ -27,11 +27,9 @@ flowchart TB
         HCX_OLLAMA["Ollama LLM"]
         HCX_QA["qa_api<br/>端口 5000 (127.0.0.1)"]
         HCX_WEB["web_app<br/>端口 5001 (127.0.0.1)"]
-        HCX_CHROMA_LOCAL["ChromaDB (本地)"]
         HCX_CLI["joplinai.py (手动 CLI)"]
 
         HCX_QA --> HCX_OLLAMA
-        HCX_QA --> HCX_CHROMA_LOCAL
         HCX_WEB --> HCX_QA
     end
 
@@ -40,8 +38,9 @@ flowchart TB
 
     USERS --> HCX_WEB
     HCX_QA -.-> TC_CENTER
+    HCX_QA -.-> TC_CHROMA
     HCX_WEB -.-> TC_CENTER
-    HCX_CLI --> HCX_CHROMA_LOCAL
+    HCX_CLI -.-> TC_CHROMA
     HCX_CLI -.-> DEEPSEEK
     HCX_CLI -.-> TC_CENTER
 ```
@@ -52,9 +51,9 @@ flowchart TB
 |------|------------|-------------|
 | 角色 | 数据核心 | 推理 + 门户 |
 | 运行服务 | center_api, ChromaDB, Joplin Server | qa_api, web_app, Ollama |
-| 对外端口 | 5003 (公网), 8000 (ChromaDB) | 无公网端口 (均 127.0.0.1) |
+| 对外端口 | 5003 (公网), 8009 (ChromaDB Docker) | 无公网端口 (均 127.0.0.1) |
 | 定时任务 | sync (8h), cache-report (daily) | 无 |
-| 数据库 | joplinai_center.db (10表) | ChromaDB 本地向量库 |
+| 数据库 | joplinai_center.db (10表), ChromaDB向量库 | 无本地数据库 |
 
 ---
 
@@ -143,7 +142,7 @@ flowchart LR
         V3 --> V4["embedding_generator.py<br/>生成嵌入向量"]
         V4 --> V5["center_client/<br/>查 DeepSeek 缓存"]
         V5 --> V6["deepseek_enhancer.py<br/>生成摘要/标签"]
-        V6 --> V7["vector_db_manager.py<br/>写入 ChromaDB"]
+        V6 --> V7["vector_db_manager.py<br/>写入 ChromaDB (TC)"]
         V7 --> V8["run_tracker.py<br/>记录运行历史"]
         V8 --> V9["center_api<br/>(/history/*)"]
     end
@@ -152,7 +151,7 @@ flowchart LR
         direction LR
         Q1["用户提问"] --> Q2["web_app<br/>POST /qa/ask"]
         Q2 --> Q3["qa_api<br/>向量检索 + LLM"]
-        Q3 --> Q4["ChromaDB<br/>语义搜索 top-k"]
+        Q3 --> Q4["ChromaDB (TC)<br/>语义搜索 top-k"]
         Q4 --> Q5["Ollama<br/>LLM 生成回答"]
         Q5 --> Q6["center_api<br/>记录 QA 历史"]
         Q6 --> Q7["返回用户"]
@@ -174,8 +173,8 @@ flowchart LR
 | web_app → center_api | HCX → TC | HTTP | X-API-Key |
 | qa_api → center_api | HCX → TC | HTTP | X-API-Key |
 | joplinai.py → center_api | HCX → TC | HTTP | X-API-Key |
-| joplinai.py → ChromaDB | HCX 本地 | ChromaDB SDK | 无 |
-| qa_api → ChromaDB | HCX 本地 | ChromaDB SDK | 无 |
+| joplinai.py → ChromaDB | HCX → TC | chromadb.HttpClient (HTTP) | 无 |
+| qa_api → ChromaDB | HCX → TC | chromadb.HttpClient (HTTP) | 无 |
 | joplinai.py → DeepSeek | 外部 API | HTTPS | API Key (配置) |
 
 ---
@@ -194,7 +193,7 @@ sequenceDiagram
     participant DS as "DeepSeekEnhancer"
     participant CC as "DeepSeekCacheClient"
     participant CA as "center_api (TC)"
-    participant VDB as "ChromaDB (本地)"
+    participant VDB as "ChromaDB (TC)"
     participant RT as "RunTracker"
 
     CLI->>JP: "获取笔记列表 (imp_nbs)"
@@ -224,7 +223,7 @@ sequenceDiagram
     participant USER as "用户浏览器"
     participant WEB as "web_app (HCX)"
     participant QA as "qa_api (HCX)"
-    participant VDB as "ChromaDB (本地)"
+    participant VDB as "ChromaDB (TC)"
     participant OLLAMA as "Ollama"
     participant CA as "center_api (TC)"
 
@@ -383,6 +382,8 @@ erDiagram
 
 ### 5b. ChromaDB 向量集合
 
+部署于腾讯云（Docker `chromadb/chroma`，端口映射 8009→8000），HCX 通过 `chromadb.HttpClient` 远程连接。
+
 | 集合名称 | 用途 | 元数据字段 |
 |---------|------|-----------|
 | `joplin_chunks` | 笔记文本块的向量索引 | `note_id`, `notebook_id`, `chunk_index`, `content_hash`, `author`, `source_url` |
@@ -537,6 +538,10 @@ ssh tc "sudo systemctl status joplinai-center-api"
 ssh tc "sudo systemctl restart joplinai-center-api"
 ssh tc "sudo journalctl -u joplinai-center-api -f"
 
+# ChromaDB (TC)
+ssh tc "docker ps | grep chroma"
+ssh tc "docker restart chroma-server"
+
 # 定时器
 ssh tc "sudo systemctl status joplinai-sync.timer"
 ssh tc "sudo systemctl status joplinai-cache-report.timer"
@@ -554,6 +559,9 @@ curl -H "X-API-Key: <key>" http://127.0.0.1:5000/health
 
 # web_app
 curl -I http://127.0.0.1:5001/             # 应返回 302 → /login
+
+# ChromaDB (TC)
+ssh tc "curl -s http://127.0.0.1:8000/api/v1/heartbeat"
 ```
 
 ### 9c. 日志文件
@@ -569,7 +577,7 @@ curl -I http://127.0.0.1:5001/             # 应返回 302 → /login
 | 症状 | 检查步骤 |
 |------|---------|
 | Web 页面 502/500 | `journalctl -u joplin-web-app -f` → 检查 gunicorn error log |
-| Q&A 返回空 | 检查 ChromaDB 是否有数据 → 检查 Ollama 是否运行 |
+| Q&A 返回空 | 检查 TC ChromaDB 是否运行 → 检查 ChromaDB 是否有数据 → 检查 Ollama 是否运行 |
 | center_api 无响应 | `ssh tc` → `systemctl status joplinai-center-api` → 检查数据库 |
 | 定时同步失败 | `ssh tc` → `journalctl -u joplinai-sync.service` → 检查 Joplin API 连通性 |
 | 配置不生效 | 检查云端 Joplin 笔记 INI → 等 5 分钟热更新或重启服务 |
