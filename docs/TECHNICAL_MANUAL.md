@@ -1,3 +1,18 @@
+---
+jupyter:
+  jupytext:
+    formats: ipynb,md
+    text_representation:
+      extension: .md
+      format_name: markdown
+      format_version: '1.3'
+      jupytext_version: 1.19.1
+  kernelspec:
+    display_name: Python 3 (ipykernel)
+    language: python
+    name: python3
+---
+
 # joplinai 技术手册
 
 面向维护人员的技术参考文档，覆盖部署拓扑、服务架构、数据流、数据库结构、配置链路与运维操作。
