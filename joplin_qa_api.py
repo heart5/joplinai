@@ -296,6 +296,8 @@ def api_ask():
 
         # 2. 获取用户身份
         user_identity = data.get("user_identity")
+        if not user_identity:
+            return jsonify({"error": "请求中缺少 user_identity 字段"}), 400
 
         # 3. 调用核心问答功能
         result = qa_system.ask(
