@@ -243,6 +243,12 @@ def history_efficiency_metrics(days: int = 30) -> dict:
 @require_auth
 def api_history_notebook_record():
     data = request.get_json(force=True)
+    chunk_stats = data.get("chunk_stats", {})
+    log.info(
+        f"笔记本处理完成: {data.get('notebook_title', '?')}, "
+        f"笔记={data.get('updated_count', 0)}更新/{data.get('failed_count', 0)}失败/{data.get('total_notes', 0)}总, "
+        f"块={chunk_stats.get('upserted', 0)}增/{chunk_stats.get('skipped', 0)}跳/{chunk_stats.get('orphans_cleaned', 0)}清"
+    )
     history_add_notebook_record(data)
     return jsonify({"ok": True})
 
