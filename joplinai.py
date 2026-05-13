@@ -456,7 +456,7 @@ def process_notes_incremental(notebook_title: str, config: Dict, note_ids: List[
     # 初始化向量数据库（在整个处理过程中只初始化一次）
     if not hasattr(process_notes_incremental, "vector_db"):
         process_notes_incremental.vector_db = VectorDBManager(
-            config["db_path"], model_name, True
+            config["db_path"], config["embedding_model"], True
         )
         log.info(
             f"向量数据库初始化完成，集合: {process_notes_incremental.vector_db.collection_name}"
