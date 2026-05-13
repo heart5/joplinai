@@ -25,7 +25,7 @@ from datetime import datetime, timedelta
 from flask import Blueprint, jsonify, request
 
 # %%
-from aimod.center_api import _init_db, require_auth
+from aimod.center_api import _init_db, log, require_auth
 
 __all__ = ["user_bp"]
 
@@ -50,8 +50,10 @@ def api_auth_verify():
         conn.execute("UPDATE users SET last_login=? WHERE id=?", (datetime.now().isoformat(), user["id"]))
         conn.commit()
         conn.close()
+        log.info(f"用户登录: {user['username']} ({user['role']})")
         return jsonify({"found": True, "user": user})
     conn.close()
+    log.info(f"登录失败: 用户名={data['username']} 不存在或密码错误")
     return jsonify({"found": False}), 404
 
 
@@ -146,9 +148,11 @@ def api_users_create():
         )
         conn.commit()
         conn.close()
+        log.info(f"用户创建: {data['username']} ({data.get('role', 'team_member')})")
         return jsonify({"ok": True})
     except sqlite3.IntegrityError:
         conn.close()
+        log.info(f"用户创建失败(已存在): {data['username']}")
         return jsonify({"ok": False, "error": "用户名已存在"}), 409
 
 
@@ -168,6 +172,7 @@ def api_users_delete():
     conn.execute("DELETE FROM users WHERE id=?", (user_id,))
     conn.commit()
     conn.close()
+    log.info(f"用户删除: {data['target_username']}")
     return jsonify({"ok": True})
 
 
@@ -183,6 +188,8 @@ def api_users_update_role():
     ok = cursor.rowcount > 0
     conn.commit()
     conn.close()
+    if ok:
+        log.info(f"用户角色变更: {data['target_username']} → {data['new_role']}")
     return jsonify({"ok": ok})
 
 
@@ -214,6 +221,8 @@ def api_users_reset_password():
     ok = cursor.rowcount > 0
     conn.commit()
     conn.close()
+    if ok:
+        log.info(f"密码重置: {data['target_username']}")
     return jsonify({"ok": ok})
 
 
@@ -467,4 +476,5 @@ def api_audit_clear():
     deleted = cursor.rowcount
     conn.commit()
     conn.close()
+    log.info(f"审计日志清理: {deleted}条 (早于{data.get('before_days', 90)}天)")
     return jsonify({"ok": True, "deleted": deleted})

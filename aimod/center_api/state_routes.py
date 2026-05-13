@@ -23,7 +23,7 @@ from datetime import datetime
 from flask import Blueprint, jsonify, request
 
 # %%
-from aimod.center_api import _init_db, require_auth
+from aimod.center_api import _init_db, log, require_auth
 
 __all__ = ["state_bp"]
 
@@ -55,6 +55,7 @@ def api_state_batch_load():
     result = {"states": states}
     if virtual_collections:
         result["virtual_collections"] = virtual_collections
+    log.info(f"状态加载: model={model_name}, {len(states)}条笔记, {len(virtual_collections)}个虚拟集合")
     return jsonify(result)
 
 
@@ -83,6 +84,7 @@ def api_state_batch_save():
         count += 1
     conn.commit()
     conn.close()
+    log.info(f"状态保存: model={model_name}, {count}条记录")
     return jsonify({"ok": True, "count": count})
 
 
