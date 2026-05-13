@@ -2,7 +2,7 @@
 # Joplinai 统一部署脚本
 # Usage:
 #   ./deploy/deploy.sh hcx     — 部署到恒创云（本地），重启 QA_API + Web_App
-#   ./deploy/deploy.sh tc      — 部署到腾讯云，rsync + 重启 center_api
+#   ./deploy/deploy.sh tc      — 部署到腾讯云，git push→git pull (直连→代理→rsync兜底)→重启 center_api
 #   ./deploy/deploy.sh hcx --dry-run   — 仅显示将执行的操作，不实际执行
 #   ./deploy/deploy.sh tc --dry-run    — 同上
 set -euo pipefail
@@ -49,17 +49,55 @@ deploy_tc() {
     local dry="$1"
     green "=== 部署到腾讯云 (tc) ==="
 
-    # 1. rsync
-    echo "rsync $PROJECT_DIR/ → $TC_HOST:$TC_PATH/"
+    # 0. 推送 HCX 本地提交到 GitHub（TC git pull 的前提）
     if [ "$dry" = "false" ]; then
-        rsync -avz --delete "${RSYNC_EXCLUDE[@]}" \
-            "$PROJECT_DIR/" "$TC_HOST:$TC_PATH/"
-        green "rsync 完成"
+        local ahead
+        ahead=$(git rev-list origin/main..HEAD --count 2>/dev/null || echo 0)
+        if [ "$ahead" -gt 0 ]; then
+            echo "推送本地 $ahead 个提交到 GitHub..."
+            if git push origin main; then
+                green "git push 完成"
+            else
+                yellow "警告: git push 失败，TC 将无法通过 git pull 获取最新提交"
+            fi
+        else
+            echo "本地与 origin/main 同步，跳过 push"
+        fi
     else
-        yellow "[dry-run] 跳过 rsync"
+        yellow "[dry-run] 跳过 git push"
     fi
 
-    # 2. 重启 center_api
+    # 1. 优先 git pull（直连）
+    if [ "$dry" = "false" ]; then
+        echo "--- TC: git pull (直连) ---"
+        if ssh "$TC_HOST" "cd $TC_PATH && git pull origin main"; then
+            green "git pull (直连) 完成"
+        else
+            # 2. 直连失败 → 开代理重试
+            yellow "直连失败，尝试 clash 代理..."
+            if ssh "$TC_HOST" "
+                source /etc/profile.d/clash.sh 2>/dev/null
+                proxy_on 2>/dev/null
+                cd $TC_PATH
+                git pull origin main
+                ret=\$?
+                proxy_off 2>/dev/null
+                exit \$ret
+            "; then
+                green "git pull (代理) 完成"
+            else
+                # 3. 代理也失败 → rsync 兜底
+                red "git pull (代理) 也失败，回退到 rsync..."
+                rsync -avz --delete "${RSYNC_EXCLUDE[@]}" \
+                    "$PROJECT_DIR/" "$TC_HOST:$TC_PATH/"
+                green "rsync 兜底完成"
+            fi
+        fi
+    else
+        yellow "[dry-run] 跳过 TC git pull"
+    fi
+
+    # 4. 重启 center_api
     echo "重启远程服务: $TC_SERVICE"
     if [ "$dry" = "false" ]; then
         systemctl_cmd "$TC_HOST" "$TC_SERVICE" restart
@@ -110,7 +148,7 @@ main() {
         *)
             echo "Usage: $0 {hcx|tc} [--dry-run]"
             echo "  hcx — 恒创云（本地），重启 QA_API + Web_App"
-            echo "  tc  — 腾讯云（远程），rsync + 重启 center_api"
+            echo "  tc  — 腾讯云（远程），git pull (直连→代理→rsync兜底) + 重启 center_api"
             exit 1
             ;;
     esac

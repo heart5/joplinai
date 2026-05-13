@@ -482,11 +482,19 @@ flowchart TD
         H1 --> H2
     end
 
-    subgraph TC_STEPS["TC 部署步骤"]
+    subgraph TC_STEPS["TC 部署步骤 (三级同步)"]
         direction TB
-        T1["rsync 项目文件到 tc"]
-        T2["ssh tc systemctl restart<br/>joplinai-center-api"]
-        T1 --> T2
+        T0["git push origin main<br/>(推送 HCX 提交到 GitHub)"]
+        T1["TC: git pull 直连"]
+        T2["失败? → 开 clash 代理<br/>TC: git pull 代理"]
+        T3["也失败? → rsync 兜底"]
+        T4["ssh tc systemctl restart<br/>joplinai-center-api"]
+        T0 --> T1
+        T1 -->|"成功"| T4
+        T1 -->|"失败"| T2
+        T2 -->|"成功"| T4
+        T2 -->|"失败"| T3
+        T3 --> T4
     end
 
     HCX --> HCX_STEPS
@@ -496,11 +504,17 @@ flowchart TD
     TC_STEPS --> DONE
 ```
 
+**TC 同步三级策略：**
+
+1. git pull 直连 — 先试，大多数情况能通
+2. git pull + clash 代理 — 直连失败时 `proxy_on` 后重试
+3. rsync — 前两步都失败才用，跳过 func/ data/ log/
+
 **部署前检查清单：**
 
 - [ ] 所有更改已提交
 - [ ] `gunicorn` 入口正确（module:app 或 "module:create_app()"）
-- [ ] TC 部署时 `proxy_on` 已执行（git pull 需要）
+- [ ] HCX 本地提交已 push 到 GitHub（deploy.sh 自动执行）
 - [ ] systemd service 文件已同步到 `/etc/systemd/system/`
 
 ---
