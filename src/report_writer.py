@@ -531,11 +531,37 @@ def main():
             content = writer.generate_cache_report()
             title = "DeepSeek缓存分析报告"
             config_key = "deepseek_cache_report"
+            if writer.cache:
+                try:
+                    stats = writer.cache.get_report()
+                    if stats:
+                        basic = stats.get("basic_stats", {}) or {}
+                        time_ana = stats.get("time_analysis", {}) or {}
+                        growth = stats.get("growth_trends", {}) or {}
+                        log.info(
+                            f"DeepSeek缓存统计: 总条目={basic.get('total_entries', 0)}, "
+                            f"总命中={basic.get('total_hits', 0)}, "
+                            f"近期活跃(7天)={time_ana.get('recent_active', 0)}, "
+                            f"预测周增长={growth.get('predicted_weekly_growth', 0)}"
+                        )
+                except Exception as e:
+                    log.warning(f"获取 DeepSeek 缓存统计失败: {e}")
         else:
             log.info("生成探测缓存报告...")
             content = writer.generate_probe_report()
             title = "文本块长度探测缓存报告"
             config_key = "probe_cache_report"
+            if writer.probe:
+                try:
+                    stats = writer.probe.get_report()
+                    if stats:
+                        log.info(
+                            f"探测缓存统计: 总条目={stats.get('total', 0)}, "
+                            f"近期活跃(7天)={stats.get('recent_active', 0)}, "
+                            f"上限={stats.get('limit', 'N/A')}"
+                        )
+                except Exception as e:
+                    log.warning(f"获取探测缓存统计失败: {e}")
 
         if args.output == "stdout":
             print(content)
