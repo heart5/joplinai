@@ -70,6 +70,27 @@ jupyter:
 - TC git pull 直连失败时通过 `HTTPS_PROXY` 代理连接
 - 全链路验证通过：sync 25 个笔记本无 bug 报错，之前 `deepseek_missing=True` 的笔记成功重处理
 
+**center_api 日志增强**：
+
+- 4 个蓝图文件全部关键端点补充业务日志：
+  - `state_routes.py`：`batch_load`/`batch_save` 记录模型名与条数
+  - `history_routes.py`：`notebook_record` 记录笔记本处理统计（更新/失败/总数，块增/跳/清）
+  - `cache_routes.py`：`deepseek set` 记录缓存写入；命中日志静默（量太大）
+  - `user_routes.py`：登录/创建/删除/角色变更/密码重置/审计清理 记录操作事件
+- 修复日志重复输出：`center_api/__init__.py` 去掉 `logging.basicConfig()`，handler 直接挂在 `joplinai_center_api` logger，设 `propagate=False` 避免 `func/logme` root handler 双重输出
+- TC gunicorn 移除 `--capture-output`，worker 日志改回 journal 输出（`journalctl -u joplinai-center-api`）
+
+**Bug 修复（jupytext 代码注释，再次发生）**：
+
+- 4 个路由文件 markdown cell (`# %% [markdown]`) 后缺少 `# %%` code cell 分隔符，jupytext sync 将全部 45 个 Flask 端点注释掉
+- 修复：各文件 `# # Flask 端点` markdown cell 后补充 `# %%`，取消注释全部端点代码
+
+**jupytext 代码注释自动检测**：
+
+- 新增 `tools/check_jupytext_comment.py` 检测脚本，扫描被注释掉的 `@route`/`def api_` 模式
+- 挂载到 `.git/hooks/pre-commit`：jupytext sync 后立即检测，有问题拒绝提交
+- 挂载到 `.pre-commit-config.yaml` 和 CI（`.github/workflows/ci.yml`），三层防线
+
 
 ### 2026年5月12日
 
