@@ -27,7 +27,11 @@ __all__ = ["create_app"]
 
 
 def create_app():
-    app = Flask(__name__)
+    app = Flask(
+        __name__,
+        template_folder=str(getdirmain() / "templates"),
+        static_folder=str(getdirmain() / "static"),
+    )
     app.secret_key = (
         getinivaluefromcloud("joplinai", "flask_secret_key") or os.urandom(32).hex()
     )
