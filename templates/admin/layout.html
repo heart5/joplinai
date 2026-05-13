@@ -11,10 +11,10 @@
 <body>
     <!-- 顶部导航 -->
     <nav class="navbar navbar-dark bg-dark px-3">
-        <a class="navbar-brand" href="{{ url_for('admin_dashboard') }}">📘 知识库管理</a>
+        <a class="navbar-brand" href="{{ url_for('admin.admin_dashboard') }}">📘 知识库管理</a>
         <!-- ★★★ 新增：审计日志入口 ★★★ -->
         <div class="d-inline-block mx-3">
-            <a href="{{ url_for('admin_audit_page') }}" class="text-light text-decoration-none small">
+            <a href="{{ url_for('admin.admin_audit_page') }}" class="text-light text-decoration-none small">
                 <i class="bi bi-clipboard-data"></i> 审计日志
             </a>
         </div>
