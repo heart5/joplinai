@@ -170,6 +170,7 @@ Production: systemd services managed via `deploy/deploy.sh`:
 - **Jupytext paired notebooks**：编辑 `.py` 源文件后，jupytext 自动生成/更新同目录同名 `.ipynb` 供 Jupyter Notebook 阅览。`.py` → `ipynb`（percent 格式）。`.ipynb` 永不入库。配置：`jupytext.toml`（默认 `formats = "ipynb,py:percent"`）+ `.git/hooks/pre-commit`（staged .py/.md 自动 `jupytext --sync`）。手动同步：`jupytext --sync <file>`。
   - **重要 `.md` 文档同样关联 `.ipynb`**：`CLAUDE.md`、`README.md`、`docs/CHANGELOG.md`、`docs/TECHNICAL_MANUAL.md` 通过 YAML frontmatter 声明 `formats: ipynb,md`。内容变更后必须同步 ipynb（pre-commit hook 自动执行）。
   - `# %%` 标记代码 cell，`# %% [markdown]` 标记 markdown cell。**关键规则**：markdown cell 后的下一段代码前必须有显式 `# %%`，否则 jupytext sync 会把代码当作 markdown 注释掉。
+      - **自动检测**：`tools/check_jupytext_comment.py` 扫描被误注释的 Flask route/endpoint。pre-commit hook（`.git/hooks/pre-commit`）在 jupytext sync 后自动执行，CI 兜底。
 - **`__all__`**: 所有 `aimod/`、`src/`、`aimod/center_api/`、`aimod/center_client/` 的公开模块都有 `__all__` 明确导出列表。
 - **`__repr__`**: 5 个关键数据类有 `__repr__`：`CacheResult`, `VectorDBManager`, `EmbeddingGenerator`, `RunTracker`, `QASystem`。
 - **Type annotations**: 所有公开函数有返回类型标注 (`-> None`, `-> str`, `-> Optional[str]` 等)。
@@ -185,14 +186,15 @@ python -m pytest tests/ -v --tb=short   # 运行测试
 flake8 . --max-line-length=100 --ignore=E402,W503,E203,E501 --exclude=func/  # lint
 ```
 
-CI (`.github/workflows/ci.yml`): push/PR 触发，flake8 lint + pytest (Python 3.10)。
-Pre-commit (`.pre-commit-config.yaml`): flake8，同参数。
+CI (`.github/workflows/ci.yml`): push/PR 触发，`check_jupytext_comment.py` → flake8 lint → pytest (Python 3.10)。
+Pre-commit (`.pre-commit-config.yaml`): jupytext 误注释检测 + flake8。
 
 ## Known Issues & Technical Debt
 
 - **`static/favicon.ico*`**: 3 domain-specific favicon copies at 3.5MB each. Only the default `favicon.ico` should be tracked; the `_for_*` variants are in `.gitignore`.
 - **TC git pull 可能需要代理**: 直连偶尔失败（GnuTLS recv error），回退方案是 `HTTPS_PROXY=http://127.0.0.1:7890 git pull`。`deploy/deploy.sh` 已包含三级回退策略。
 - **HCX `joplin-qa-api`/`joplin-web-app` 代码更新后需手动重启**: gunicorn 进程不自动 reload，git pull 后必须 `sudo systemctl restart`。
+- **center_api 日志查看**：TC 上 `sudo journalctl -u joplinai-center-api -f`。logger 配置在 `aimod/center_api/__init__.py`：`propagate=False` 避免 `func/logme` root handler 双重输出。
 
 ## Git
 
