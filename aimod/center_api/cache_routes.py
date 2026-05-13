@@ -308,18 +308,15 @@ def probe_cache_report() -> dict:
         "daily_new": daily_new,
     }
 
-
 # %% [markdown]
 # # Flask 端点
 
+# %%
 @cache_bp.route("/cache/deepseek/get", methods=["POST"])
 @require_auth
 def api_ds_cache_get():
     data = request.get_json(force=True)
-    result = deepseek_cache_get(data["content_hash"], data["task"])
-    if result.get("found"):
-        log.info(f"DeepSeek缓存命中: task={data['task']}, total_hits={result.get('total_hits')}")
-    return jsonify(result)
+    return jsonify(deepseek_cache_get(data["content_hash"], data["task"]))
 
 
 @cache_bp.route("/cache/deepseek/set", methods=["POST"])
