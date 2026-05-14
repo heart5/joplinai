@@ -14,6 +14,19 @@ class TextPreprocessor:
     def __init__(self, chunk_size: int = 1024):
         self.chunk_size = chunk_size
 
+    RESOURCE_ID_PATTERN = re.compile(r"!\[.*?\]\(:/([a-fA-F0-9]{32})\)")
+
+    @staticmethod
+    def extract_resource_ids(text: str) -> list[str]:
+        """Extract Joplin resource IDs from image syntax in text.
+
+        Matches ![alt_text](:/32-char-hex-resource-id) and returns
+        the ordered list of resource IDs as they appear in the text.
+        """
+        if not text:
+            return []
+        return TextPreprocessor.RESOURCE_ID_PATTERN.findall(text)
+
     def clean_text(self, text: str) -> str:
         """Remove images, formatting symbols, and excess whitespace from note text."""
         if not text:

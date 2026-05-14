@@ -91,6 +91,17 @@ jupyter:
 - 挂载到 `.git/hooks/pre-commit`：jupytext sync 后立即检测，有问题拒绝提交
 - 挂载到 `.pre-commit-config.yaml` 和 CI（`.github/workflows/ci.yml`），三层防线
 
+**图片 Vision 处理功能**：
+
+- 新增 `aimod/image_processor.py`：从 Joplin API 获取图片资源，通过 magic bytes 检测格式（JPEG/PNG/WebP/GIF/BMP），并发拉取（ThreadPoolExecutor 5 并发），限制 8MB
+- `aimod/text_preprocessor.py` 新增 `extract_resource_ids()`：从笔记 body 提取 `![...](:/resource_id)` 中的 32 位 hex resource_id
+- `aimod/deepseek_enhancer.py` 新增 `ollama_vision_describe()`：调用本地 Ollama vision 模型描述图片，结合上下文生成中文描述
+- `aimod/embedding_generator.py` `split_into_semantic_chunks()` 接受 `image_descriptions` 参数，图片描述自动拼接为 chunk 上下文前缀
+- `joplinai.py` pipeline 集成：`process_note_chunks()` 提取 resource_id → 拉取图片 → Ollama vision 描述 → 合并到分块文本
+- Vision 模型选型：DeepSeek 云 API 不支持图片输入 → 回退本地 Ollama；HCX CPU-only 测试后选定 `minicpm-v`（8B/5.5GB，中文 OCR 可用 57-121s/图），`qwen3-vl:2b` 超时不可用
+- 图片获取/vision 调用失败时静默回退纯文本模式，不影响无图片笔记
+- Vision 开关：`data/joplinai.ini` 的 `[vision] enabled` 控制，默认开启
+
 
 ### 2026年5月12日
 
