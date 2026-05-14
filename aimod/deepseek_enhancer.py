@@ -427,10 +427,12 @@ def deepseek_process_note_vision(
 # ## _is_valid_vision_result(content: str) -> bool
 
 # %%
-def _is_valid_vision_result(content: str, min_length: int = 15) -> bool:
+def _is_valid_vision_result(content: str, min_length: int = 30) -> bool:
     """Check if a vision model response is a valid description (not a refusal/hallucination)."""
     if not content or len(content) < min_length:
         return False
+
+    # 直接拒绝
     refusal_patterns = [
         "很抱歉，我无法",
         "对不起，我不能",
@@ -438,6 +440,7 @@ def _is_valid_vision_result(content: str, min_length: int = 15) -> bool:
         "由于我无法访问",
         "我无法查看",
         "无法提供对您提到的",
+        "错误的链接或损坏",
         "I cannot provide",
         "I'm unable to",
         "cannot access the image",
@@ -445,6 +448,17 @@ def _is_valid_vision_result(content: str, min_length: int = 15) -> bool:
     for pattern in refusal_patterns:
         if pattern in content:
             return False
+
+    # 纯元描述（没有实际内容，只是说"这是一张图片"）
+    meta_only_patterns = [
+        r"^这是一[张个幅].*(?:图片|照片|截图|图像)[，。]?$",
+        r"^该.*(?:图片|照片|截图|图像).*(?:显示|展示|包含).*[。，]?$",
+    ]
+    import re
+    for pattern in meta_only_patterns:
+        if re.match(pattern, content.strip()):
+            return False
+
     return True
 
 
@@ -497,11 +511,16 @@ def ollama_vision_describe(
         if cache_manager is not None:
             cache_result = cache_manager.get(img_hash, task)
             if cache_result.content is not None:
-                descriptions.append(cache_result.content)
-                log.info(
-                    f"Ollama Vision 缓存命中: {rid[:12]}... "
-                    f"({len(cache_result.content)}字符)"
-                )
+                if _is_valid_vision_result(cache_result.content):
+                    descriptions.append(cache_result.content)
+                    log.info(
+                        f"Ollama Vision 缓存命中: {rid[:12]}... "
+                        f"({len(cache_result.content)}字符)"
+                    )
+                else:
+                    log.info(
+                        f"Ollama Vision 缓存无效(拒绝/过短)，跳过: {rid[:12]}..."
+                    )
                 continue
 
         # Call Ollama
@@ -518,13 +537,19 @@ def ollama_vision_describe(
             )
             if response.status_code == 200:
                 content = response.json()["message"]["content"].strip()
-                descriptions.append(content)
-                log.info(f"Ollama Vision 描述成功: {rid[:12]}... ({len(content)}字符)")
-                if cache_manager is not None and _is_valid_vision_result(content):
-                    try:
-                        cache_manager.set(img_hash, task, content)
-                    except Exception:
-                        pass
+                if _is_valid_vision_result(content):
+                    descriptions.append(content)
+                    log.info(f"Ollama Vision 描述成功: {rid[:12]}... ({len(content)}字符)")
+                    if cache_manager is not None:
+                        try:
+                            cache_manager.set(img_hash, task, content)
+                        except Exception:
+                            pass
+                else:
+                    log.warning(
+                        f"Ollama Vision 结果无效(拒绝/过短/元描述)，丢弃: "
+                        f"{rid[:12]}... ({len(content)}字符)"
+                    )
             else:
                 log.warning(
                     f"Ollama Vision 失败({response.status_code}): {rid[:12]}..."
