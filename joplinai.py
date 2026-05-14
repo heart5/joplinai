@@ -231,44 +231,54 @@ def process_note_chunks(
         notebook_title = next(iter(notebook_dict.values()), "")  # 获取笔记本标题
 
         # 开始分块
-        # 图片处理：提取图片资源 → 获取base64 → DeepSeek Vision生成描述
+        # 图片处理：提取图片资源 → 获取base64 → Ollama Vision生成描述
+        from aimod.text_preprocessor import TextPreprocessor
+
         vision_enabled = config.get("vision_enabled")
         if vision_enabled is None:
             vision_enabled = True  # 默认开启
         elif isinstance(vision_enabled, str):
             vision_enabled = vision_enabled.lower() not in ("false", "0", "no", "off")
         image_descriptions = None
-        if vision_enabled:
+        resource_ids = TextPreprocessor.extract_resource_ids(note.body)
+
+        if vision_enabled and resource_ids:
             try:
-                from aimod.text_preprocessor import TextPreprocessor
-                resource_ids = TextPreprocessor.extract_resource_ids(note.body)
-                if resource_ids:
+                log.info(
+                    f"笔记《{note.title}》检测到 {len(resource_ids)} 个图片资源"
+                )
+                from aimod.image_processor import ImageProcessor
+                image_proc = ImageProcessor(jpapi)
+                images = image_proc.fetch_images_for_note(note.id, resource_ids)
+                if images:
                     log.info(
-                        f"笔记《{note.title}》检测到 {len(resource_ids)} 个图片资源"
+                        f"笔记《{note.title}》成功获取 {len(images)}/{len(resource_ids)} 张图片"
                     )
-                    from aimod.image_processor import ImageProcessor
-                    image_proc = ImageProcessor(jpapi)
-                    images = image_proc.fetch_images_for_note(note.id, resource_ids)
-                    if images:
+                    from aimod.deepseek_enhancer import ollama_vision_describe
+                    image_descriptions = ollama_vision_describe(
+                        images,
+                        context=note.body,
+                        model=config.get("vision_model", "minicpm-v"),
+                        ollama_host=config.get("vision_ollama_host", "http://127.0.0.1:11434"),
+                    )
+                    if image_descriptions:
                         log.info(
-                            f"笔记《{note.title}》成功获取 {len(images)}/{len(resource_ids)} 张图片"
+                            f"笔记《{note.title}》图片视觉描述生成成功"
+                            f"（{len(image_descriptions)}字符）"
                         )
-                        from aimod.deepseek_enhancer import ollama_vision_describe
-                        image_descriptions = ollama_vision_describe(
-                            images,
-                            context=note.body,
-                            model=config.get("vision_model", "minicpm-v"),
-                            ollama_host=config.get("vision_ollama_host", "http://127.0.0.1:11434"),
-                        )
-                        if image_descriptions:
-                            log.info(
-                                f"笔记《{note.title}》图片视觉描述生成成功"
-                                f"（{len(image_descriptions)}字符）"
-                            )
-                    else:
-                        log.debug(f"笔记《{note.title}》图片资源获取失败，回退纯文本模式")
+                else:
+                    log.debug(f"笔记《{note.title}》图片资源获取失败，回退纯文本模式")
             except Exception as e:
                 log.warning(f"笔记《{note.title}》图片处理异常，回退纯文本模式: {e}")
+
+        # 清理图片 markdown 语法：vision成功→删除；失败→保留alt_text作为标注
+        if resource_ids:
+            keep_alt = not bool(image_descriptions)
+            text = TextPreprocessor.remove_image_syntax(text, keep_alt=keep_alt)
+            log.debug(
+                f"笔记《{note.title}》图片语法已清理 "
+                f"（{'保留alt_text' if keep_alt else '已用vision描述替代'}）"
+            )
 
         chunk_dicts = embedding_generator.split_into_semantic_chunks(
             text=text,

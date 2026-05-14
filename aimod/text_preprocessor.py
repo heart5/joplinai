@@ -15,6 +15,7 @@ class TextPreprocessor:
         self.chunk_size = chunk_size
 
     RESOURCE_ID_PATTERN = re.compile(r"!\[.*?\]\(:/([a-fA-F0-9]{32})\)")
+    IMAGE_SYNTAX_PATTERN = re.compile(r"!\[(.*?)\]\(:/([a-fA-F0-9]{32})\)")
 
     @staticmethod
     def extract_resource_ids(text: str) -> list[str]:
@@ -26,6 +27,21 @@ class TextPreprocessor:
         if not text:
             return []
         return TextPreprocessor.RESOURCE_ID_PATTERN.findall(text)
+
+    @staticmethod
+    def remove_image_syntax(text: str, keep_alt: bool = False) -> str:
+        """Remove Joplin image syntax ![alt](:/resource_id) from text.
+
+        Args:
+            text: The raw text with image references.
+            keep_alt: If True, replace each image reference with its alt_text
+                      (e.g. "工作日志"). If False, remove them entirely.
+        """
+        if not text:
+            return ""
+        if keep_alt:
+            return TextPreprocessor.IMAGE_SYNTAX_PATTERN.sub(r"\1", text)
+        return TextPreprocessor.IMAGE_SYNTAX_PATTERN.sub("", text)
 
     def clean_text(self, text: str) -> str:
         """Remove images, formatting symbols, and excess whitespace from note text."""
