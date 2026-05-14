@@ -94,7 +94,7 @@ def _guess_mime_from_bytes(data: bytes) -> str:
     """Guess image MIME type from magic bytes."""
     if len(data) < 4:
         return ""
-    if data[:4] == b'\xff\xd8\xff':
+    if data[:3] == b'\xff\xd8\xff':
         return "image/jpeg"
     if data[:8] == b'\x89PNG\r\n\x1a\n':
         return "image/png"
