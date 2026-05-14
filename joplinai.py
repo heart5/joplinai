@@ -112,6 +112,11 @@ CONFIG = {
     "enable_adaptive_chunking": getinivaluefromcloud(
         "joplinai", "enable_adaptive_chunking"
     ),
+    # 【新增】图片视觉处理开关，默认开启
+    "vision_enabled": getinivaluefromcloud("joplinai", "vision_enabled"),
+    # 【新增】Ollama Vision 模型和主机
+    "vision_model": getinivaluefromcloud("joplinai", "vision_model") or "minicpm-v",
+    "vision_ollama_host": getinivaluefromcloud("joplinai", "vision_ollama_host") or "http://127.0.0.1:11434",
 }
 
 model_name_str = (
@@ -226,11 +231,51 @@ def process_note_chunks(
         notebook_title = next(iter(notebook_dict.values()), "")  # 获取笔记本标题
 
         # 开始分块
+        # 图片处理：提取图片资源 → 获取base64 → DeepSeek Vision生成描述
+        vision_enabled = config.get("vision_enabled")
+        if vision_enabled is None:
+            vision_enabled = True  # 默认开启
+        elif isinstance(vision_enabled, str):
+            vision_enabled = vision_enabled.lower() not in ("false", "0", "no", "off")
+        image_descriptions = None
+        if vision_enabled:
+            try:
+                from aimod.text_preprocessor import TextPreprocessor
+                resource_ids = TextPreprocessor.extract_resource_ids(note.body)
+                if resource_ids:
+                    log.info(
+                        f"笔记《{note.title}》检测到 {len(resource_ids)} 个图片资源"
+                    )
+                    from aimod.image_processor import ImageProcessor
+                    image_proc = ImageProcessor(jpapi)
+                    images = image_proc.fetch_images_for_note(note.id, resource_ids)
+                    if images:
+                        log.info(
+                            f"笔记《{note.title}》成功获取 {len(images)}/{len(resource_ids)} 张图片"
+                        )
+                        from aimod.deepseek_enhancer import ollama_vision_describe
+                        image_descriptions = ollama_vision_describe(
+                            images,
+                            context=note.body,
+                            model=config.get("vision_model", "minicpm-v"),
+                            ollama_host=config.get("vision_ollama_host", "http://127.0.0.1:11434"),
+                        )
+                        if image_descriptions:
+                            log.info(
+                                f"笔记《{note.title}》图片视觉描述生成成功"
+                                f"（{len(image_descriptions)}字符）"
+                            )
+                    else:
+                        log.debug(f"笔记《{note.title}》图片资源获取失败，回退纯文本模式")
+            except Exception as e:
+                log.warning(f"笔记《{note.title}》图片处理异常，回退纯文本模式: {e}")
+
         chunk_dicts = embedding_generator.split_into_semantic_chunks(
             text=text,
             note_title=note.title,
             note_tags=tags_str,
             source_notebook_title=notebook_title,  # 新增参数
+            image_descriptions=image_descriptions,
         )
         if not chunk_dicts:
             log.warning(f"笔记《{note.title}》拆分不出有效内容块，跳过。")

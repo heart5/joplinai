@@ -50,6 +50,8 @@ DEEPSEEK_EMBED_URL = "https://api.deepseek.com/v1/embeddings"  # 嵌入API端点
 DEEPSEEK_CHAT_URL = "https://api.deepseek.com/v1/chat/completions"  # 大模型API端点
 DEFAULT_EMBED_MODEL = "deepseek-embedding"  # DeepSeek嵌入模型（示例）
 DEFAULT_CHAT_MODEL = "deepseek-chat"  # DeepSeek大模型（示例）
+DEFAULT_VISION_MODEL = "deepseek-v4-pro"  # DeepSeek Vision 多模态模型
+DEFAULT_OLLAMA_VISION_MODEL = "minicpm-v"  # 本地 Ollama Vision 模型
 
 # %% [markdown]
 # # 缓存支持
@@ -78,7 +80,13 @@ def _ensure_cache_dir() -> None:
 # ## get_cache_manager()
 
 # %%
-__all__ = ["get_cache_manager", "deepseek_process_note"]
+__all__ = [
+    "get_cache_manager",
+    "deepseek_process_note",
+    "deepseek_describe_images",
+    "deepseek_process_note_vision",
+    "ollama_vision_describe",
+]
 
 def get_cache_manager():
     """获取缓存管理器 — 云端未配 URL 则本机为生产主机走本地"""
@@ -289,6 +297,191 @@ def _call_deepseek_api_directly(
             )
             time.sleep(2**attempt)
     return None
+
+
+# %% [markdown]
+# # DeepSeek Vision API（图片处理）
+
+# %% [markdown]
+# ## _call_deepseek_vision_api(messages: list[dict], model: str, max_retries: int)
+
+# %%
+def _call_deepseek_vision_api(
+    messages: list[dict],
+    model: str = DEFAULT_VISION_MODEL,
+    max_retries: int = 2,
+) -> Optional[str]:
+    """Call DeepSeek V4 vision API with native multimodal format.
+
+    Each message dict has top-level 'image_data' (pure base64, no prefix)
+    or 'image_url' field alongside 'role' and 'content':
+    {"role": "user", "content": "描述图片", "image_data": "base64..."}
+    """
+    if not DEEPSEEK_API_KEY:
+        log.warning("未配置DeepSeek API Key")
+        return None
+
+    headers = {
+        "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": model,
+        "messages": messages,
+        "temperature": 0.3,
+        "max_tokens": 800,
+    }
+
+    for attempt in range(max_retries):
+        try:
+            response = requests.post(
+                DEEPSEEK_CHAT_URL, headers=headers, json=payload, timeout=60
+            )
+            if response.status_code == 400:
+                log.error(f"DeepSeek Vision API 400错误: {response.text[:200]}")
+                return None
+            response.raise_for_status()
+            result = response.json()["choices"][0]["message"]["content"].strip()
+            return result
+        except Exception as e:
+            log.warning(
+                f"DeepSeek Vision API调用失败({attempt + 1}/{max_retries}): {str(e)[:100]}"
+            )
+            time.sleep(2 ** attempt)
+    return None
+
+
+# %% [markdown]
+# ## deepseek_describe_images(images: dict[str, dict], context: str, model: str) -> Optional[str]
+
+# %%
+def deepseek_describe_images(
+    images: dict[str, dict],
+    context: str = "",
+    model: str = DEFAULT_VISION_MODEL,
+) -> Optional[str]:
+    """Describe a set of images using DeepSeek V4 Vision API (native format).
+
+    Args:
+        images: {resource_id: {'b64': str, 'mime': str}} dict
+        context: surrounding text context for better descriptions
+        model: DeepSeek model name
+
+    Returns concatenated image description text, or None if all fail.
+    """
+    if not images:
+        return None
+
+    # One message per image (DeepSeek V4: image_data is top-level message field)
+    image_items = list(images.items())
+    descriptions = []
+
+    for rid, img_data in image_items:
+        prompt = "请用中文描述这张图片的内容，重点说明图片传达的关键信息。"
+        if context:
+            prompt = (
+                f"以下是笔记的部分文本上下文，请结合上下文描述图片内容：\n"
+                f"{context[:3000]}\n\n"
+                f"请用中文描述这张图片的内容，重点说明图片与上下文的关系。"
+            )
+        message = {
+            "role": "user",
+            "content": prompt,
+            "image_data": img_data["b64"],
+        }
+        result = _call_deepseek_vision_api([message], model=model)
+        if result:
+            descriptions.append(result)
+        else:
+            log.warning(f"图片 {rid} 描述失败")
+
+    if not descriptions:
+        return None
+    return "\n".join(descriptions)
+
+
+# %% [markdown]
+# ## deepseek_process_note_vision(note_content, images, context, model) -> Optional[str]
+
+# %%
+def deepseek_process_note_vision(
+    note_content: str,
+    images: dict[str, dict],
+    context: str = "",
+    model: str = DEFAULT_VISION_MODEL,
+) -> Optional[str]:
+    """Generate a comprehensive note enhancement using vision + text.
+
+    Combines note text and embedded images, sends to DeepSeek V4,
+    returns a description that enriches the text-only understanding.
+
+    Use cache-friendly: wrap with deepseek_process_note for caching.
+    """
+    return deepseek_describe_images(images, context=context or note_content, model=model)
+
+
+# %% [markdown]
+# # Ollama 本地 Vision API
+
+# %% [markdown]
+# ## ollama_vision_describe(images, context, model, ollama_host) -> Optional[str]
+
+# %%
+def ollama_vision_describe(
+    images: dict[str, dict],
+    context: str = "",
+    model: str = DEFAULT_OLLAMA_VISION_MODEL,
+    ollama_host: str = "http://127.0.0.1:11434",
+) -> Optional[str]:
+    """Describe images using a local Ollama vision model.
+
+    Args:
+        images: {resource_id: {'b64': str, 'mime': str}} dict
+        context: surrounding text context for better descriptions
+        model: Ollama model name
+        ollama_host: Ollama API base URL
+
+    Returns concatenated image description text, or None if all fail.
+    """
+    if not images:
+        return None
+
+    prompt = "请用中文描述这张图片的内容，重点说明图片中的文字信息和关键数据。"
+    if context:
+        prompt = (
+            f"以下是笔记的部分文本上下文：\n{context[:2000]}\n\n"
+            f"请结合上下文用中文描述这张图片的内容，"
+            f"重点说明图片中的文字信息和关键数据，以及图片与上下文的关系。"
+        )
+
+    descriptions = []
+    for rid, img_data in images.items():
+        try:
+            response = requests.post(
+                f"{ollama_host}/api/chat",
+                json={
+                    "model": model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "images": [img_data["b64"]],
+                    "stream": False,
+                },
+                timeout=120,
+            )
+            if response.status_code == 200:
+                content = response.json()["message"]["content"].strip()
+                descriptions.append(content)
+                log.info(f"Ollama Vision 描述成功: {rid[:12]}... ({len(content)}字符)")
+            else:
+                log.warning(
+                    f"Ollama Vision 失败({response.status_code}): {rid[:12]}..."
+                    f" {response.text[:100]}"
+                )
+        except Exception as e:
+            log.warning(f"Ollama Vision 异常: {rid[:12]}... {e}")
+
+    if not descriptions:
+        return None
+    return "\n".join(descriptions)
 
 
 # %% [markdown]
