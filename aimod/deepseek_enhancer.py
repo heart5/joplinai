@@ -424,6 +424,31 @@ def deepseek_process_note_vision(
 # # Ollama 本地 Vision API
 
 # %% [markdown]
+# ## _is_valid_vision_result(content: str) -> bool
+
+# %%
+def _is_valid_vision_result(content: str, min_length: int = 15) -> bool:
+    """Check if a vision model response is a valid description (not a refusal/hallucination)."""
+    if not content or len(content) < min_length:
+        return False
+    refusal_patterns = [
+        "很抱歉，我无法",
+        "对不起，我不能",
+        "抱歉，无法提供",
+        "由于我无法访问",
+        "我无法查看",
+        "无法提供对您提到的",
+        "I cannot provide",
+        "I'm unable to",
+        "cannot access the image",
+    ]
+    for pattern in refusal_patterns:
+        if pattern in content:
+            return False
+    return True
+
+
+# %% [markdown]
 # ## ollama_vision_describe(images, context, model, ollama_host) -> Optional[str]
 
 # %%
@@ -495,8 +520,7 @@ def ollama_vision_describe(
                 content = response.json()["message"]["content"].strip()
                 descriptions.append(content)
                 log.info(f"Ollama Vision 描述成功: {rid[:12]}... ({len(content)}字符)")
-                # Cache result
-                if cache_manager is not None:
+                if cache_manager is not None and _is_valid_vision_result(content):
                     try:
                         cache_manager.set(img_hash, task, content)
                     except Exception:
