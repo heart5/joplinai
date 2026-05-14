@@ -432,6 +432,7 @@ def ollama_vision_describe(
     context: str = "",
     model: str = DEFAULT_OLLAMA_VISION_MODEL,
     ollama_host: str = "http://127.0.0.1:11434",
+    use_cache: bool = True,
 ) -> Optional[str]:
     """Describe images using a local Ollama vision model.
 
@@ -440,11 +441,19 @@ def ollama_vision_describe(
         context: surrounding text context for better descriptions
         model: Ollama model name
         ollama_host: Ollama API base URL
+        use_cache: cache vision results by image hash to avoid repeat Ollama calls
 
     Returns concatenated image description text, or None if all fail.
     """
     if not images:
         return None
+
+    cache_manager = None
+    if use_cache:
+        try:
+            cache_manager = get_cache_manager()
+        except Exception:
+            pass
 
     prompt = "请用中文描述这张图片的内容，重点说明图片中的文字信息和关键数据。"
     if context:
@@ -454,8 +463,23 @@ def ollama_vision_describe(
             f"重点说明图片中的文字信息和关键数据，以及图片与上下文的关系。"
         )
 
+    task = f"vision_desc:{model}"
     descriptions = []
     for rid, img_data in images.items():
+        img_hash = compute_content_hash(img_data["b64"])
+
+        # Check cache
+        if cache_manager is not None:
+            cache_result = cache_manager.get(img_hash, task)
+            if cache_result.content is not None:
+                descriptions.append(cache_result.content)
+                log.info(
+                    f"Ollama Vision 缓存命中: {rid[:12]}... "
+                    f"({len(cache_result.content)}字符)"
+                )
+                continue
+
+        # Call Ollama
         try:
             response = requests.post(
                 f"{ollama_host}/api/chat",
@@ -471,6 +495,12 @@ def ollama_vision_describe(
                 content = response.json()["message"]["content"].strip()
                 descriptions.append(content)
                 log.info(f"Ollama Vision 描述成功: {rid[:12]}... ({len(content)}字符)")
+                # Cache result
+                if cache_manager is not None:
+                    try:
+                        cache_manager.set(img_hash, task, content)
+                    except Exception:
+                        pass
             else:
                 log.warning(
                     f"Ollama Vision 失败({response.status_code}): {rid[:12]}..."
