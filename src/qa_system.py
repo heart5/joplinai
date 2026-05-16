@@ -401,7 +401,7 @@ class QASystem:
     # %%
     def _generate_optimized_answer(self, question: str, context: str) -> str:
         """生成优化答案"""
-        if self.config["enable_deepseek"] and self.config["deepseek_api_key"]:
+        if self.config["cloud_model"] != "none" and self.config["deepseek_api_key"]:
             log.info(f"启用deepseek聊天模式")
             return self._generate_answer_with_deepseek(question, context)
         else:
@@ -433,7 +433,7 @@ class QASystem:
 4. 语言自然，像在对话"""
 
             payload = {
-                "model": self.config["deepseek_chat_model"],
+                "model": self.config["cloud_model"],
                 "messages": [
                     {
                         "role": "system",
@@ -483,7 +483,7 @@ class QASystem:
             }
 
             payload = {
-                "model": self.config["deepseek_chat_model"],
+                "model": self.config["cloud_model"],
                 "messages": [
                     {"role": "user", "content": f"请回答：{question}"},
                 ],
@@ -595,7 +595,7 @@ class QASystem:
                 "config": {
                     "embedding_model": self.config["embedding_model"],
                     "chat_model": self.config["chat_model"],
-                    "using_deepseek": self.config["enable_deepseek"],
+                    "using_deepseek": self.config["cloud_model"] != "none",
                 },
             }
         except:

@@ -47,8 +47,8 @@ cache_bp = Blueprint("cache", __name__)
 # # DeepSeek 缓存操作
 
 # %%
-def deepseek_cache_get(content_hash: str, task: str) -> dict:
-    cache_key = f"{content_hash}_{task}"
+def deepseek_cache_get(content_hash: str, task: str, model: str = "") -> dict:
+    cache_key = f"{content_hash}_{task}_{model}" if model else f"{content_hash}_{task}"
     conn = _init_db()
     row = conn.execute(
         "SELECT result, hit_count, total_hits FROM deepseek_cache "
@@ -89,8 +89,8 @@ def deepseek_cache_get(content_hash: str, task: str) -> dict:
     }
 
 
-def deepseek_cache_set(content_hash: str, task: str, result: str):
-    cache_key = f"{content_hash}_{task}"
+def deepseek_cache_set(content_hash: str, task: str, result: str, model: str = ""):
+    cache_key = f"{content_hash}_{task}_{model}" if model else f"{content_hash}_{task}"
     now_iso = datetime.now().isoformat()
     conn = _init_db()
     conn.execute(
@@ -316,15 +316,15 @@ def probe_cache_report() -> dict:
 @require_auth
 def api_ds_cache_get():
     data = request.get_json(force=True)
-    return jsonify(deepseek_cache_get(data["content_hash"], data["task"]))
+    return jsonify(deepseek_cache_get(data["content_hash"], data["task"], data.get("model", "")))
 
 
 @cache_bp.route("/cache/deepseek/set", methods=["POST"])
 @require_auth
 def api_ds_cache_set():
     data = request.get_json(force=True)
-    deepseek_cache_set(data["content_hash"], data["task"], data["result"])
-    log.info(f"DeepSeek缓存写入: task={data['task']}")
+    deepseek_cache_set(data["content_hash"], data["task"], data["result"], data.get("model", ""))
+    log.info(f"缓存写入: task={data['task']}")
     return jsonify({"ok": True})
 
 

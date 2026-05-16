@@ -133,13 +133,13 @@ class SQLiteCacheManager:
 # ## get(self, content_hash: str, task: str) -> Optional[str]
 
     # %%
-    def get(self, content_hash: str, task: str) -> CacheResult:
+    def get(self, content_hash: str, task: str, model: str = "") -> CacheResult:
         """
         获取缓存结果。
         核心职责：1. 返回缓存内容 2. 更新访问计数和时间 3. 判断并标记是否需要验证。
         绝不包含任何API调用逻辑。
         """
-        cache_key = f"{content_hash}_{task}"
+        cache_key = f"{content_hash}_{task}_{model}" if model else f"{content_hash}_{task}"
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
 
@@ -267,9 +267,9 @@ class SQLiteCacheManager:
 # ## set(self, content_hash: str, task: str, result: str)
 
     # %%
-    def set(self, content_hash: str, task: str, result: str):
+    def set(self, content_hash: str, task: str, result: str, model: str = ""):
         """设置新的缓存条目（首次保存或强制覆盖）"""
-        cache_key = f"{content_hash}_{task}"
+        cache_key = f"{content_hash}_{task}_{model}" if model else f"{content_hash}_{task}"
         now_iso = datetime.now().isoformat()
 
         conn = sqlite3.connect(self.db_path)

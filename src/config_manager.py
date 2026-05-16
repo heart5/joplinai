@@ -76,8 +76,10 @@ class ConfigManager:
             "similarity_threshold",
             "context_max_length",
             "max_retrieved_chunks",
-            "enable_deepseek_summary",
-            "enable_deepseek_tags",
+            "summary_model",
+            "tags_model",
+            "cloud_model",
+            "local_model",
             # 可以根据需要无限扩展...
         ]
         self._fetch_and_update()  # 初始加载

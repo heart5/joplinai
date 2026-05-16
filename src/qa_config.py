@@ -51,11 +51,10 @@ CONFIG = {
     )
     else 20,
     "similarity_threshold": 0.5,
-    "enable_deepseek": enable_deepseek
-    if (enable_deepseek := getinivaluefromcloud("joplinai", "enable_deepseek"))
-    else False,
     "deepseek_api_key": getinivaluefromcloud("joplinai", "deepseek_token"),
-    "deepseek_chat_model": "deepseek-chat",
+    "cloud_model": cloud_model
+    if (cloud_model := getinivaluefromcloud("joplinai", "cloud_model"))
+    else "deepseek-chat",
     "context_max_length": context_max_length
     if (context_max_length := getinivaluefromcloud("joplinai", "context_max_length"))
     else 4000,
