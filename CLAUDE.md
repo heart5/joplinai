@@ -25,10 +25,10 @@ Joplinai is an AI-powered knowledge retrieval and Q&A system for [Joplin](https:
 
 | Server | Hostname | Role |
 |--------|----------|------|
-| 腾讯云 (TC) | `tc` (122.51.102.233:2202) | Joplin Server, 向量数据库 (ChromaDB), 数据中心 (center_api), 用户管理 |
-| 恒创云 (HCX) | long9.org | Ollama LLM 推理, Q&A API, Web 门户 |
+| 腾讯云 (TC) | `tc` (122.51.102.233:2202) | Joplin Server, 向量数据库 (ChromaDB), 数据中心 (center_api), 定时向量化 (joplinai-sync), 用户管理 |
+| 恒创云 (HCX) | long9.org (149.30.242.156) | Ollama LLM 推理 (端口 11434), Q&A API, Web 门户 |
 
-TC 是数据核心，HCX 是推理+门户。HCX 的 Web 门户通过 HTTP API Key 认证远程调用 TC 的 center_api 和 Q&A API。
+TC 是数据核心+向量化，HCX 是推理+门户。TC 向量化时通过公网 IP 调用 HCX 的 Ollama 生成嵌入向量。HCX 的 Web 门户通过 HTTP API Key 认证远程调用 TC 的 center_api。
 
 ## Architecture — Four Independent Services
 
@@ -39,12 +39,13 @@ All services are Flask apps。No Docker/containerization in production (docker-c
 | Web Portal | `joplin_web_app.py` | 127.0.0.1:5001 | HCX | User login, Q&A chat UI, admin panel |
 | Q&A API | `joplin_qa_api.py` | 127.0.0.1:5000 | HCX | Internal HTTP API for vector search + LLM Q&A |
 | Center API | `aimod/center_api/` | 0.0.0.0:5003 | TC | Centralized data service for multi-host sharing |
-| Vectorization CLI | `joplinai.py` | — | HCX | Chunks Joplin notes, generates embeddings, stores in ChromaDB |
+| Vectorization Engine | `joplinai.py` | — | TC | 分块编排 / AI增强 / 写 ChromaDB / 报告。joplinai-sync.timer 每8小时触发 |
+| Embedding Inference | Ollama | 11434 | HCX | 嵌入向量生成 (`dengcao/bge-large-zh-v1.5`)，TC 经公网 IP 远程调用 |
 
 Center API 的 gunicorn 入口：`"aimod.center_api:create_app()"`（app factory 模式）。
 Web App 入口：`joplin_web_app:app`（模块级 `app = create_app()`，勿放 `if __name__` 内——gunicorn 不执行该块）。
 
-Data flow: `joplinai.py` → `note_enhancer.py` / `embedding_generator.py` / `run_tracker.py` / `report_writer.py` → `CacheClient` / `ProbeCacheClient` / `HistoryClient` / `ProcessStateClient` (HTTP + API key auth) → `aimod/center_api/` → `data/joplinai_center.db`
+Data flow: `joplinai.py` → TC 本地 (Joplin Server / ChromaDB / center_api) + 远程 HCX (Ollama embedding / 11434) + 外部 DeepSeek API (AI增强)。各 center_client 通过 HTTP + API Key → `aimod/center_api/` → `data/joplinai_center.db`
 
 `joplinai_center.db` 包含 10 张表：
 - 缓存与历史：`enhance_cache`、`probe_cache`、`notebook_history`、`global_run_history`
@@ -229,6 +230,8 @@ Pre-commit (`.pre-commit-config.yaml`): jupytext 误注释检测 + flake8。
 - **TC git pull 可能需要代理**: 直连偶尔失败（GnuTLS recv error），回退方案是 `HTTPS_PROXY=http://127.0.0.1:7890 git pull`。`deploy/deploy.sh` 已包含三级回退策略。
 - **HCX `joplin-qa-api`/`joplin-web-app` 代码更新后需手动重启**: gunicorn 进程不自动 reload，git pull 后必须 `sudo systemctl restart`。
 - **center_api 日志查看**：TC 上 `sudo journalctl -u joplinai-center-api -f`。logger 配置在 `aimod/center_api/__init__.py`：`propagate=False` 避免 `func/logme` root handler 双重输出。
+- **ChromaDB 在 TC 以 Docker 运行**：`docker run chromadb/chroma`，端口映射 8009→8000。配置中 `chroma_port=8009`，但 `vector_db_manager.py` 硬编码默认 8000——依赖云端配置覆盖。直接 `chromadb.HttpClient(host='127.0.0.1', port=8009)` 才能连上。
+- **Ollama 在 HCX 以公网 IP 暴露**：TC 向量化通过 `149.30.242.156:11434` 远程调 HCX 的 Ollama 生成嵌入。端口 11434 需对外网开放。
 
 ## Git
 
