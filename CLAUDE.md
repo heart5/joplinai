@@ -44,14 +44,14 @@ All services are Flask apps。No Docker/containerization in production (docker-c
 Center API 的 gunicorn 入口：`"aimod.center_api:create_app()"`（app factory 模式）。
 Web App 入口：`joplin_web_app:app`（模块级 `app = create_app()`，勿放 `if __name__` 内——gunicorn 不执行该块）。
 
-Data flow: `joplinai.py` → `deepseek_enhancer.py` / `embedding_generator.py` / `run_tracker.py` / `report_writer.py` → `DeepSeekCacheClient` / `ProbeCacheClient` / `HistoryClient` / `ProcessStateClient` (HTTP + API key auth) → `aimod/center_api/` → `data/joplinai_center.db`
+Data flow: `joplinai.py` → `note_enhancer.py` / `embedding_generator.py` / `run_tracker.py` / `report_writer.py` → `CacheClient` / `ProbeCacheClient` / `HistoryClient` / `ProcessStateClient` (HTTP + API key auth) → `aimod/center_api/` → `data/joplinai_center.db`
 
 `joplinai_center.db` 包含 10 张表：
-- 缓存与历史：`deepseek_cache`、`probe_cache`、`notebook_history`、`global_run_history`
+- 缓存与历史：`enhance_cache`、`probe_cache`、`notebook_history`、`global_run_history`
 - 笔记状态：`note_process_state`
 - 用户管理：`users`、`sessions`、`audit_log`、`qa_history`、`chat_sessions`
 
-Center client 拆分为 5 个独立文件 (`aimod/center_client/`)，各自提供 remote-first + local fallback：`DeepSeekCacheClient`, `ProbeCacheClient`, `HistoryClient`, `ProcessStateClient`, `UserManagerClient`。URL 发现逻辑：云端 `joplinai_center_url` 未配置则本机为生产主机走 `127.0.0.1:5003`。
+Center client 拆分为 5 个独立文件 (`aimod/`)，各自提供 remote-first + local fallback：`CacheClient`, `ProbeCacheClient`, `HistoryClient`, `ProcessStateClient`, `UserManagerClient`。URL 发现逻辑：云端 `joplinai_center_url` 未配置则本机为生产主机走 `127.0.0.1:5003`。
 
 ### Source Layout
 
@@ -86,7 +86,7 @@ aimod/                  # AI 核心包
 ├── text_splitter.py        # 文本切分器（拆分自 embedding_generator）
 ├── vector_db_manager.py    # ChromaDB CRUD
 ├── cache_manager.py        # SQLite LRU 缓存（本地回退用）
-├── deepseek_enhancer.py    # DeepSeek API 摘要/标签增强
+├── note_enhancer.py         # AI增强 摘要/标签增强（cloud/local/none）
 ├── run_tracker.py          # 运行数据采集与历史记录
 ├── runner_config.py        # 运行器配置
 ├── center_api/             # 数据中心 API 包
@@ -97,7 +97,7 @@ aimod/                  # AI 核心包
 │   └── user_routes.py      # /users/* /auth/* 端点
 ├── center_client/          # 数据中心客户端（拆分为独立文件）
 │   ├── __init__.py         # 重新导出全部客户端
-│   ├── deepseek_cache.py   # DeepSeekCacheClient
+│   ├── cache_client.py     # CacheClient
 │   ├── probe_cache.py      # ProbeCacheClient
 │   ├── history.py          # HistoryClient
 │   ├── process_state.py    # ProcessStateClient
@@ -118,7 +118,7 @@ log/                    # 日志 (gitignored)
 - `text_splitter.py` — 文本切分器，按句子边界切分
 - `vector_db_manager.py` — VectorDBManager 类，ChromaDB CRUD
 - `cache_manager.py` — SQLite LRU 缓存（本地回退用）
-- `deepseek_enhancer.py` — DeepSeek API 摘要/标签增强
+- `note_enhancer.py` — AI增强 摘要/标签增强（cloud/local/none），含 Ollama vision 描述
 - `run_tracker.py` — RunTracker 类，运行数据采集和历史记录 (remote-first)
 - `report_writer.py` — 统一报告生成（在 `src/`）
 - `center_api/` — 数据中心 Flask 包（5 个端点蓝图）
@@ -179,6 +179,40 @@ Production: systemd services managed via `deploy/deploy.sh`:
 - **Inter-service auth**: `joplin_web_app.py` calls `joplin_qa_api.py` using an API key from the shared cloud config (`X-API-Key` header).
 - **Gunicorn entry points**: `aimod.center_api:create_app()` (app factory), `joplin_web_app:app` (module-level instance), `joplin_qa_api:app` (module-level instance).
 
+## Model Strategy
+
+**核心原则：实时走云端，离线走本地。** HCX 服务器无 GPU（纯 CPU 8核），7B+ 模型本地推理需 6-12 分钟，对 web 场景不可用。
+
+### 本地模型（Ollama, CPU-only）
+
+| 模型 | 大小 | 用途 | 速度 |
+|------|------|------|------|
+| `dengcao/bge-large-zh-v1.5` | 651 MB | 文本嵌入（向量化） | ~2秒/次 |
+| `qwen2.5:1.5b` | 986 MB | 标签提取、内容分类 | ~40-80秒/条 |
+| `minicpm-v:latest` | 5.5 GB | 笔记图片描述（`vision_enabled=False` 默认关闭） | ~数分钟/图 |
+
+- **`qwen2.5:1.5b`** 通过 `local_tag_model` 配置键指定，供向量化管线离线批量任务使用
+- **无本地 QA 回退**：`chat_model=none`，DeepSeek API 不可用时直接返回服务不可用，不尝试本地模型
+- 之前使用后删除的模型：`qwen:1.8b`（架构旧）、`qwen3:8b`（12分钟太慢）、`deepseek-r1:7b`（RAG误判）、`gemma3:4b-it-qat`（中文幻觉）
+
+### 云端模型（DeepSeek API）
+
+| 模型 | 用途 | 速度 |
+|------|------|------|
+| `deepseek-chat` | QA 对话主路（`cloud_model=deepseek-chat`） | ~5秒/次 |
+| `deepseek-v4-pro` | 图片精细描述（备用） | ~数秒/图 |
+
+### 配置要点
+
+| 配置键 | 当前值 | 说明 |
+|--------|--------|------|
+| `chat_model` | `none` | 无本地 QA 回退 |
+| `cloud_model` | `deepseek-chat` | 云端大模型 |
+| `summary_model` | `cloud` | 摘要模型: cloud/local/none |
+| `tags_model` | `cloud` | 标签模型: cloud/local/none |
+| `local_model` | `qwen2.5:1.5b` | 本地标签/分类模型 |
+| `vision_enabled` | `false` | CPU 跑视觉太慢，默认关闭 |
+
 ## Testing & CI
 
 ```bash
@@ -209,6 +243,8 @@ Pre-commit (`.pre-commit-config.yaml`): jupytext 误注释检测 + flake8。
 Main config stored in cloud-synced Joplin note (INI format). Local override: `data/joplinai.ini`. Key settings: Joplin API token, Ollama model name, embedding model, ChromaDB path, Q&A prompts, user session settings.
 
 **数据中心配置**：`joplinai_center_url`（非生产主机配，指向 TC 公网IP；生产主机不配则自动走 localhost）、`joplinai_center_api_key`（认证密钥）、`probe_cache_limit`（探测缓存上限，默认 10000）。
+
+**模型配置**：`chat_model`（本地对话模型，当前 `none` 无本地回退）、`local_model`（本地标签/分类小模型）、`embedding_model`（嵌入模型）、`vision_model`（视觉模型）、`cloud_model` / `summary_model` / `tags_model`（云端/本地/关闭三态切换）。详见上方 Model Strategy 章节。
 
 ### Remote Joplin fallback
 

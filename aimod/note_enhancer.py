@@ -14,7 +14,7 @@
 # ---
 
 # %% [markdown]
-# # deepseek_enhancer.py（新增增强模块）
+# # note_enhancer.py（AI增强模块）
 
 # %% [markdown]
 # # 导入库
@@ -43,7 +43,7 @@ with pathmagic.Context():
         log.error(f"导入项目模块失败: {e}")
 
 # %% [markdown]
-# # DeepSeek配置
+# # 模型配置
 
 # %%
 DEEPSEEK_API_KEY = getinivaluefromcloud("joplinai", "deepseek_token")
@@ -84,8 +84,8 @@ def _ensure_cache_dir() -> None:
 __all__ = [
     "get_cache_manager",
     "deepseek_process_note",
-    "deepseek_describe_images",
-    "deepseek_process_note_vision",
+    "describe_images",
+    "process_note_vision",
     "ollama_vision_describe",
     "local_process_note",
     "enhance_note",
@@ -106,9 +106,9 @@ def get_cache_manager():
         remote_url = "http://127.0.0.1:5003"
     api_key = getinivaluefromcloud("joplinai", "joplinai_center_api_key")
     if remote_url and api_key:
-        from aimod.deepseek_client import DeepSeekCacheClient
+        from aimod.cache_client import CacheClient
 
-        _CACHE_MANAGER = DeepSeekCacheClient(remote_url, api_key)
+        _CACHE_MANAGER = CacheClient(remote_url, api_key)
         return _CACHE_MANAGER
 
     _ensure_cache_dir()
@@ -119,7 +119,7 @@ def get_cache_manager():
 # %% [markdown]
 #
 # %% [markdown]
-# # DeepSeek大模型（笔记智能加工）
+# # 大模型（笔记智能加工）
 
 # %% [markdown]
 # ## deepseek_process_note(text: str, task: str = "summary", model: str = DEFAULT_CHAT_MODEL, max_retries: int = 3, use_cache: bool = True,) -> Optional[str]
@@ -133,9 +133,9 @@ def deepseek_process_note(
     max_retries: int = 3,
     use_cache: bool = True,
 ) -> Optional[str]:
-    """DeepSeek大模型处理（集成智能验证机制）"""
+    """大模型处理（集成智能验证机制）"""
     if not DEEPSEEK_API_KEY:
-        log.warning("未配置DeepSeek API Key")
+        log.warning("未配置AI API Key")
         return None
 
     if not use_cache:
@@ -151,12 +151,12 @@ def deepseek_process_note(
 
     if cache_result.content is not None:
         # 缓存命中
-        # log.info(f"deepseek增强缓存命中 {task}: {content_hash[:12]}")
+        # log.info(f"增强缓存命中 {task}: {content_hash[:12]}")
 
         # 2. 检查是否需要验证
         if cache_result.requires_validation:
             log.info(
-                f"deepseek增强缓存条目达到验证阈值，启动异步验证: {content_hash[:12]}"
+                f"增强缓存条目达到验证阈值，启动异步验证: {content_hash[:12]}"
             )
             # 重要：这里可以同步验证，但为了不阻塞当前请求，建议异步或后台执行。
             # 以下是同步验证的示例（可能会增加本次请求的延迟）：
@@ -174,13 +174,13 @@ def deepseek_process_note(
         return cache_result.content
 
     # 缓存未命中，调用API获取新结果
-    log.info(f"deepseek增强缓存未命中，调用API: {task} for {content_hash[:12]}")
+    log.info(f"增强缓存未命中，调用API: {task} for {content_hash[:12]}")
     new_result = _call_deepseek_api_directly(text, task, model, max_retries)
 
     if new_result:
         # 将新结果保存到缓存
         cache_manager.set(content_hash, task, new_result, model)
-        # log.info(f"deepseek增强新结果已缓存: {content_hash[:12]}")
+        # log.info(f"增强新结果已缓存: {content_hash[:12]}")
 
     return new_result
 
@@ -223,12 +223,12 @@ def _validate_cache_entry_async(
             )
         else:
             # 内容已变，更新缓存
-            log.warning(f"deepseek增强验证发现内容变化，更新缓存: {cache_key[:12]}...")
+            log.warning(f"增强验证发现内容变化，更新缓存: {cache_key[:12]}...")
             get_cache_manager().update_on_validation(
                 cache_key, new_result, validation_successful=True
             )
     except Exception as e:
-        log.error(f"deepseek增强后台验证过程异常: {e}")
+        log.error(f"增强后台验证过程异常: {e}")
         get_cache_manager().update_on_validation(
             cache_key, None, validation_successful=False
         )
@@ -268,7 +268,7 @@ def _call_deepseek_api_directly(
     }
 
     if task not in prompts:
-        log.error(f"deepseek增强不支持的任务类型: {task}")
+        log.error(f"增强不支持的任务类型: {task}")
         return None
 
     # 使用 % 格式化，避免花括号问题
@@ -292,7 +292,7 @@ def _call_deepseek_api_directly(
                 DEEPSEEK_CHAT_URL, headers=headers, json=payload, timeout=30
             )
             if response.status_code == 400:
-                log.error(f"deepseek增强聊天API 400错误: {response.text}")
+                log.error(f"增强API 400错误: {response.text}")
                 return None
             response.raise_for_status()
             # print(response.json())
@@ -301,7 +301,7 @@ def _call_deepseek_api_directly(
             return result
         except Exception as e:
             log.warning(
-                f"deepseek增强大模型调用失败({attempt + 1}/{max_retries}): {str(e)[:100]}"
+                f"增强大模型调用失败({attempt + 1}/{max_retries}): {str(e)[:100]}"
             )
             time.sleep(2**attempt)
     return None
@@ -312,7 +312,7 @@ def _call_deepseek_api_directly(
 
 # %%
 def _call_ollama_local(text: str, task: str, model: str) -> Optional[str]:
-    """本地 Ollama 模型处理标签/摘要，复用与 DeepSeek 相同的 prompt"""
+    """本地 Ollama 模型处理标签/摘要，复用与云端模型相同的 prompt"""
     prompts = {
         "summary": "用1-3句话总结以下笔记核心内容，突出主题和结论：\n%s",
         "tags": """请从以下文本中提取3-5个核心关键词作为标签。
@@ -357,38 +357,37 @@ def _call_ollama_local(text: str, task: str, model: str) -> Optional[str]:
 
 # %% [markdown]
 # ## local_process_note(text, task, model, use_cache) -> Optional[str]
-
+#
 # 本地/云端模型调用统计（供向量化运行结束汇总）
-_call_stats = {"summary": {"local": 0, "cloud": 0}, "tags": {"local": 0, "cloud": 0}}
-
-
-def get_call_stats() -> dict:
-    """返回当前运行的本地/云端模型调用统计"""
-    return {
-        "summary": dict(_call_stats["summary"]),
-        "tags": dict(_call_stats["tags"]),
-    }
-
-
-def reset_call_stats():
-    """重置调用统计（新运行开始时调用）"""
-    _call_stats["summary"]["local"] = 0
-    _call_stats["summary"]["cloud"] = 0
-    _call_stats["tags"]["local"] = 0
-    _call_stats["tags"]["cloud"] = 0
-
-
+# _call_stats = {"summary": {"local": 0, "cloud": 0}, "tags": {"local": 0, "cloud": 0}}
+#
+#
+# def get_call_stats() -> dict:
+#     """返回当前运行的本地/云端模型调用统计"""
+#     return {
+#         "summary": dict(_call_stats["summary"]),
+#         "tags": dict(_call_stats["tags"]),
+#     }
+#
+#
+# def reset_call_stats():
+#     """重置调用统计（新运行开始时调用）"""
+#     _call_stats["summary"]["local"] = 0
+#     _call_stats["summary"]["cloud"] = 0
+#     _call_stats["tags"]["local"] = 0
+#     _call_stats["tags"]["cloud"] = 0
+#
+#
 # 保留旧名兼容
-def get_local_call_stats() -> dict:
-    """返回当前运行的本地模型调用统计"""
-    return {task: _call_stats[task]["local"] for task in _call_stats}
-
-
-def reset_local_call_stats():
-    """重置本地调用统计"""
-    for task in _call_stats:
-        _call_stats[task]["local"] = 0
-
+# def get_local_call_stats() -> dict:
+#     """返回当前运行的本地模型调用统计"""
+#     return {task: _call_stats[task]["local"] for task in _call_stats}
+#
+#
+# def reset_local_call_stats():
+#     """重置本地调用统计"""
+#     for task in _call_stats:
+#         _call_stats[task]["local"] = 0
 
 # %%
 def local_process_note(
@@ -512,10 +511,10 @@ def _call_deepseek_vision_api(
 
 
 # %% [markdown]
-# ## deepseek_describe_images(images: dict[str, dict], context: str, model: str) -> Optional[str]
+# ## describe_images(images: dict[str, dict], context: str, model: str) -> Optional[str]
 
 # %%
-def deepseek_describe_images(
+def describe_images(
     images: dict[str, dict],
     context: str = "",
     model: str = DEFAULT_VISION_MODEL,
@@ -561,10 +560,10 @@ def deepseek_describe_images(
 
 
 # %% [markdown]
-# ## deepseek_process_note_vision(note_content, images, context, model) -> Optional[str]
+# ## process_note_vision(note_content, images, context, model) -> Optional[str]
 
 # %%
-def deepseek_process_note_vision(
+def process_note_vision(
     note_content: str,
     images: dict[str, dict],
     context: str = "",
@@ -577,7 +576,7 @@ def deepseek_process_note_vision(
 
     Use cache-friendly: wrap with deepseek_process_note for caching.
     """
-    return deepseek_describe_images(images, context=context or note_content, model=model)
+    return describe_images(images, context=context or note_content, model=model)
 
 
 # %% [markdown]

@@ -14,8 +14,8 @@
 # ---
 
 # %% [markdown]
-# # DeepSeekCacheClient
-# DeepSeek 摘要/标签缓存客户端 — 远程优先 + 本地 SQLite 回退
+# # CacheClient
+# AI增强缓存客户端 — 远程优先 + 本地 SQLite 回退
 
 # %%
 import logging
@@ -40,10 +40,10 @@ CENTER_DB_PATH = getdirmain() / "data" / "joplinai_center.db"
 
 
 # %%
-__all__ = ["DeepSeekCacheClient"]
+__all__ = ["CacheClient"]
 
-class DeepSeekCacheClient:
-    """DeepSeek 摘要/标签缓存客户端 — 远程优先 + 本地 SQLite 回退"""
+class CacheClient:
+    """AI增强缓存客户端 — 远程优先 + 本地 SQLite 回退"""
 
     def __init__(self, remote_url: str, api_key: str):
         self.remote_url = remote_url.rstrip("/")
@@ -68,7 +68,7 @@ class DeepSeekCacheClient:
 
     def get(self, content_hash: str, task: str, model: str = "") -> CacheResult:
         resp = self._request(
-            "POST", "/cache/deepseek/get",
+            "POST", "/cache/enhance/get",
             json={"content_hash": content_hash, "task": task, "model": model},
         )
         if resp is not None:
@@ -86,7 +86,7 @@ class DeepSeekCacheClient:
     def set(self, content_hash: str, task: str, result: str, model: str = ""):
         if self._request(
             "POST",
-            "/cache/deepseek/set",
+            "/cache/enhance/set",
             json={"content_hash": content_hash, "task": task, "result": result, "model": model},
         ):
             return
@@ -97,7 +97,7 @@ class DeepSeekCacheClient:
     ):
         if self._request(
             "POST",
-            "/cache/deepseek/validate",
+            "/cache/enhance/validate",
             json={
                 "cache_key": cache_key,
                 "new_result": new_result,
@@ -109,13 +109,13 @@ class DeepSeekCacheClient:
 
     def get_stats(self, cache_key: str = None) -> Dict[str, Any]:
         params = {"cache_key": cache_key} if cache_key else {}
-        resp = self._request("GET", "/cache/deepseek/stats", params=params)
+        resp = self._request("GET", "/cache/enhance/stats", params=params)
         if resp is not None:
             return resp.json()
         return self.local.get_stats(cache_key=cache_key)
 
     def get_report(self) -> Dict[str, Any]:
-        resp = self._request("GET", "/cache/deepseek/report")
+        resp = self._request("GET", "/cache/enhance/report")
         if resp is not None:
             return resp.json()
         log.warning("远程获取缓存报告失败，返回空报告")

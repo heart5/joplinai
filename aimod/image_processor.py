@@ -1,12 +1,14 @@
 """Image resource fetching and preprocessing for Joplin notes.
 
 Fetches image resources from Joplin API, converts to base64
-for use with multimodal LLM APIs (DeepSeek V4 vision).
+for use with multimodal LLM APIs.
 """
 import base64
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional
+
+import requests
 
 import pathmagic
 
@@ -20,7 +22,7 @@ with pathmagic.Context():
 
 __all__ = ["ImageProcessor"]
 
-DEEPSEEK_SUPPORTED_MIMES = {"image/jpeg", "image/png", "image/webp"}
+SUPPORTED_IMAGE_MIMES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
 MAX_IMAGE_SIZE = 8 * 1024 * 1024  # 8MB
 MAX_IMAGE_WORKERS = 5
 
@@ -29,11 +31,25 @@ class ImageProcessor:
     """Fetch and encode image resources from Joplin API.
 
     Returns pure base64 strings (no data URI prefix) with MIME type,
-    matching DeepSeek V4 API requirements.
+    matching multimodal API requirements.
     """
 
     def __init__(self, joplin_api):
         self.api = joplin_api
+
+    def _get_resource_url(self, resource_id: str) -> str:
+        """Build the raw resource file URL from the API's base URL."""
+        base = self.api.url.rstrip("/")
+        return f"{base}/resources/{resource_id}/file?token={self.api.token}"
+
+    def _fetch_resource_bytes(self, resource_id: str) -> Optional[bytes]:
+        """Fetch resource file bytes via direct HTTP (bypasses joppy's
+        charset_normalizer bug triggered by logging response.text on binary
+        content)."""
+        url = self._get_resource_url(resource_id)
+        resp = requests.get(url, timeout=30)
+        resp.raise_for_status()
+        return resp.content
 
     def fetch_image_base64(self, resource_id: str) -> Optional[dict]:
         """Fetch a single image resource, return {'b64': ..., 'mime': ...}.
@@ -41,7 +57,7 @@ class ImageProcessor:
         Returns None if the resource is not a supported image or fetch fails.
         """
         try:
-            content = self.api.get_resource_file(resource_id)
+            content = self._fetch_resource_bytes(resource_id)
             if not content:
                 log.debug(f"资源 {resource_id} 内容为空")
                 return None
@@ -49,9 +65,9 @@ class ImageProcessor:
             if not mime:
                 log.debug(f"资源 {resource_id} 无法识别图片格式，跳过")
                 return None
-            if mime not in DEEPSEEK_SUPPORTED_MIMES:
+            if mime not in SUPPORTED_IMAGE_MIMES:
                 log.debug(
-                    f"资源 {resource_id} 格式 {mime} 不被DeepSeek支持，跳过"
+                    f"资源 {resource_id} 格式 {mime} 不被视觉模型支持，跳过"
                 )
                 return None
             if len(content) > MAX_IMAGE_SIZE:

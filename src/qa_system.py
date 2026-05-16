@@ -402,7 +402,7 @@ class QASystem:
     def _generate_optimized_answer(self, question: str, context: str) -> str:
         """生成优化答案"""
         if self.config["cloud_model"] != "none" and self.config["deepseek_api_key"]:
-            log.info(f"启用deepseek聊天模式")
+            log.info(f"启用云端聊天模式")
             return self._generate_answer_with_deepseek(question, context)
         else:
             log.info(f"启用本地ollama调用的聊天大模型{self.config['chat_model']}")
@@ -463,7 +463,7 @@ class QASystem:
             return answer
 
         except Exception as e:
-            log.error(f"DeepSeek生成答案失败: {e}")
+            log.error(f"云端模型生成答案失败: {e}")
             return f"抱歉，生成答案时出错: {str(e)[:100]}"
 
 # %% [markdown]
@@ -595,7 +595,7 @@ class QASystem:
                 "config": {
                     "embedding_model": self.config["embedding_model"],
                     "chat_model": self.config["chat_model"],
-                    "using_deepseek": self.config["cloud_model"] != "none",
+                    "using_cloud": self.config["cloud_model"] != "none",
                 },
             }
         except:

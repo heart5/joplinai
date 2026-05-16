@@ -77,7 +77,7 @@ class CacheResult:
 
 # %%
 class SQLiteCacheManager:
-    """基于SQLite的高性能缓存管理器，用于DeepSeek增强结果。"""
+    """基于SQLite的高性能缓存管理器，用于AI增强结果。"""
 
 # %% [markdown]
 # ## 验证阈值
@@ -89,10 +89,10 @@ class SQLiteCacheManager:
         VALIDATION_THRESHOLD = 5000  # 验证阈值，可从配置读取
 
 # %% [markdown]
-# ## __init__(self, db_path: str = "data/.deepseek_cache/deepseek_cache.db")
+# ## __init__(self, db_path: str = "data/.enhance_cache/enhance_cache.db")
 
     # %%
-    def __init__(self, db_path: str = "data/.deepseek_cache/deepseek_cache.db"):
+    def __init__(self, db_path: str = "data/.enhance_cache/enhance_cache.db"):
         self.db_path = db_path
         self._init_db()
 

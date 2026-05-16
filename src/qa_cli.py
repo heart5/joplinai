@@ -22,8 +22,8 @@ def parse_args():
         help=f"聊天模型名称（默认：{CONFIG['chat_model']}）",
     )
     parser.add_argument(
-        "--use-deepseek", action="store_true", default=False,
-        help=f"使用DeepSeek API（默认：{CONFIG['enable_deepseek']}）",
+        "--use-cloud", action="store_true", default=False,
+        help=f"使用云端模型（默认：{CONFIG.get('cloud_model', 'deepseek-chat')}）",
     )
     parser.add_argument(
         "--max-notes", type=int, default=CONFIG["max_retrieved_notes"],
@@ -65,7 +65,7 @@ def interactive_mode(qa_system: QASystem):
                 print(f"  对话历史数: {stats['conversation_history_count']}")
                 print(f"  嵌入模型: {stats['config']['embedding_model']}")
                 print(f"  聊天模型: {stats['config']['chat_model']}")
-                print(f"  使用DeepSeek: {stats['config']['using_deepseek']}")
+                print(f"  使用云端模型: {stats['config']['using_cloud']}")
                 continue
             elif question.lower() == "/help":
                 print("\n可用命令:")
@@ -118,7 +118,7 @@ def main():
     from joplinai import CONFIG as joplinai_config
     dynamic_config = {**CONFIG.copy(), **joplinai_config}
     dynamic_config["chat_model"] = args.model
-    dynamic_config["enable_deepseek"] = args.use_deepseek
+    dynamic_config["cloud_model"] = args.use_cloud if args.use_cloud else dynamic_config.get("cloud_model", "deepseek-chat")
     dynamic_config["max_retrieved_notes"] = args.max_notes
 
     log.info("初始化Joplin问答系统...")
