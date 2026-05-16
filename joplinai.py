@@ -256,7 +256,7 @@ def process_note_chunks(
                     log.info(
                         f"笔记《{note.title}》成功获取 {len(images)}/{len(resource_ids)} 张图片"
                     )
-                    from aimod.deepseek_enhancer import ollama_vision_describe
+                    from aimod.note_enhancer import ollama_vision_describe
                     image_descriptions = ollama_vision_describe(
                         images,
                         context=note.body,
@@ -298,7 +298,7 @@ def process_note_chunks(
         enhance_missing = False
         if enhance_enabled:
             enhance_flags = [
-                c.get("metadata", {}).get("deepseek_enhanced", False)
+                c.get("metadata", {}).get("enhanced", False)
                 for c in chunk_dicts
             ]
             enhance_missing = not any(enhance_flags)
@@ -563,7 +563,7 @@ def process_notes_incremental(notebook_title: str, config: Dict, note_ids: List[
     else:
         process_state = load_process_state(config["state_path"])
     # 重置增强调用统计
-    from aimod.deepseek_enhancer import reset_call_stats
+    from aimod.note_enhancer import reset_call_stats
     reset_call_stats()
 
     # 获取强制更新配置
@@ -856,7 +856,7 @@ def process_notes_incremental(notebook_title: str, config: Dict, note_ids: List[
         "process_time": datetime.now().isoformat(),
     }
 
-    from aimod.deepseek_enhancer import get_call_stats
+    from aimod.note_enhancer import get_call_stats
     stats["enhance_stats"] = get_call_stats()
 
     log.info(f"笔记集【{notebook_title}】处理完成。")

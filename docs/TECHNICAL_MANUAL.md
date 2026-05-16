@@ -109,7 +109,7 @@ flowchart LR
         C4["chunk_optimizer.py"]
         C5["text_splitter.py"]
         C6["vector_db_manager.py"]
-        C7["deepseek_enhancer.py"]
+        C7["note_enhancer.py"]
         C8["run_tracker.py"]
         C9["cache_manager.py"]
     end
@@ -162,8 +162,8 @@ flowchart LR
         V1["joplinai.py"] --> V2["text_splitter.py<br/>文本切分"]
         V2 --> V3["chunk_optimizer.py<br/>自适应分块"]
         V3 --> V4["embedding_generator.py<br/>生成嵌入向量"]
-        V4 --> V5["center_client/<br/>查 DeepSeek 缓存"]
-        V5 --> V6["deepseek_enhancer.py<br/>生成摘要/标签"]
+        V4 --> V5["cache_client/<br/>查 AI增强缓存"]
+        V5 --> V6["note_enhancer.py<br/>生成摘要/标签"]
         V6 --> V7["vector_db_manager.py<br/>写入 ChromaDB (TC)"]
         V7 --> V8["run_tracker.py<br/>记录运行历史"]
         V8 --> V9["center_api<br/>(/history/*)"]
@@ -214,8 +214,8 @@ sequenceDiagram
     participant TS as "TextSplitter"
     participant CO as "ChunkOptimizer"
     participant EG as "EmbeddingGenerator"
-    participant DS as "DeepSeekEnhancer"
-    participant CC as "DeepSeekCacheClient"
+    participant DS as "NoteEnhancer"
+    participant CC as "CacheClient"
     participant CA as "center_api (TC)"
     participant VDB as "ChromaDB (TC)"
     participant RT as "RunTracker"
@@ -223,8 +223,8 @@ sequenceDiagram
     CLI->>JP: "获取笔记列表 (imp_nbs)"
     JP-->>CLI: "笔记 JSON"
     CLI->>CLI: "parse_args() 过滤"
-    CLI->>CC: "查询 DeepSeek 缓存"
-    CC->>CA: "HTTP GET /cache/deepseek/query"
+    CLI->>CC: "查询 AI增强缓存"
+    CC->>CA: "HTTP GET /cache/enhance/get"
     CA-->>CC: "缓存命中/未命中"
     CLI->>TS: "文本切分"
     TS->>CO: "自适应分块探测"
@@ -233,8 +233,8 @@ sequenceDiagram
     EG->>VDB: "批量写入向量"
     CLI->>DS: "生成摘要/标签"
     DS-->>CLI: "摘要/标签 JSON"
-    CLI->>CC: "写入 DeepSeek 缓存"
-    CC->>CA: "HTTP POST /cache/deepseek/upsert"
+    CLI->>CC: "写入 AI增强缓存"
+    CC->>CA: "HTTP POST /cache/enhance/set"
     CLI->>RT: "记录运行历史"
     RT->>CA: "HTTP POST /history/record"
     CLI-->>CLI: "输出报告"
@@ -350,7 +350,7 @@ erDiagram
         text updated_at
     }
 
-    deepseek_cache {
+    enhance_cache {
         int id PK
         text model
         text operation
@@ -685,7 +685,7 @@ flowchart TD
 
     subgraph LAYER2["AI 核心"]
         M4["aimod/embedding_generator.py"]
-        M5["aimod/deepseek_enhancer.py"]
+        M5["aimod/note_enhancer.py"]
         M6["aimod/run_tracker.py"]
     end
 

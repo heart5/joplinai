@@ -86,7 +86,7 @@ def _init_db():
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("""
-        CREATE TABLE IF NOT EXISTS deepseek_cache (
+        CREATE TABLE IF NOT EXISTS enhance_cache (
             cache_key TEXT PRIMARY KEY,
             content_hash TEXT NOT NULL,
             task TEXT NOT NULL,
@@ -99,8 +99,8 @@ def _init_db():
             validation_result TEXT
         )
     """)
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_ds_hash_task ON deepseek_cache(content_hash, task)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_ds_last_accessed ON deepseek_cache(last_accessed)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_enh_hash_task ON enhance_cache(content_hash, task)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_enh_last_accessed ON enhance_cache(last_accessed)")
     conn.execute("""
         CREATE TABLE IF NOT EXISTS probe_cache (
             text_md5      TEXT PRIMARY KEY,

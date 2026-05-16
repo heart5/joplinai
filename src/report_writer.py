@@ -27,7 +27,7 @@ class ReportWriter:
     def __init__(self, config: Dict, history_client=None, cache_client=None, probe_client=None):
         self.config = config
         self.history = history_client
-        self.cache = cache_client      # DeepSeekCacheClient
+        self.cache = cache_client      # CacheClient
         self.probe = probe_client      # ProbeCacheClient
 
     # %% [markdown]
@@ -206,7 +206,7 @@ class ReportWriter:
 
     # %%
     def generate_cache_report(self) -> str:
-        """生成 DeepSeek 缓存分析报告"""
+        """生成 AI增强缓存分析报告"""
         if not self.cache:
             return "*缓存报告：cache_client 未配置*\n"
 
@@ -214,7 +214,7 @@ class ReportWriter:
         if not report:
             return "*缓存报告数据暂不可用*\n"
 
-        md_lines = ["# 📊 DeepSeek 缓存分析报告"]
+        md_lines = ["# 📊 AI增强缓存分析报告"]
         md_lines.append(f"**生成时间**: {datetime.now().isoformat()}")
         md_lines.append("")
 
@@ -420,7 +420,7 @@ class ReportWriter:
         """将报告写入 Joplin 笔记
 
         config_key 用于区分不同报告类型，避免 note_id 缓存冲突。
-        默认 "vectorization_report"，缓存报告用 "deepseek_cache_report" / "probe_cache_report"。
+        默认 "vectorization_report"，缓存报告用 "enhance_cache_report" / "probe_cache_report"。
         """
         try:
             with pathmagic.Context():
@@ -481,7 +481,7 @@ def _init_clients():
     import pathmagic
     with pathmagic.Context():
         from func.jpfuncs import getinivaluefromcloud
-        from aimod.deepseek_client import DeepSeekCacheClient
+        from aimod.cache_client import CacheClient
         from aimod.probe_client import ProbeCacheClient
 
     remote_url = getinivaluefromcloud("joplinai", "joplinai_center_url")
@@ -491,7 +491,7 @@ def _init_clients():
     if not api_key:
         raise RuntimeError("未配置 joplinai_center_api_key")
 
-    cache_client = DeepSeekCacheClient(remote_url, api_key)
+    cache_client = CacheClient(remote_url, api_key)
     probe_client = ProbeCacheClient(remote_url, api_key)
     return cache_client, probe_client
 
@@ -502,7 +502,7 @@ def main():
     parser = argparse.ArgumentParser(description="Joplinai 缓存报告生成器")
     parser.add_argument(
         "--type", type=str, default="all",
-        choices=["deepseek_cache", "probe_cache", "all"],
+        choices=["enhance_cache", "probe_cache", "all"],
         help="报告类型 (default: all)",
     )
     parser.add_argument(
@@ -522,15 +522,15 @@ def main():
     writer = ReportWriter(config, cache_client=cache_client, probe_client=probe_client)
 
     report_types = (
-        ["deepseek_cache", "probe_cache"] if args.type == "all" else [args.type]
+        ["enhance_cache", "probe_cache"] if args.type == "all" else [args.type]
     )
 
     for rtype in report_types:
-        if rtype == "deepseek_cache":
-            log.info("生成 DeepSeek 缓存报告...")
+        if rtype == "enhance_cache":
+            log.info("生成 AI增强缓存报告...")
             content = writer.generate_cache_report()
-            title = "DeepSeek缓存分析报告"
-            config_key = "deepseek_cache_report"
+            title = "AI增强缓存分析报告"
+            config_key = "enhance_cache_report"
             if writer.cache:
                 try:
                     stats = writer.cache.get_report()
@@ -539,13 +539,13 @@ def main():
                         time_ana = stats.get("time_analysis", {}) or {}
                         growth = stats.get("growth_trends", {}) or {}
                         log.info(
-                            f"DeepSeek缓存统计: 总条目={basic.get('total_entries', 0)}, "
+                            f"AI增强缓存统计: 总条目={basic.get('total_entries', 0)}, "
                             f"总命中={basic.get('total_hits', 0)}, "
                             f"近期活跃(7天)={time_ana.get('recent_active', 0)}, "
                             f"预测周增长={growth.get('predicted_weekly_growth', 0)}"
                         )
                 except Exception as e:
-                    log.warning(f"获取 DeepSeek 缓存统计失败: {e}")
+                    log.warning(f"获取 AI增强缓存统计失败: {e}")
         else:
             log.info("生成探测缓存报告...")
             content = writer.generate_probe_report()

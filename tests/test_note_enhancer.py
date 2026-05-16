@@ -1,6 +1,6 @@
-"""deepseek_enhancer 缓存流程测试 — API 调用全部 mock。
+"""note_enhancer 缓存流程测试 — API 调用全部 mock。
 
-注意：aimod.deepseek_enhancer 导入链会触发 func/datatools 模块级副作用，
+注意：aimod.note_enhancer 导入链会触发 func/datatools 模块级副作用，
 故所有 SUT 导入均延迟到测试函数内部。
 """
 from unittest.mock import MagicMock, patch
@@ -14,7 +14,7 @@ from aimod.cache_manager import CacheResult
 class TestCacheFlow:
     @pytest.fixture
     def de(self):
-        import aimod.deepseek_enhancer as mod
+        import aimod.note_enhancer as mod
         return mod
 
     def test_no_api_key_returns_none(self, de, monkeypatch):
@@ -91,7 +91,7 @@ class TestCacheFlow:
 class TestValidationAsync:
     @pytest.fixture
     def de(self):
-        import aimod.deepseek_enhancer as mod
+        import aimod.note_enhancer as mod
         return mod
 
     def test_validation_updates_cache_on_change(self, de, monkeypatch):
@@ -177,7 +177,7 @@ class TestValidationAsync:
 
 class TestCallAPI:
     def test_unsupported_task_returns_none(self, monkeypatch):
-        import aimod.deepseek_enhancer as de
+        import aimod.note_enhancer as de
 
         monkeypatch.setattr(de, "DEEPSEEK_API_KEY", "fake-key")
         result = de._call_deepseek_api_directly("text", "invalid_task", "model", 1)

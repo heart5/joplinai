@@ -36,7 +36,7 @@ import requests
 with pathmagic.Context():
     try:
         from aimod.chunk_optimizer import AdaptiveChunkOptimizer
-        from aimod.deepseek_enhancer import enhance_note
+        from aimod.note_enhancer import enhance_note
         from aimod.text_preprocessor import TextPreprocessor
         from aimod.text_splitter import ContextAwareSplitter
         from func.datatools import compute_content_hash
@@ -254,16 +254,16 @@ class EmbeddingGenerator:
         self.text_prep.chunk_size = self.chunk_size
 
 # %% [markdown]
-# ## enhance_by_deepseek_for_summary_tags(chunk_content: str, note_tags: str, config: Dict)
+# ## enhance_chunk_metadata(chunk_content: str, note_tags: str, config: Dict)
 
     # %%
-    def enhance_by_deepseek_for_summary_tags(self, chunk_content: str, note_tags: str, config: Dict):
+    def enhance_chunk_metadata(self, chunk_content: str, note_tags: str, config: Dict):
         """增强生成小结和标签（provider-agnostic: cloud/local/none）
 
         Returns:
-            enhanced_metadata: 增强后的元数据字典，包含 deepseek_enhanced 标记
+            enhanced_metadata: 增强后的元数据字典，包含 enhanced 标记
         """
-        enhanced_metadata = {"deepseek_enhanced": False}
+        enhanced_metadata = {"enhanced": False}
 
         cloud_model = config.get("cloud_model", "deepseek-chat")
         local_model = config.get("local_model", "qwen2.5:1.5b")
@@ -275,7 +275,7 @@ class EmbeddingGenerator:
             model=cloud_model if summary_provider == "cloud" else local_model,
         )
         if summary:
-            enhanced_metadata["deepseek_enhanced"] = True
+            enhanced_metadata["enhanced"] = True
             enhanced_metadata["chunk_summary"] = summary
         else:
             enhanced_metadata["chunk_summary"] = ""
@@ -287,7 +287,7 @@ class EmbeddingGenerator:
             model=cloud_model if tags_provider == "cloud" else local_model,
         )
         if tags_str:
-            enhanced_metadata["deepseek_enhanced"] = True
+            enhanced_metadata["enhanced"] = True
 
         if tags_str:
             extracted_tags = self._clean_tags(tags_str)
@@ -807,15 +807,15 @@ class EmbeddingGenerator:
                 "note_author": note_meta['note_author'],
                 "note_type": note_meta['note_type'],
             }
-            # DeepSeek 增强生成摘要和标签
+            # AI增强生成摘要和标签
             enhanced_metadata = {}
             try:
-                enhanced_metadata = self.enhance_by_deepseek_for_summary_tags(
+                enhanced_metadata = self.enhance_chunk_metadata(
                     chunk_content, note_tags, self.config,
                 )
             except Exception as e:
                 log.error(
-                    f"[DeepSeek增强失败] 笔记《{note_title}》块{block_number} "
+                    f"[AI增强失败] 笔记《{note_title}》块{block_number} "
                     f"（长度：{len(chunk_content)}字符）: {e}",
                     exc_info=True,
                 )

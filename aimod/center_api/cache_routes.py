@@ -14,7 +14,7 @@
 # ---
 
 # %% [markdown]
-# # Cache Blueprint — DeepSeek 缓存 + 探测缓存端点
+# # Cache Blueprint — 增强缓存 + 探测缓存端点
 
 # %%
 import json
@@ -44,14 +44,14 @@ cache_bp = Blueprint("cache", __name__)
 
 
 # %% [markdown]
-# # DeepSeek 缓存操作
+# # 增强缓存操作
 
 # %%
-def deepseek_cache_get(content_hash: str, task: str, model: str = "") -> dict:
+def enhance_cache_get(content_hash: str, task: str, model: str = "") -> dict:
     cache_key = f"{content_hash}_{task}_{model}" if model else f"{content_hash}_{task}"
     conn = _init_db()
     row = conn.execute(
-        "SELECT result, hit_count, total_hits FROM deepseek_cache "
+        "SELECT result, hit_count, total_hits FROM enhance_cache "
         "WHERE cache_key=? AND (julianday('now') - julianday(created_at)) < 90",
         (cache_key,),
     ).fetchone()
@@ -68,13 +68,13 @@ def deepseek_cache_get(content_hash: str, task: str, model: str = "") -> dict:
 
     if should_validate:
         conn.execute(
-            "UPDATE deepseek_cache SET hit_count=0, total_hits=?, last_accessed=?, "
+            "UPDATE enhance_cache SET hit_count=0, total_hits=?, last_accessed=?, "
             "last_validated_at=?, validation_result='pending' WHERE cache_key=?",
             (new_total_hits, now_iso, now_iso, cache_key),
         )
     else:
         conn.execute(
-            "UPDATE deepseek_cache SET hit_count=?, total_hits=?, last_accessed=? WHERE cache_key=?",
+            "UPDATE enhance_cache SET hit_count=?, total_hits=?, last_accessed=? WHERE cache_key=?",
             (new_hit_count, new_total_hits, now_iso, cache_key),
         )
     conn.commit()
@@ -89,12 +89,12 @@ def deepseek_cache_get(content_hash: str, task: str, model: str = "") -> dict:
     }
 
 
-def deepseek_cache_set(content_hash: str, task: str, result: str, model: str = ""):
+def enhance_cache_set(content_hash: str, task: str, result: str, model: str = ""):
     cache_key = f"{content_hash}_{task}_{model}" if model else f"{content_hash}_{task}"
     now_iso = datetime.now().isoformat()
     conn = _init_db()
     conn.execute(
-        "INSERT OR REPLACE INTO deepseek_cache "
+        "INSERT OR REPLACE INTO enhance_cache "
         "(cache_key, content_hash, task, result, created_at, last_accessed, "
         "last_validated_at, hit_count, total_hits, validation_result) "
         "VALUES (?,?,?,?,?,?,NULL,0,0,NULL)",
@@ -104,42 +104,42 @@ def deepseek_cache_set(content_hash: str, task: str, result: str, model: str = "
     conn.close()
 
 
-def deepseek_cache_validate(cache_key: str, new_result: Optional[str], success: bool):
+def enhance_cache_validate(cache_key: str, new_result: Optional[str], success: bool):
     conn = _init_db()
     now_iso = datetime.now().isoformat()
     if not success:
         conn.execute(
-            "UPDATE deepseek_cache SET last_validated_at=?, validation_result='failed' WHERE cache_key=?",
+            "UPDATE enhance_cache SET last_validated_at=?, validation_result='failed' WHERE cache_key=?",
             (now_iso, cache_key),
         )
     elif new_result is None:
         conn.execute(
-            "UPDATE deepseek_cache SET last_validated_at=?, validation_result='valid' WHERE cache_key=?",
+            "UPDATE enhance_cache SET last_validated_at=?, validation_result='valid' WHERE cache_key=?",
             (now_iso, cache_key),
         )
     else:
         conn.execute(
-            "UPDATE deepseek_cache SET result=?, created_at=?, last_validated_at=?, validation_result='updated' WHERE cache_key=?",
+            "UPDATE enhance_cache SET result=?, created_at=?, last_validated_at=?, validation_result='updated' WHERE cache_key=?",
             (new_result, now_iso, now_iso, cache_key),
         )
     conn.commit()
     conn.close()
 
 
-def deepseek_cache_stats(cache_key: str = None) -> dict:
+def enhance_cache_stats(cache_key: str = None) -> dict:
     conn = _init_db()
     conn.row_factory = sqlite3.Row
     if cache_key:
-        row = conn.execute("SELECT * FROM deepseek_cache WHERE cache_key=?", (cache_key,)).fetchone()
+        row = conn.execute("SELECT * FROM enhance_cache WHERE cache_key=?", (cache_key,)).fetchone()
         conn.close()
         return dict(row) if row else {}
     else:
         row = conn.execute(
-            "SELECT COUNT(*) as total, SUM(total_hits) as total_hits, SUM(hit_count) as current_hits FROM deepseek_cache"
+            "SELECT COUNT(*) as total, SUM(total_hits) as total_hits, SUM(hit_count) as current_hits FROM enhance_cache"
         ).fetchone()
         stats = dict(row) if row else {}
         rows = conn.execute(
-            "SELECT validation_result, COUNT(*) as count FROM deepseek_cache "
+            "SELECT validation_result, COUNT(*) as count FROM enhance_cache "
             "WHERE validation_result IS NOT NULL GROUP BY validation_result"
         ).fetchall()
         stats["validation_breakdown"] = {r["validation_result"]: r["count"] for r in rows}
@@ -147,43 +147,43 @@ def deepseek_cache_stats(cache_key: str = None) -> dict:
         return stats
 
 
-def deepseek_cache_report() -> dict:
+def enhance_cache_report() -> dict:
     conn = _init_db()
     conn.row_factory = sqlite3.Row
     report = {}
-    row = conn.execute("SELECT COUNT(*) as total FROM deepseek_cache").fetchone()
+    row = conn.execute("SELECT COUNT(*) as total FROM enhance_cache").fetchone()
     report["total"] = row["total"] if row else 0
     row = conn.execute(
-        "SELECT COUNT(*) as active FROM deepseek_cache "
+        "SELECT COUNT(*) as active FROM enhance_cache "
         "WHERE last_accessed >= datetime('now', '-7 days')"
     ).fetchone()
     report["recent_active"] = row["active"] if row else 0
     report["validation_threshold"] = VALIDATION_THRESHOLD
     report["avg_hits"] = conn.execute(
-        "SELECT AVG(total_hits) FROM deepseek_cache"
+        "SELECT AVG(total_hits) FROM enhance_cache"
     ).fetchone()[0] or 0
 
     report["by_task"] = [dict(r) for r in conn.execute(
-        "SELECT task, COUNT(*) as count FROM deepseek_cache GROUP BY task"
+        "SELECT task, COUNT(*) as count FROM enhance_cache GROUP BY task"
     ).fetchall()]
     report["validation_status"] = [dict(r) for r in conn.execute(
-        "SELECT validation_result, COUNT(*) as count FROM deepseek_cache "
+        "SELECT validation_result, COUNT(*) as count FROM enhance_cache "
         "WHERE validation_result IS NOT NULL GROUP BY validation_result"
     ).fetchall()]
     report["hit_distribution"] = [dict(r) for r in conn.execute(
         "SELECT CASE WHEN total_hits<10 THEN '<10' WHEN total_hits<100 THEN '10-100' "
-        "ELSE '>100' END as range, COUNT(*) as count FROM deepseek_cache GROUP BY range"
+        "ELSE '>100' END as range, COUNT(*) as count FROM enhance_cache GROUP BY range"
     ).fetchall()]
 
     daily = [dict(r) for r in conn.execute("""
         SELECT DATE(created_at) as date, COUNT(*) as new_entries
-        FROM deepseek_cache WHERE DATE(created_at) >= DATE('now', '-30 days')
+        FROM enhance_cache WHERE DATE(created_at) >= DATE('now', '-30 days')
         GROUP BY DATE(created_at) ORDER BY date
     """).fetchall()]
     cum = [dict(r) for r in conn.execute("""
         SELECT DATE(created_at) as date,
                SUM(COUNT(*)) OVER (ORDER BY DATE(created_at)) as cumulative
-        FROM deepseek_cache WHERE DATE(created_at) >= DATE('now', '-30 days')
+        FROM enhance_cache WHERE DATE(created_at) >= DATE('now', '-30 days')
         GROUP BY DATE(created_at) ORDER BY date
     """).fetchall()]
     avg_daily = sum(d["new_entries"] for d in daily) / len(daily) if daily else 0
@@ -312,41 +312,41 @@ def probe_cache_report() -> dict:
 # # Flask 端点
 
 # %%
-@cache_bp.route("/cache/deepseek/get", methods=["POST"])
+@cache_bp.route("/cache/enhance/get", methods=["POST"])
 @require_auth
-def api_ds_cache_get():
+def api_enh_cache_get():
     data = request.get_json(force=True)
-    return jsonify(deepseek_cache_get(data["content_hash"], data["task"], data.get("model", "")))
+    return jsonify(enhance_cache_get(data["content_hash"], data["task"], data.get("model", "")))
 
 
-@cache_bp.route("/cache/deepseek/set", methods=["POST"])
+@cache_bp.route("/cache/enhance/set", methods=["POST"])
 @require_auth
-def api_ds_cache_set():
+def api_enh_cache_set():
     data = request.get_json(force=True)
-    deepseek_cache_set(data["content_hash"], data["task"], data["result"], data.get("model", ""))
+    enhance_cache_set(data["content_hash"], data["task"], data["result"], data.get("model", ""))
     log.info(f"缓存写入: task={data['task']}")
     return jsonify({"ok": True})
 
 
-@cache_bp.route("/cache/deepseek/validate", methods=["POST"])
+@cache_bp.route("/cache/enhance/validate", methods=["POST"])
 @require_auth
-def api_ds_cache_validate():
+def api_enh_cache_validate():
     data = request.get_json(force=True)
-    deepseek_cache_validate(data["cache_key"], data.get("new_result"), data["success"])
+    enhance_cache_validate(data["cache_key"], data.get("new_result"), data["success"])
     return jsonify({"ok": True})
 
 
-@cache_bp.route("/cache/deepseek/stats")
+@cache_bp.route("/cache/enhance/stats")
 @require_auth
-def api_ds_cache_stats():
+def api_enh_cache_stats():
     cache_key = request.args.get("cache_key")
-    return jsonify(deepseek_cache_stats(cache_key))
+    return jsonify(enhance_cache_stats(cache_key))
 
 
-@cache_bp.route("/cache/deepseek/report")
+@cache_bp.route("/cache/enhance/report")
 @require_auth
-def api_ds_cache_report():
-    return jsonify(deepseek_cache_report())
+def api_enh_cache_report():
+    return jsonify(enhance_cache_report())
 
 
 @cache_bp.route("/cache/probe/get/<text_md5>", methods=["GET"])
