@@ -357,37 +357,38 @@ def _call_ollama_local(text: str, task: str, model: str) -> Optional[str]:
 
 # %% [markdown]
 # ## local_process_note(text, task, model, use_cache) -> Optional[str]
-#
+
+# %%
 # 本地/云端模型调用统计（供向量化运行结束汇总）
-# _call_stats = {"summary": {"local": 0, "cloud": 0}, "tags": {"local": 0, "cloud": 0}}
-#
-#
-# def get_call_stats() -> dict:
-#     """返回当前运行的本地/云端模型调用统计"""
-#     return {
-#         "summary": dict(_call_stats["summary"]),
-#         "tags": dict(_call_stats["tags"]),
-#     }
-#
-#
-# def reset_call_stats():
-#     """重置调用统计（新运行开始时调用）"""
-#     _call_stats["summary"]["local"] = 0
-#     _call_stats["summary"]["cloud"] = 0
-#     _call_stats["tags"]["local"] = 0
-#     _call_stats["tags"]["cloud"] = 0
-#
-#
+_call_stats = {"summary": {"local": 0, "cloud": 0}, "tags": {"local": 0, "cloud": 0}}
+
+
+def get_call_stats() -> dict:
+    """返回当前运行的本地/云端模型调用统计"""
+    return {
+        "summary": dict(_call_stats["summary"]),
+        "tags": dict(_call_stats["tags"]),
+    }
+
+
+def reset_call_stats():
+    """重置调用统计（新运行开始时调用）"""
+    _call_stats["summary"]["local"] = 0
+    _call_stats["summary"]["cloud"] = 0
+    _call_stats["tags"]["local"] = 0
+    _call_stats["tags"]["cloud"] = 0
+
+
 # 保留旧名兼容
-# def get_local_call_stats() -> dict:
-#     """返回当前运行的本地模型调用统计"""
-#     return {task: _call_stats[task]["local"] for task in _call_stats}
-#
-#
-# def reset_local_call_stats():
-#     """重置本地调用统计"""
-#     for task in _call_stats:
-#         _call_stats[task]["local"] = 0
+def get_local_call_stats() -> dict:
+    """返回当前运行的本地模型调用统计"""
+    return {task: _call_stats[task]["local"] for task in _call_stats}
+
+
+def reset_local_call_stats():
+    """重置本地调用统计"""
+    for task in _call_stats:
+        _call_stats[task]["local"] = 0
 
 # %%
 def local_process_note(
