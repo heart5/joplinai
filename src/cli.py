@@ -132,6 +132,10 @@ def main() -> None:
 
     note_ids_str = args.note_ids or getinivaluefromcloud("joplinai", "imp_note_ids") or ""
 
+    # 区分用户意图：显式传参 vs 默认全量模式
+    user_explicit_notebooks = args.notebook_titles != CONFIG["notebook_titles"]
+    user_explicit_note_ids = bool(args.note_ids)
+
     log.info(
         f"动态配置：模型={dynamic_config['embedding_model']}, "
         f"处理状态文件={dynamic_config['state_path']}, "
@@ -224,25 +228,29 @@ def main() -> None:
                 checkpoint = json.load(f)
             notebook_titles = notebook_titles[checkpoint["last_processed_index"]:]
 
-        for i, notebook_title in enumerate(notebook_titles, 1):
-            log.info(f"开始处理笔记本（{i}/{len(notebook_titles)}）: 【{notebook_title}】…………")
-            stats = process_notes_incremental(
-                notebook_title=notebook_title, config=dynamic_config
-            )
-            task_reporter.add_notebook_record(notebook_title, stats)
+        if not user_explicit_note_ids:
+            for i, notebook_title in enumerate(notebook_titles, 1):
+                log.info(f"开始处理笔记本（{i}/{len(notebook_titles)}）: 【{notebook_title}】…………")
+                stats = process_notes_incremental(
+                    notebook_title=notebook_title, config=dynamic_config
+                )
+                task_reporter.add_notebook_record(notebook_title, stats)
 
-            if i % 2 == 0:
-                checkpoint_data = {
-                    "notebook": notebook_title,
-                    "last_processed_index": i,
-                    "timestamp": datetime.now().isoformat(),
-                }
-                with open(checkpoint_file, "w") as f:
-                    json.dump(checkpoint_data, f)
+                if i % 2 == 0:
+                    checkpoint_data = {
+                        "notebook": notebook_title,
+                        "last_processed_index": i,
+                        "timestamp": datetime.now().isoformat(),
+                    }
+                    with open(checkpoint_file, "w") as f:
+                        json.dump(checkpoint_data, f)
 
-        log.info("===== 所有笔记本处理完成 =====")
+            log.info("===== 所有笔记本处理完成 =====")
+        else:
+            log.info("===== 显式指定 --note_ids，跳过物理笔记本处理 =====")
 
-        if note_ids_str.strip():
+        skip_virtual = user_explicit_notebooks and not user_explicit_note_ids
+        if note_ids_str.strip() and not skip_virtual:
             note_ids = [
                 nid.strip()
                 for nid in re.split(r"[,，]", note_ids_str.strip())
@@ -255,6 +263,8 @@ def main() -> None:
                 )
                 task_reporter.add_notebook_record("[指定笔记]", v_stats)
                 log.info("虚拟笔记集处理完成。")
+        elif skip_virtual:
+            log.info("显式指定 --notebook_titles，跳过虚拟笔记集【[指定笔记]】。")
 
         if is_batch:
             new_index = resume_index + len(notebook_titles)
