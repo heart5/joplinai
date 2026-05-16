@@ -24,6 +24,7 @@ import os
 import time
 from typing import Optional
 
+import ollama
 import requests
 
 # %%
@@ -86,6 +87,12 @@ __all__ = [
     "deepseek_describe_images",
     "deepseek_process_note_vision",
     "ollama_vision_describe",
+    "local_process_note",
+    "enhance_note",
+    "get_call_stats",
+    "reset_call_stats",
+    "get_local_call_stats",
+    "reset_local_call_stats",
 ]
 
 def get_cache_manager():
@@ -140,7 +147,7 @@ def deepseek_process_note(
     cache_manager = get_cache_manager()
 
     # 1. 查询缓存（此时cache_manager只返回数据，不调用API）
-    cache_result = cache_manager.get(content_hash, task)
+    cache_result = cache_manager.get(content_hash, task, model)
 
     if cache_result.content is not None:
         # 缓存命中
@@ -172,7 +179,7 @@ def deepseek_process_note(
 
     if new_result:
         # 将新结果保存到缓存
-        cache_manager.set(content_hash, task, new_result)
+        cache_manager.set(content_hash, task, new_result, model)
         # log.info(f"deepseek增强新结果已缓存: {content_hash[:12]}")
 
     return new_result
@@ -247,11 +254,12 @@ def _call_deepseek_api_directly(
         "summary": "用1-3句话总结以下笔记核心内容，突出主题和结论：\n%s",
         "tags": """请从以下文本中提取3-5个核心关键词作为标签。
     要求：
-    1. 每个标签必须是2-6个字的简短名词、专业术语或关键地名
-    2. 避免使用长短语和完整的句子
-    3. 用英文逗号分隔，不要编号
-    4. 优先提取文本中反复出现的关键概念、实体和**关键地点**
-    5. 对于地名，仅提取在文中作为核心要素出现的地点（如事件发生地、主要研究对象所在地、重要机构所在地等）
+    1. 请用中文关键词
+    2. 每个标签必须是2-6个字的简短名词、专业术语或关键地名
+    3. 避免使用长短语和完整的句子
+    4. 用英文逗号分隔，不要编号
+    5. 优先提取文本中反复出现的关键概念、实体和**关键地点**
+    6. 对于地名，仅提取在文中作为核心要素出现的地点（如事件发生地、主要研究对象所在地、重要机构所在地等）
     
     文本内容：
     %s
@@ -296,6 +304,158 @@ def _call_deepseek_api_directly(
                 f"deepseek增强大模型调用失败({attempt + 1}/{max_retries}): {str(e)[:100]}"
             )
             time.sleep(2**attempt)
+    return None
+
+
+# %% [markdown]
+# ## _call_ollama_local(text: str, task: str, model: str) -> Optional[str]
+
+# %%
+def _call_ollama_local(text: str, task: str, model: str) -> Optional[str]:
+    """本地 Ollama 模型处理标签/摘要，复用与 DeepSeek 相同的 prompt"""
+    prompts = {
+        "summary": "用1-3句话总结以下笔记核心内容，突出主题和结论：\n%s",
+        "tags": """请从以下文本中提取3-5个核心关键词作为标签。
+    要求：
+    1. 请用中文关键词
+    2. 每个标签必须是2-6个字的简短名词、专业术语或关键地名
+    3. 避免使用长短语和完整的句子
+    4. 用英文逗号分隔，不要编号
+    5. 优先提取文本中反复出现的关键概念、实体和**关键地点**
+    6. 对于地名，仅提取在文中作为核心要素出现的地点（如事件发生地、主要研究对象所在地、重要机构所在地等）
+
+    文本内容：
+    %s
+
+    请直接输出标签，不要有其他说明。""",
+    }
+
+    if task not in prompts:
+        log.error(f"本地模型不支持的任务类型: {task}")
+        return None
+
+    prompt = prompts[task] % text[:8000]
+
+    for attempt in range(2):
+        try:
+            response = ollama.chat(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                options={"temperature": 0.3, "num_predict": 500},
+            )
+            result = response["message"]["content"].strip()
+            log.info(f"本地模型 {model}/{task} 完成，输出 {len(result)} 字符")
+            return result
+        except Exception as e:
+            if attempt == 0:
+                log.warning(f"本地Ollama处理失败({model}/{task}), 重试中: {e}")
+                time.sleep(3)
+            else:
+                log.error(f"本地Ollama处理失败({model}/{task}): {e}")
+                return None
+
+
+# %% [markdown]
+# ## local_process_note(text, task, model, use_cache) -> Optional[str]
+
+# 本地/云端模型调用统计（供向量化运行结束汇总）
+_call_stats = {"summary": {"local": 0, "cloud": 0}, "tags": {"local": 0, "cloud": 0}}
+
+
+def get_call_stats() -> dict:
+    """返回当前运行的本地/云端模型调用统计"""
+    return {
+        "summary": dict(_call_stats["summary"]),
+        "tags": dict(_call_stats["tags"]),
+    }
+
+
+def reset_call_stats():
+    """重置调用统计（新运行开始时调用）"""
+    _call_stats["summary"]["local"] = 0
+    _call_stats["summary"]["cloud"] = 0
+    _call_stats["tags"]["local"] = 0
+    _call_stats["tags"]["cloud"] = 0
+
+
+# 保留旧名兼容
+def get_local_call_stats() -> dict:
+    """返回当前运行的本地模型调用统计"""
+    return {task: _call_stats[task]["local"] for task in _call_stats}
+
+
+def reset_local_call_stats():
+    """重置本地调用统计"""
+    for task in _call_stats:
+        _call_stats[task]["local"] = 0
+
+
+# %%
+def local_process_note(
+    text: str,
+    task: str = "summary",
+    model: str = "qwen2.5:1.5b",
+    use_cache: bool = True,
+) -> Optional[str]:
+    """本地 Ollama 模型处理笔记（标签/摘要），支持缓存。
+
+    与 deepseek_process_note 相同的接口，但使用本地 Ollama 模型。
+    """
+    if not use_cache:
+        return _call_ollama_local(text, task, model)
+
+    content_hash = compute_content_hash(text[:8000])
+    cache_manager = get_cache_manager()
+
+    cache_result = cache_manager.get(content_hash, task, model)
+    if cache_result.content is not None:
+        return cache_result.content
+
+    result = _call_ollama_local(text, task, model)
+    if result:
+        cache_manager.set(content_hash, task, result, model)
+        if task in _call_stats:
+            _call_stats[task]["local"] += 1
+    return result
+
+
+# %% [markdown]
+# ## enhance_note(text, task, provider, model, use_cache) -> Optional[str]
+
+# %%
+def enhance_note(
+    text: str,
+    task: str = "summary",
+    provider: str = "cloud",
+    model: str = "",
+    use_cache: bool = True,
+) -> Optional[str]:
+    """统一增强入口：根据 provider 路由到本地或云端模型。
+
+    Args:
+        text: 笔记文本
+        task: "summary" 或 "tags"
+        provider: "local" / "cloud" / "none"
+        model: 模型名（cloud 默认 deepseek-chat，local 默认 qwen2.5:1.5b）
+        use_cache: 是否使用缓存
+    """
+    if provider == "none":
+        return None
+
+    if provider == "cloud":
+        if not model:
+            model = DEFAULT_CHAT_MODEL
+        result = deepseek_process_note(text, task=task, model=model, use_cache=use_cache)
+        if result and task in _call_stats:
+            _call_stats[task]["cloud"] += 1
+        return result
+
+    if provider == "local":
+        if not model:
+            model = "qwen2.5:1.5b"
+        return local_process_note(text, task=task, model=model, use_cache=use_cache)
+
+    log.error(f"enhance_note 不支持的 provider: {provider}")
     return None
 
 
@@ -533,7 +693,7 @@ def ollama_vision_describe(
                     "images": [img_data["b64"]],
                     "stream": False,
                 },
-                timeout=120,
+                timeout=300,
             )
             if response.status_code == 200:
                 content = response.json()["message"]["content"].strip()

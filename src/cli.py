@@ -66,14 +66,16 @@ def parse_args():
         help=f"并发数（默认：{CONFIG['max_workers']}）",
     )
     parser.add_argument(
-        "--enable_deepseek_summary", action="store_true",
-        default=CONFIG["enable_deepseek_summary"],
-        help=f"开启deepseek摘要支持（默认：{CONFIG['enable_deepseek_summary']}）",
+        "--summary_model", type=str,
+        default=CONFIG.get("summary_model", "cloud"),
+        choices=["cloud", "local", "none"],
+        help=f"摘要模型: cloud/local/none（默认：{CONFIG.get('summary_model', 'cloud')}）",
     )
     parser.add_argument(
-        "--enable_deepseek_tags", action="store_true",
-        default=CONFIG["enable_deepseek_tags"],
-        help=f"开启deepseek标签支持（默认：{CONFIG['enable_deepseek_tags']}）",
+        "--tags_model", type=str,
+        default=CONFIG.get("tags_model", "cloud"),
+        choices=["cloud", "local", "none"],
+        help=f"标签模型: cloud/local/none（默认：{CONFIG.get('tags_model', 'cloud')}）",
     )
     parser.add_argument(
         "--enable_force_update", action="store_true",
@@ -112,8 +114,8 @@ def main() -> None:
     )
 
     dynamic_config["max_workers"] = args.workers
-    dynamic_config["enable_deepseek_summary"] = args.enable_deepseek_summary
-    dynamic_config["enable_deepseek_tags"] = args.enable_deepseek_tags
+    dynamic_config["summary_model"] = args.summary_model
+    dynamic_config["tags_model"] = args.tags_model
     if args.enable_force_update:
         dynamic_config["force_update"] = True
     else:
@@ -140,8 +142,8 @@ def main() -> None:
         f"笔记本={dynamic_config['notebook_titles']}, "
         f"指定笔记ID={'有' if note_ids_str else '无'}, "
         f"并发数={dynamic_config['max_workers']}，"
-        f"使能deepseek摘要功能为{dynamic_config['enable_deepseek_summary']}，"
-        f"使能deepseek标签功能为{dynamic_config['enable_deepseek_tags']}，"
+        f"摘要模型={dynamic_config['summary_model']}，"
+        f"标签模型={dynamic_config['tags_model']}，"
         f"强制更新为{dynamic_config['force_update']}"
     )
 

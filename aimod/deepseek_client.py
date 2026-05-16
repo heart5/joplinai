@@ -66,9 +66,10 @@ class DeepSeekCacheClient:
             log.warning(f"远程数据中心 {method} {path} 失败: {e}")
         return None
 
-    def get(self, content_hash: str, task: str) -> CacheResult:
+    def get(self, content_hash: str, task: str, model: str = "") -> CacheResult:
         resp = self._request(
-            "POST", "/cache/deepseek/get", json={"content_hash": content_hash, "task": task}
+            "POST", "/cache/deepseek/get",
+            json={"content_hash": content_hash, "task": task, "model": model},
         )
         if resp is not None:
             data = resp.json()
@@ -80,16 +81,16 @@ class DeepSeekCacheClient:
                     current_hit_count=data["current_hit_count"],
                     total_hits=data["total_hits"],
                 )
-        return self.local.get(content_hash, task)
+        return self.local.get(content_hash, task, model)
 
-    def set(self, content_hash: str, task: str, result: str):
+    def set(self, content_hash: str, task: str, result: str, model: str = ""):
         if self._request(
             "POST",
             "/cache/deepseek/set",
-            json={"content_hash": content_hash, "task": task, "result": result},
+            json={"content_hash": content_hash, "task": task, "result": result, "model": model},
         ):
             return
-        self.local.set(content_hash, task, result)
+        self.local.set(content_hash, task, result, model)
 
     def update_on_validation(
         self, cache_key: str, new_result: Optional[str], validation_successful: bool

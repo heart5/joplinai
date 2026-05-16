@@ -101,10 +101,12 @@ CONFIG = {
     ),  # 动态设置最大工作者数：CPU核心数 * 2，上限为16
     "db_path": str(getdirmain() / "data" / "joplin_vector_db"),  # ChromaDB存储路径
     # "enable_deepseek_embed": False,  # 是否用DeepSeek嵌入替代本地嵌入（增强向量质量）
-    "enable_deepseek_summary": False,  # 是否用DeepSeek生成摘要（增强笔记元数据）
-    "enable_deepseek_tags": False,  # 是否用DeepSeek提取标签（增强笔记标签）
+    # provider-agnostic 增强模型配置: "cloud" / "local" / "none"
+    "summary_model": getinivaluefromcloud("joplinai", "summary_model") or "cloud",
+    "tags_model": getinivaluefromcloud("joplinai", "tags_model") or "cloud",
+    "cloud_model": getinivaluefromcloud("joplinai", "cloud_model") or "deepseek-chat",
+    "local_model": getinivaluefromcloud("joplinai", "local_model") or "qwen2.5:1.5b",
     "deepseek_api_key": getinivaluefromcloud("joplinai", "deepseek_token"),
-    "deepseek_chat_model": "deepseek-chat",  # 修正模型名称
     "deepseek_embed_model": "deepseek-embedding",
     "force_update": False,  # 新增：强制更新开关，默认关闭
     "chunk_overlap": 50,
@@ -291,18 +293,18 @@ def process_note_chunks(
             log.warning(f"笔记《{note.title}》拆分不出有效内容块，跳过。")
             return {"success": False, "chunk_stats": {}}
 
-        # 检查 DeepSeek 增强是否完成（启用了但所有块皆未成功增强）
-        deepseek_enabled = config.get("enable_deepseek_summary") or config.get("enable_deepseek_tags")
-        deepseek_missing = False
-        if deepseek_enabled:
-            deepseek_enhanced_flags = [
+        # 检查增强是否完成（启用了但所有块皆未成功增强）
+        enhance_enabled = config.get("summary_model") != "none" or config.get("tags_model") != "none"
+        enhance_missing = False
+        if enhance_enabled:
+            enhance_flags = [
                 c.get("metadata", {}).get("deepseek_enhanced", False)
                 for c in chunk_dicts
             ]
-            deepseek_missing = not any(deepseek_enhanced_flags)
-            if deepseek_missing:
+            enhance_missing = not any(enhance_flags)
+            if enhance_missing:
                 log.warning(
-                    f"笔记《{note.title}》DeepSeek 增强未完成"
+                    f"笔记《{note.title}》增强未完成"
                     f"（共 {len(chunk_dicts)} 个块全部失败），将在下次运行时重试。"
                 )
 
@@ -465,7 +467,7 @@ def process_note_chunks(
             # 返回详细的统计字典，而不仅仅是 True
             return {
                 "success": True,
-                "deepseek_missing": deepseek_missing,  # DeepSeek 增强是否缺失
+                "enhance_missing": enhance_missing,
                 "chunk_stats": {
                     "total_chunks": len(chunk_dicts),
                     "upserted": successful_upserts,
@@ -537,6 +539,22 @@ def process_notes_incremental(notebook_title: str, config: Dict, note_ids: List[
 
     embedding_gen = process_notes_incremental.embedding_gen
 
+    # 本地模型可用性检查（摘要/标签配了本地模型时）
+    local_model = config.get("local_model")
+    if config.get("summary_model") == "local" or config.get("tags_model") == "local":
+        try:
+            import ollama
+            installed = [m["name"] for m in ollama.list().get("models", [])]
+            if local_model in installed:
+                log.info(f"本地标签/摘要模型 {local_model} 可用")
+            else:
+                log.warning(
+                    f"本地模型 {local_model} 未安装，标签/摘要将不可用。"
+                    f"安装: ollama pull {local_model}"
+                )
+        except Exception as e:
+            log.warning(f"Ollama 连接失败: {e}，本地标签/摘要将不可用")
+
     # 加载处理状态（远程优先 + 本地回退）
     state_client = config.get("state_client")
     if state_client:
@@ -544,6 +562,10 @@ def process_notes_incremental(notebook_title: str, config: Dict, note_ids: List[
         process_state = state_client.batch_load(model_name_str, Path(config["state_path"]))
     else:
         process_state = load_process_state(config["state_path"])
+    # 重置增强调用统计
+    from aimod.deepseek_enhancer import reset_call_stats
+    reset_call_stats()
+
     # 获取强制更新配置
     force_update = config.get("force_update", False)
 
@@ -615,17 +637,17 @@ def process_notes_incremental(notebook_title: str, config: Dict, note_ids: List[
             last_update_time = last_state.get("update_time")
             last_content_hash = last_state.get("content_hash")
             last_meta_hash = last_state.get("meta_hash")
-            last_deepseek_missing = last_state.get("deepseek_missing", True)
+            last_enhance_missing = last_state.get("enhance_missing", True)
 
             # 如果状态文件是旧的（没有meta_hash字段），则视为需要更新元数据
             needs_meta_update = ("meta_hash" not in last_state)
 
-            # DeepSeek 增强未完成时也需要强制重试
-            deepseek_enabled = config.get("enable_deepseek_summary") or config.get("enable_deepseek_tags")
-            needs_deepseek_retry = deepseek_enabled and last_deepseek_missing
+            # 增强未完成时也需要强制重试
+            enhance_enabled = config.get("summary_model") != "none" or config.get("tags_model") != "none"
+            needs_enhance_retry = enhance_enabled and last_enhance_missing
 
-            # 判断是否需要处理：强制更新 或 元数据缺失 或 DeepSeek缺失 或 内容变更
-            if force_update or needs_meta_update or needs_deepseek_retry or not (
+            # 判断是否需要处理：强制更新 或 元数据缺失 或 增强缺失 或 内容变更
+            if force_update or needs_meta_update or needs_enhance_retry or not (
                 last_update_time == current_update_time
                 and last_content_hash == current_content_hash
                 and last_meta_hash == current_meta_hash
@@ -633,7 +655,7 @@ def process_notes_incremental(notebook_title: str, config: Dict, note_ids: List[
                 log.info(
                     f"笔记《{note.title}》需要更新。"
                     f"原因: force={force_update}, meta_missing={needs_meta_update}, "
-                    f"deepseek_missing={needs_deepseek_retry}, "
+                    f"enhance_missing={needs_enhance_retry}, "
                     f"时间变化={last_update_time != current_update_time}, "
                     f"内容变化={last_content_hash != current_content_hash}, "
                     f"元数据变化={last_meta_hash != current_meta_hash}"
@@ -680,7 +702,7 @@ def process_notes_incremental(notebook_title: str, config: Dict, note_ids: List[
                         "content_hash": content_hash,
                         "meta_hash": meta_hash,
                         "processed_time": datetime.now().timestamp(),
-                        "deepseek_missing": result_dict.get("deepseek_missing", False),
+                        "enhance_missing": result_dict.get("enhance_missing", False),
                     }
                     # 仅当有实际块变更（新增/更新/清理孤儿）时才计入 updated_count
                     note_upserted = note_chunk_stats.get("upserted", 0)
@@ -833,6 +855,9 @@ def process_notes_incremental(notebook_title: str, config: Dict, note_ids: List[
         },
         "process_time": datetime.now().isoformat(),
     }
+
+    from aimod.deepseek_enhancer import get_call_stats
+    stats["enhance_stats"] = get_call_stats()
 
     log.info(f"笔记集【{notebook_title}】处理完成。")
     # 返回这个完整的 stats 字典

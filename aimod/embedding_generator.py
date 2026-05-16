@@ -36,7 +36,7 @@ import requests
 with pathmagic.Context():
     try:
         from aimod.chunk_optimizer import AdaptiveChunkOptimizer
-        from aimod.deepseek_enhancer import deepseek_process_note
+        from aimod.deepseek_enhancer import enhance_note
         from aimod.text_preprocessor import TextPreprocessor
         from aimod.text_splitter import ContextAwareSplitter
         from func.datatools import compute_content_hash
@@ -258,42 +258,180 @@ class EmbeddingGenerator:
 
     # %%
     def enhance_by_deepseek_for_summary_tags(self, chunk_content: str, note_tags: str, config: Dict):
-        """DeepSeek 官方模型增强生成小结和标签（和笔记既有标签进行融合）
+        """增强生成小结和标签（provider-agnostic: cloud/local/none）
 
         Returns:
             enhanced_metadata: 增强后的元数据字典，包含 deepseek_enhanced 标记
         """
-
-        # log.info(get_cache_manager().get_stats())
-
         enhanced_metadata = {"deepseek_enhanced": False}
-        if config["enable_deepseek_summary"]:
-            summary = deepseek_process_note(
-                chunk_content,
-                task="summary",
-                model=config.get("deepseek_chat_model", "deepseek-chat"),
-                use_cache=True,  # 启用缓存
-            )
-            if summary:
-                enhanced_metadata["deepseek_enhanced"] = True
-            enhanced_metadata["chunk_summary"] = summary or ""  # 存入摘要
 
-        if config["enable_deepseek_tags"]:
-            tags_str = deepseek_process_note(
-                chunk_content,
-                task="tags",
-                model=config.get("deepseek_chat_model", "deepseek-chat"),
-                use_cache=True,  # 启用缓存
-            )
-            if tags_str:
-                enhanced_metadata["deepseek_enhanced"] = True
-            deepseek_tags = [t.strip() for t in tags_str.split(",")] if tags_str else []
-            # 合并本地标签与DeepSeek标签（去重）
-            original_tags = [t.strip() for t in note_tags.split(",")] if note_tags else []
-            enhanced_tags = list(set(original_tags + deepseek_tags))
+        cloud_model = config.get("cloud_model", "deepseek-chat")
+        local_model = config.get("local_model", "qwen2.5:1.5b")
+
+        # 摘要增强
+        summary_provider = config.get("summary_model", "cloud")
+        summary = enhance_note(
+            chunk_content, task="summary", provider=summary_provider,
+            model=cloud_model if summary_provider == "cloud" else local_model,
+        )
+        if summary:
+            enhanced_metadata["deepseek_enhanced"] = True
+            enhanced_metadata["chunk_summary"] = summary
+        else:
+            enhanced_metadata["chunk_summary"] = ""
+
+        # 标签增强
+        tags_provider = config.get("tags_model", "cloud")
+        tags_str = enhance_note(
+            chunk_content, task="tags", provider=tags_provider,
+            model=cloud_model if tags_provider == "cloud" else local_model,
+        )
+        if tags_str:
+            enhanced_metadata["deepseek_enhanced"] = True
+
+        if tags_str:
+            extracted_tags = self._clean_tags(tags_str)
+            original_tags = [t.strip() for t in note_tags.split(",") if t.strip()] if note_tags else []
+            enhanced_tags = list(set(original_tags + extracted_tags))
             enhanced_metadata["tags"] = ",".join(enhanced_tags)
 
         return enhanced_metadata
+
+    @staticmethod
+    def _clean_tags(raw_tags: str) -> list:
+        """清洗模型输出的标签，返回合规关键词列表。
+
+        统一分隔符、去编号前缀后分三类处理：
+        - 含中文：保留，长度限制2-12字符
+        - 纯ASCII短词(≤12)：专有名词，直接保留
+        - 纯ASCII长词(>12)：尝试拆分为英文单词，拆不开则丢弃
+        """
+        import re
+
+        text = raw_tags.replace("\n", ",").replace("\r", ",").replace("，", ",")
+        text = re.sub(r",\s*,+", ",", text)
+        candidates = [t.strip() for t in text.split(",") if t.strip()]
+
+        cleaned = []
+        for tag in candidates:
+            tag = re.sub(r"^[\d]+[\.\、\)\s]\s*", "", tag).strip()
+            tag = re.sub(r"^[-*]\s*", "", tag).strip()
+            if not tag:
+                continue
+
+            has_cjk = bool(re.search(r"[一-鿿]", tag))
+            if has_cjk:
+                if 2 <= len(tag) <= 12:
+                    cleaned.append(tag)
+            elif len(tag) <= 12:
+                cleaned.append(tag)
+            else:
+                # 超长纯ASCII拼接词，尝试拆分
+                parts = EmbeddingGenerator._split_compound(tag)
+                cleaned.extend(parts)
+
+        seen = set()
+        result = []
+        for tag in cleaned:
+            if tag not in seen:
+                seen.add(tag)
+                result.append(tag)
+        return result
+
+    # 用于拆分英文拼接词的小词表（业务/技术/通用高频词）
+    _COMPOUND_WORDS: set = None
+
+    @classmethod
+    def _get_compound_words(cls) -> set:
+        if cls._COMPOUND_WORDS is not None:
+            return cls._COMPOUND_WORDS
+        cls._COMPOUND_WORDS = {
+            # 业务
+            "sale", "sales", "market", "marketing", "price", "network",
+            "confirm", "confirmation", "valid", "validation", "train", "training",
+            "develop", "development", "place", "manage", "management",
+            "customer", "product", "service", "business", "finance",
+            "relation", "relationship", "process", "processing",
+            "pay", "payment", "ship", "shipping", "deliver", "delivery",
+            "support", "operation", "brand", "store", "order", "stock",
+            "supply", "chain", "retail", "trade", "client", "partner",
+            "contract", "invoice", "budget", "revenue", "profit", "cost",
+            # 营销
+            "promote", "promotion", "strategy", "campaign", "channel",
+            "content", "target", "launch", "growth", "social", "media",
+            # 运营
+            "company", "warehouse", "logistics", "inventory", "quality",
+            "standard", "policy", "report", "review", "account",
+            "region", "district", "area", "office", "meeting",
+            "weekly", "monthly", "annual", "terminal", "dealer",
+            # 团队
+            "leader", "member", "staff", "hire", "recruit", "coach",
+            "perform", "performance", "goal", "objective", "bonus",
+            "salary", "feedback", "agenda",
+            # 生活
+            "health", "sleep", "walk", "drink", "smoke", "study",
+            "learn", "exercise", "food", "meal", "travel", "trip",
+            "family", "child", "school", "doctor", "hospital",
+            # 技术
+            "data", "code", "server", "cloud", "file", "system", "user",
+            "admin", "login", "cache", "config", "model", "token",
+            "query", "search", "index", "base", "node", "test", "debug",
+            "build", "deploy", "web", "app", "api", "key", "log",
+            "core", "type", "script", "python", "java", "linux",
+            "docker", "git", "json", "html", "http", "sql", "ssh",
+            # 通用
+            "time", "line", "note", "team", "plan", "task", "work",
+            "home", "list", "view", "link", "page", "post", "text",
+            "name", "date", "info", "check", "back", "call", "chat",
+            "open", "read", "send", "auto", "soft", "hard", "life",
+            "book", "card", "gold", "blue", "fast", "plus", "mini",
+            "free", "pro", "max", "lite", "tool", "pack", "unit",
+            # 较长的词，本身可作为拆分结果
+            "technology", "presentation", "information", "organization",
+            "communication", "application",
+        }
+        return cls._COMPOUND_WORDS
+
+    @classmethod
+    def _split_compound(cls, word: str) -> list:
+        """拆解英文拼接词(如 salesvalidation → [sales, validation])。
+
+        用词表做动态规划：找到覆盖整词的最少拆分。
+        拆分失败返回空列表。
+        """
+        word_lower = word.lower()
+        n = len(word_lower)
+        vocab = cls._get_compound_words()
+
+        # dp[i] = 从位置i到末尾的最少段数，无法拆分则为 -1
+        dp = [-1] * (n + 1)
+        dp[n] = 0
+        split_from = [-1] * (n + 1)
+
+        for i in range(n - 1, -1, -1):
+            best = float('inf')
+            best_j = -1
+            for j in range(i + 1, min(i + 16, n + 1)):
+                if word_lower[i:j] in vocab:
+                    if dp[j] != -1 and dp[j] + 1 < best:
+                        best = dp[j] + 1
+                        best_j = j
+            if best != float('inf'):
+                dp[i] = best
+                split_from[i] = best_j
+
+        if dp[0] == -1 or dp[0] == 1:
+            # 拆不开，或整词命中（说明词表里有这个词，但作为标签太长）
+            return []
+
+        # 回溯，保留原词的大小写
+        parts = []
+        pos = 0
+        while pos < n:
+            nxt = split_from[pos]
+            parts.append(word[pos:nxt])
+            pos = nxt
+        return [p for p in parts if len(p) >= 3]
 
 
 # %% [markdown]
