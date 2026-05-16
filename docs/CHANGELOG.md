@@ -26,9 +26,19 @@ jupyter:
 本文档记录 Claude Code 协助下的所有项目变更。
 
 
-### 2026年5月16–17日
+### 2026年5月17日
 
-**架构重构：DeepSeek增强功能命名 → provider-agnostic AI增强命名**（commit `05a64a9`–`ff9a748`）：
+**文档全量更新至当前架构**（commit `f801188`）：
+
+- CLAUDE.md：服务表拆分向量化引擎(TC)+嵌入推理(HCX)，数据流更新，已知问题补充 ChromaDB Docker/Ollama 公网暴露
+- README.md：分布式架构重新描述，修正文件名，刷新最近更新
+- TECHNICAL_MANUAL.md：9处修正 — 拓扑图/序列图/协议表/ER schema/ChromaDB集合名和元数据字段/健康检查端口
+- CHANGELOG.md：拆分5月16-17日合并条目为独立日期
+
+
+### 2026年5月16日
+
+**架构重构：DeepSeek增强功能命名 → provider-agnostic AI增强命名**（commit `05a64a9`）：
 
 - **文件重命名**（`git mv` 保留历史）：`aimod/deepseek_enhancer.py` → `aimod/note_enhancer.py`、`aimod/deepseek_client.py` → `aimod/cache_client.py`、`tests/test_deepseek.py` → `tests/test_note_enhancer.py`
 - **类重命名**：`DeepSeekCacheClient` → `CacheClient`
@@ -39,8 +49,9 @@ jupyter:
 - **CLI 参数**：`--use-deepseek` → `--use-cloud`
 - **日志清理**：所有 "deepseek增强" → "AI增强"/"增强"、"DeepSeek生成答案" → "云端模型生成答案"
 - **保留不动**：真正涉及 DeepSeek API 服务的命名（API Key、URL、模型名 `deepseek-chat`、`_call_deepseek_api_directly()` 等）
-- **Bug 修复**：`get_call_stats()`/`reset_call_stats()` 被 jupytext sync 误放入 markdown cell 导致注释化（commit `ff9a748`）
-- **文档全量更新**：CLAUDE.md（分布式架构、已知问题补充）、README.md（服务表拆分、最近更新）、TECHNICAL_MANUAL.md（拓扑图/序列图/协议表/DB Schema 全面修正）
+
+**Bug 修复**（commit `ff9a748`）：
+- `get_call_stats()`/`reset_call_stats()` 被 jupytext sync 误放入 markdown cell 导致注释化，TC 验证测试时才暴露
 
 **技术收获**：
 - TC ChromaDB 通过 Docker 运行（端口 8009→8000），`vector_db_manager.py` 默认 8000 无效，依赖云端配置覆盖
