@@ -15,13 +15,11 @@
 
 # %% [markdown]
 # # ProcessStateClient
-# 笔记处理状态客户端 — 远程优先 + 本地 JSON 回退
+# 笔记处理状态客户端 — 纯远程，无本地 fallback
 
 # %%
-import json
 import logging
-from pathlib import Path
-from typing import Dict, Optional
+from typing import Optional
 
 import requests
 
@@ -40,8 +38,9 @@ with pathmagic.Context():
 # %%
 __all__ = ["ProcessStateClient"]
 
+
 class ProcessStateClient:
-    """笔记处理状态客户端 — 远程优先 + 本地 JSON 回退"""
+    """笔记处理状态客户端 — 纯远程，center_api 不可用时报错"""
 
     def __init__(self, remote_url: str, api_key: str):
         self.remote_url = remote_url.rstrip("/")
@@ -63,17 +62,20 @@ class ProcessStateClient:
             log.warning(f"远程状态 {method} {path} 失败: {e}")
         return None
 
-    def batch_load(self, model_name: str, local_path: Path) -> Dict[str, Dict]:
+    # ---- 笔记处理状态 ----
+
+    def batch_load(self, model_name: str) -> dict:
         resp = self._request("POST", "/state/batch_load", json={"model_name": model_name})
         if resp is not None:
             data = resp.json()
             result = dict(data.get("states", {}))
-            if "virtual_collections" in data and data["virtual_collections"]:
+            if data.get("virtual_collections"):
                 result["_virtual_collections"] = data["virtual_collections"]
             return result
-        return self._local_load(local_path)
+        log.error(f"batch_load 远程调用失败 (model={model_name})，状态无法加载，视为全新运行")
+        return {}
 
-    def batch_save(self, model_name: str, state: Dict, local_path: Path):
+    def batch_save(self, model_name: str, state: dict) -> bool:
         states = {k: v for k, v in state.items() if k != "_virtual_collections"}
         virtual_collections = state.get("_virtual_collections", {})
         resp = self._request("POST", "/state/batch_save", json={
@@ -82,37 +84,34 @@ class ProcessStateClient:
             "virtual_collections": virtual_collections,
         })
         if resp is not None:
-            return
-        self._local_save(state, local_path)
+            return True
+        log.error(f"batch_save 远程调用失败 (model={model_name})，状态未持久化")
+        return False
 
-    @staticmethod
-    def _local_load(path: Path) -> Dict:
-        if path.exists():
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    return json.load(f)
-            except Exception:
-                pass
-        return {}
+    # ---- 运行时标记 (checkpoint / batch_progress) ----
 
-    @staticmethod
-    def _local_save(state: Dict, path: Path):
-        def serialize(obj):
-            from datetime import datetime as dt
-            if isinstance(obj, dt):
-                return obj.isoformat()
-            if isinstance(obj, (int, float, str, bool, type(None))):
-                return obj
-            if isinstance(obj, (list, tuple)):
-                return [serialize(item) for item in obj]
-            if isinstance(obj, dict):
-                return {k: serialize(v) for k, v in obj.items()}
-            return str(obj)
+    def load_run_state(self, model_name: str, key: str) -> Optional[dict]:
+        resp = self._request("POST", "/state/run_state/load", json={
+            "model_name": model_name,
+            "key": key,
+        })
+        if resp is not None:
+            data = resp.json()
+            if data.get("found"):
+                return data["value"]
+        return None
 
-        try:
-            serialized_state = serialize(state)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(serialized_state, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            log.error(f"保存状态文件{path}失败: {e}")
+    def save_run_state(self, model_name: str, key: str, value: dict) -> bool:
+        resp = self._request("POST", "/state/run_state/save", json={
+            "model_name": model_name,
+            "key": key,
+            "value": value,
+        })
+        return resp is not None
+
+    def delete_run_state(self, model_name: str, key: str) -> bool:
+        resp = self._request("POST", "/state/run_state/delete", json={
+            "model_name": model_name,
+            "key": key,
+        })
+        return resp is not None

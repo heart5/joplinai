@@ -113,3 +113,59 @@ def api_state_delete_model():
     conn.commit()
     conn.close()
     return jsonify({"ok": True, "deleted": deleted})
+
+
+# %% [markdown]
+# # Run State 端点 — checkpoint/batch_progress 等运行时标记
+
+# %%
+@state_bp.route("/state/run_state/load", methods=["POST"])
+@require_auth
+def api_run_state_load():
+    data = request.get_json(force=True)
+    model_name = data["model_name"]
+    key = data["key"]
+    conn = _init_db()
+    row = conn.execute(
+        "SELECT state_json FROM note_process_state WHERE model_name=? AND note_id=?",
+        (model_name, f"__{key}__"),
+    ).fetchone()
+    conn.close()
+    if row:
+        return jsonify({"found": True, "value": json.loads(row[0])})
+    return jsonify({"found": False, "value": None})
+
+
+@state_bp.route("/state/run_state/save", methods=["POST"])
+@require_auth
+def api_run_state_save():
+    data = request.get_json(force=True)
+    model_name = data["model_name"]
+    key = data["key"]
+    value = data["value"]
+    conn = _init_db()
+    conn.execute(
+        "INSERT OR REPLACE INTO note_process_state (model_name, note_id, state_json, updated_at) "
+        "VALUES (?,?,?,?)",
+        (model_name, f"__{key}__", json.dumps(value, ensure_ascii=False), datetime.now().isoformat()),
+    )
+    conn.commit()
+    conn.close()
+    log.info(f"run_state 保存: model={model_name}, key={key}")
+    return jsonify({"ok": True})
+
+
+@state_bp.route("/state/run_state/delete", methods=["POST"])
+@require_auth
+def api_run_state_delete():
+    data = request.get_json(force=True)
+    model_name = data["model_name"]
+    key = data["key"]
+    conn = _init_db()
+    conn.execute(
+        "DELETE FROM note_process_state WHERE model_name=? AND note_id=?",
+        (model_name, f"__{key}__"),
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
