@@ -272,6 +272,10 @@ class EmbeddingGenerator:
         summary_provider = config.get("summary_model", "cloud")
         tags_provider = config.get("tags_model", "cloud")
 
+        ollama_host = config.get("ollama_host") or ""
+        ollama_port = config.get("ollama_port") or "11434"
+        ollama_url = f"http://{ollama_host}:{ollama_port}" if ollama_host else ""
+
         # 首次调用时输出增强模型策略
         if not self._enhance_model_logged:
             log.info(
@@ -286,6 +290,7 @@ class EmbeddingGenerator:
         summary = enhance_note(
             chunk_content, task="summary", provider=summary_provider,
             model=cloud_model if summary_provider == "cloud" else local_model,
+            ollama_host=ollama_url,
         )
         if summary:
             enhanced_metadata["enhanced"] = True
@@ -297,6 +302,7 @@ class EmbeddingGenerator:
         tags_str = enhance_note(
             chunk_content, task="tags", provider=tags_provider,
             model=cloud_model if tags_provider == "cloud" else local_model,
+            ollama_host=ollama_url,
         )
         if tags_str:
             enhanced_metadata["enhanced"] = True

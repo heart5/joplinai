@@ -65,7 +65,8 @@ for nd in notes_data:
         print(f"    🖥️  本地 qwen2.5:1.5b ...", end=" ", flush=True)
         t0 = time.time()
         local_result = local_process_note(nd["text"], task=task,
-                                          model="qwen2.5:1.5b", use_cache=False)
+                                          model="qwen2.5:1.5b", use_cache=False,
+                                          ollama_host="http://127.0.0.1:11434")
         local_time = round(time.time() - t0, 1)
         print(f"({local_time}s)")
         print(f"    {local_result[:200] if local_result else 'ERROR: 无结果'}")
