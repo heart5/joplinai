@@ -90,8 +90,8 @@ CONFIG = {
     ),
     "chroma_server_port": getinivaluefromcloud("joplinai", "chroma_port"),
     "notebook_titles": "顺风顺水, 日新白异, 运营管理",  # 改为笔记本名称列表字符串
-    "embedding_model": getinivaluefromcloud("joplinai", "embedding_model") or "dengcao/bge-large-zh-v1.5",
-    # "embedding_model": "qwen:1.8b",  # 嵌入模型（Ollama本地模型，优先选nomic-embed-text）
+    "ollama_embedding_model": getinivaluefromcloud("joplinai", "ollama_embedding_model") or "dengcao/bge-large-zh-v1.5",
+    # "ollama_embedding_model": "qwen:1.8b",  # 嵌入模型（Ollama本地模型，优先选nomic-embed-text）
     # "chunk_size": 512,  # 文本分块大小（字符数，根据模型上下文调整）
     # "max_context": 512,  # 模型最大上下文（字符数）
     "concurrency_type": "thread",  # 固定使用多线程，移除 process 选项
@@ -100,11 +100,11 @@ CONFIG = {
     ),  # 动态设置最大工作者数：CPU核心数 * 2，上限为16
     "db_path": str(getdirmain() / "data" / "joplin_vector_db"),  # ChromaDB存储路径
     # "enable_deepseek_embed": False,  # 是否用DeepSeek嵌入替代本地嵌入（增强向量质量）
-    # provider-agnostic 增强模型配置: "cloud" / "local" / "none"
+    # provider-agnostic 增强模型配置: "cloud" / "ollama" / "none"
     "summary_model": getinivaluefromcloud("joplinai", "summary_model") or "cloud",
     "tags_model": getinivaluefromcloud("joplinai", "tags_model") or "cloud",
     "cloud_model": getinivaluefromcloud("joplinai", "cloud_model") or "deepseek-chat",
-    "local_model": getinivaluefromcloud("joplinai", "local_model") or "qwen2.5:1.5b",
+    "ollama_chat_model": getinivaluefromcloud("joplinai", "ollama_chat_model") or "qwen2.5:1.5b",
     "deepseek_api_key": getinivaluefromcloud("joplinai", "deepseek_token"),
     "deepseek_embed_model": "deepseek-embedding",
     "force_update": False,  # 新增：强制更新开关，默认关闭
@@ -467,7 +467,7 @@ def process_notes_incremental(notebook_title: str, config: Dict, note_ids: List[
     # 初始化向量数据库（在整个处理过程中只初始化一次）
     if not hasattr(process_notes_incremental, "vector_db"):
         process_notes_incremental.vector_db = VectorDBManager(
-            config["db_path"], config["embedding_model"], True
+            config["db_path"], config["ollama_embedding_model"], True
         )
         log.info(
             f"向量数据库初始化完成，集合: {process_notes_incremental.vector_db.collection_name}"
@@ -482,7 +482,7 @@ def process_notes_incremental(notebook_title: str, config: Dict, note_ids: List[
     if not hasattr(process_notes_incremental, "embedding_gen"):
         process_notes_incremental.embedding_gen = EmbeddingGenerator(
             config,
-            config["embedding_model"],
+            config["ollama_embedding_model"],
             chunk_size=config.get("chunk_size", 512),
             chunk_overlap=config.get("chunk_overlap", 50),
             # 【新增】传递自适应分块配置
@@ -493,25 +493,25 @@ def process_notes_incremental(notebook_title: str, config: Dict, note_ids: List[
     embedding_gen = process_notes_incremental.embedding_gen
 
     # 本地模型可用性检查（摘要/标签配了本地模型时）
-    local_model = config.get("local_model")
-    if config.get("summary_model") == "local" or config.get("tags_model") == "local":
+    ollama_chat_model = config.get("ollama_chat_model")
+    if config.get("summary_model") == "ollama" or config.get("tags_model") == "ollama":
         try:
             import ollama
             installed = [m["name"] for m in ollama.list().get("models", [])]
-            if local_model in installed:
-                log.info(f"本地标签/摘要模型 {local_model} 可用")
+            if ollama_chat_model in installed:
+                log.info(f"Ollama 标签/摘要模型 {ollama_chat_model} 可用")
             else:
                 log.warning(
-                    f"本地模型 {local_model} 未安装，标签/摘要将不可用。"
-                    f"安装: ollama pull {local_model}"
+                    f"Ollama 模型 {ollama_chat_model} 未安装，标签/摘要将不可用。"
+                    f"安装: ollama pull {ollama_chat_model}"
                 )
         except Exception as e:
-            log.warning(f"Ollama 连接失败: {e}，本地标签/摘要将不可用")
+            log.warning(f"Ollama 连接失败: {e}，标签/摘要将不可用")
 
     # 加载处理状态（纯远程，无本地 fallback）
     state_client = config.get("state_client")
     if state_client:
-        model_name_str = config["embedding_model"].replace(":", "_").replace("/", "_").replace("-", "_")
+        model_name_str = config["ollama_embedding_model"].replace(":", "_").replace("/", "_").replace("-", "_")
         process_state = state_client.batch_load(model_name_str)
     else:
         log.error("state_client 未配置，无法加载处理状态，本次运行视为全新处理")
@@ -674,7 +674,7 @@ def process_notes_incremental(notebook_title: str, config: Dict, note_ids: List[
     # 保存状态（纯远程，无本地 fallback）
     state_client = config.get("state_client")
     if state_client:
-        model_name_str = config["embedding_model"].replace(":", "_").replace("/", "_").replace("-", "_")
+        model_name_str = config["ollama_embedding_model"].replace(":", "_").replace("/", "_").replace("-", "_")
         state_client.batch_save(model_name_str, process_state)
     else:
         log.error("state_client 未配置，处理状态未能持久化")

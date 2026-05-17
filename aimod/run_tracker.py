@@ -200,7 +200,7 @@ class RunTracker:
         """完成本次运行，保存全局运行记录到历史数据库（远程优先）"""
         run_id = self._get_current_run_id()
         timestamp = datetime.now().isoformat()
-        embedding_model = self.config["embedding_model"]
+        embedding_model = self.config["ollama_embedding_model"]
         notebook_count = len(self.summary_data)
 
         total_notes_processed = sum(s.get("total_notes", 0) for s in self.summary_data.values())
@@ -211,7 +211,7 @@ class RunTracker:
         if self.history_client:
             self.history_client.finalize_run(
                 run_id=run_id, timestamp=timestamp,
-                embedding_model=embedding_model, notebook_count=notebook_count,
+                ollama_embedding_model=embedding_model, notebook_count=notebook_count,
                 total_notes_processed=total_notes_processed,
                 total_chunks_processed=total_chunks,
                 total_notes_added=total_notes_added,
@@ -262,7 +262,7 @@ class RunTracker:
     # %%
     def _get_current_run_id(self) -> str:
         """生成当前运行的唯一ID"""
-        model_part = self.config["embedding_model"].split("/")[-1].replace(":", "_")[:10]
+        model_part = self.config["ollama_embedding_model"].split("/")[-1].replace(":", "_")[:10]
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         return f"{timestamp}_{model_part}"
 

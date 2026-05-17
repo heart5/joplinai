@@ -51,8 +51,8 @@ __all__ = ["parse_args", "main"]
 def parse_args():
     parser = argparse.ArgumentParser(description="Joplin笔记向量化处理工具")
     parser.add_argument(
-        "--model", type=str, default=CONFIG["embedding_model"],
-        help=f"Ollama嵌入模型名称（默认：{CONFIG['embedding_model']}）",
+        "--model", type=str, default=CONFIG["ollama_embedding_model"],
+        help=f"Ollama嵌入模型名称（默认：{CONFIG['ollama_embedding_model']}）",
     )
     parser.add_argument(
         "--notebook_titles", type=str, default=CONFIG["notebook_titles"],
@@ -65,14 +65,14 @@ def parse_args():
     parser.add_argument(
         "--summary_model", type=str,
         default=CONFIG.get("summary_model", "cloud"),
-        choices=["cloud", "local", "none"],
-        help=f"摘要模型: cloud/local/none（默认：{CONFIG.get('summary_model', 'cloud')}）",
+        choices=["cloud", "ollama", "none"],
+        help=f"摘要模型: cloud/ollama/none（默认：{CONFIG.get('summary_model', 'cloud')}）",
     )
     parser.add_argument(
         "--tags_model", type=str,
         default=CONFIG.get("tags_model", "cloud"),
-        choices=["cloud", "local", "none"],
-        help=f"标签模型: cloud/local/none（默认：{CONFIG.get('tags_model', 'cloud')}）",
+        choices=["cloud", "ollama", "none"],
+        help=f"标签模型: cloud/ollama/none（默认：{CONFIG.get('tags_model', 'cloud')}）",
     )
     parser.add_argument(
         "--enable_force_update", action="store_true",
@@ -124,7 +124,7 @@ def main() -> None:
     args = parse_args()
     dynamic_config = CONFIG.copy()
 
-    dynamic_config["embedding_model"] = args.model
+    dynamic_config["ollama_embedding_model"] = args.model
 
     dynamic_config["max_workers"] = args.workers
     dynamic_config["summary_model"] = args.summary_model
@@ -150,7 +150,7 @@ def main() -> None:
     user_explicit_note_ids = bool(args.note_ids)
 
     log.info(
-        f"动态配置：模型={dynamic_config['embedding_model']}, "
+        f"动态配置：模型={dynamic_config['ollama_embedding_model']}, "
         f"ollama server={dynamic_config['ollama_host']}, "
         f"ollama port={dynamic_config['ollama_port']}, "
         f"chroma server={dynamic_config['chroma_server_host']}, "
@@ -164,7 +164,7 @@ def main() -> None:
     )
 
     # ==== 1. 文件锁 ====
-    model_name = dynamic_config["embedding_model"]
+    model_name = dynamic_config["ollama_embedding_model"]
     model_name_str2 = model_name.replace(":", "_").replace("/", "_").replace("-", "_")
     lock_name = f"joplinai_{model_name_str2}.lock"
     lock_file, lock_acquired = add_file_lock(model_name, lock_name, timeout=10800)

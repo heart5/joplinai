@@ -206,9 +206,9 @@ Production: systemd services managed via `deploy/deploy.sh`:
 |--------|--------|------|
 | `chat_model` | `none` | 无本地 QA 回退 |
 | `cloud_model` | `deepseek-chat` | 云端大模型 |
-| `summary_model` | `cloud` | 摘要模型: cloud/local/none |
-| `tags_model` | `cloud` | 标签模型: cloud/local/none |
-| `local_model` | `qwen2.5:1.5b` | 本地标签/分类模型 |
+| `summary_model` | `cloud` | 摘要模型: cloud/ollama/none |
+| `tags_model` | `cloud` | 标签模型: cloud/ollama/none |
+| `ollama_chat_model` | `qwen2.5:1.5b` | Ollama 标签/分类模型 |
 | `vision_enabled` | `false` | CPU 跑视觉太慢，默认关闭 |
 
 ## Testing & CI
@@ -244,7 +244,7 @@ Main config stored in cloud-synced Joplin note (INI format). Local override: `da
 
 **数据中心配置**：`joplinai_center_url`（非生产主机配，指向 TC 公网IP；生产主机不配则自动走 localhost）、`joplinai_center_api_key`（认证密钥）、`probe_cache_limit`（探测缓存上限，默认 10000）。
 
-**模型配置**：`chat_model`（本地对话模型，当前 `none` 无本地回退）、`local_model`（本地标签/分类小模型）、`embedding_model`（嵌入模型）、`vision_model`（视觉模型）、`cloud_model` / `summary_model` / `tags_model`（云端/本地/关闭三态切换）。详见上方 Model Strategy 章节。
+**模型配置**：`chat_model`（本地对话模型，当前 `none` 无本地回退）、`ollama_chat_model`（Ollama 标签/分类小模型）、`ollama_embedding_model`（嵌入模型）、`vision_model`（视觉模型）、`cloud_model` / `summary_model` / `tags_model`（cloud/ollama/none 三态切换）。详见上方 Model Strategy 章节。
 
 ### Remote Joplin fallback
 

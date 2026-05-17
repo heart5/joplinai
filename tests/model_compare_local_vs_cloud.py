@@ -26,7 +26,7 @@ def sep(char="=", w=80):
 # 加载笔记
 print("加载笔记内容...")
 vector_db = VectorDBManager(
-    config_all["db_path"], config_all["embedding_model"], for_creation=False
+    config_all["db_path"], config_all["ollama_embedding_model"], for_creation=False
 )
 
 notes_data = []
@@ -80,7 +80,7 @@ for nd in notes_data:
         print(f"    {ds_result[:200] if ds_result else 'ERROR: 无结果'}")
         
         note_result["tasks"][task] = {
-            "local": {"result": local_result, "time": local_time},
+            "ollama": {"result": local_result, "time": local_time},
             "deepseek": {"result": ds_result, "time": ds_time},
         }
         print()
@@ -97,7 +97,7 @@ for nr in all_results:
     print(f"  {'任务':<8s} {'模型':<20s} {'耗时':>8s} {'输出长度':>8s}")
     print(f"  {'─'*76}")
     for task in ["summary", "tags"]:
-        for model_key, model_name in [("local", "qwen2.5:1.5b"), ("deepseek", "DeepSeek API")]:
+        for model_key, model_name in [("ollama", "qwen2.5:1.5b"), ("deepseek", "DeepSeek API")]:
             tr = nr["tasks"][task][model_key]
             result_text = tr["result"] or "N/A"
             time_str = f"{tr['time']}s"

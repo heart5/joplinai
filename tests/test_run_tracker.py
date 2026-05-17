@@ -9,7 +9,7 @@ def tracker(history_db_path):
 
     __init__ 中 history_db_path 使用 getdirmain()，需事后覆盖为 temp 路径。
     """
-    config = {"embedding_model": "test/model:v1"}
+    config = {"ollama_embedding_model": "test/model:v1"}
     rt = RunTracker(config, history_client=None)
     rt.history_db_path = history_db_path
     rt._init_history_db()  # 在 temp DB 上重新建表
