@@ -63,7 +63,7 @@ def interactive_mode(qa_system: QASystem):
                 print(f"\n系统统计:")
                 print(f"  数据库笔记数: {stats['total_notes_in_db']}")
                 print(f"  对话历史数: {stats['conversation_history_count']}")
-                print(f"  嵌入模型: {stats['config']['embedding_model']}")
+                print(f"  嵌入模型: {stats['config']['ollama_embedding_model']}")
                 print(f"  聊天模型: {stats['config']['chat_model']}")
                 print(f"  使用云端模型: {stats['config']['using_cloud']}")
                 continue

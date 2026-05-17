@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# %%
 """统一报告模块 — 从 center_api stats 端点获取数据 → Markdown 格式化 → 写入 Joplin"""
 # %% [markdown]
 # # ReportWriter — 统一报告生成与写入
@@ -30,8 +31,8 @@ class ReportWriter:
         self.cache = cache_client      # CacheClient
         self.probe = probe_client      # ProbeCacheClient
 
-    # %% [markdown]
-    # ## generate_vectorization_report
+# %% [markdown]
+#     # ## generate_vectorization_report
 
     # %%
     def generate_vectorization_report(self, snapshot: Dict) -> str:
@@ -50,7 +51,7 @@ class ReportWriter:
         md_lines = ["# 📊 Joplin笔记向量化处理统计报告（历史分析版）\n"]
         md_lines.append(
             f"*报告生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*  |  "
-            f"*嵌入模型：{self.config.get('embedding_model', 'N/A')}*  |  "
+            f"*嵌入模型：{self.config.get('ollama_embedding_model', 'N/A')}*  |  "
             f"*历史数据库：{history_db_path.name}*\n"
         )
 
@@ -201,8 +202,8 @@ class ReportWriter:
 
         return "\n".join(md_lines)
 
-    # %% [markdown]
-    # ## generate_cache_report
+# %% [markdown]
+#     # ## generate_cache_report
 
     # %%
     def generate_cache_report(self) -> str:
@@ -347,8 +348,8 @@ class ReportWriter:
 
         return "\n".join(md_lines)
 
-    # %% [markdown]
-    # ## generate_probe_report
+# %% [markdown]
+#     # ## generate_probe_report
 
     # %%
     def generate_probe_report(self) -> str:
@@ -411,8 +412,8 @@ class ReportWriter:
 
         return "\n".join(md_lines)
 
-    # %% [markdown]
-    # ## write_to_joplin
+# %% [markdown]
+#     # ## write_to_joplin
 
     # %%
     def write_to_joplin(self, content: str, note_title: str,
@@ -453,8 +454,8 @@ class ReportWriter:
             log.error(f"写入 Joplin 报告失败: {e}")
             return False
 
-    # %% [markdown]
-    # ## _safe_call
+# %% [markdown]
+#     # ## _safe_call
 
     # %%
     @staticmethod

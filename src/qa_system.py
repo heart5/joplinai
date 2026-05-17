@@ -72,22 +72,22 @@ class QASystem:
             config_all.update(config)
         self.config = config_all
         self.vector_db = VectorDBManager(
-            self.config["db_path"], self.config["embedding_model"], for_creation=False
+            self.config["db_path"], self.config["ollama_embedding_model"], for_creation=False
         )
         self.conversation_history = []
 
         from aimod.embedding_generator import EmbeddingGenerator
         self.embedding_generator = EmbeddingGenerator(
             self.config,
-            model_name=self.config["embedding_model"],
+            model_name=self.config["ollama_embedding_model"],
         )
         log.info(
             f"QASystem 初始化完成，已加载 embedding_generator，"
-            f"嵌入模型为：{self.config['embedding_model']}"
+            f"嵌入模型为：{self.config['ollama_embedding_model']}"
         )
 
     def __repr__(self):
-        return f"QASystem(embed={self.config.get('embedding_model', '?')}, chat={self.config.get('chat_model', '?')})"
+        return f"QASystem(embed={self.config.get('ollama_embedding_model', '?')}, chat={self.config.get('chat_model', '?')})"
 
 # %% [markdown]
 # ### ask(self, question: str, use_history: bool = True) -> Dict
@@ -593,7 +593,7 @@ class QASystem:
                 "total_notes_in_db": collection_info,
                 "conversation_history_count": len(self.conversation_history),
                 "config": {
-                    "embedding_model": self.config["embedding_model"],
+                    "ollama_embedding_model": self.config["ollama_embedding_model"],
                     "chat_model": self.config["chat_model"],
                     "using_cloud": self.config["cloud_model"] != "none",
                 },

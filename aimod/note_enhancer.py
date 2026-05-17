@@ -52,7 +52,7 @@ DEEPSEEK_CHAT_URL = "https://api.deepseek.com/v1/chat/completions"  # 大模型A
 DEFAULT_EMBED_MODEL = "deepseek-embedding"  # DeepSeek嵌入模型（示例）
 DEFAULT_CHAT_MODEL = "deepseek-chat"  # DeepSeek大模型（示例）
 DEFAULT_VISION_MODEL = "deepseek-v4-pro"  # DeepSeek Vision 多模态模型
-DEFAULT_OLLAMA_VISION_MODEL = "minicpm-v"  # 本地 Ollama Vision 模型
+DEFAULT_OLLAMA_VISION_MODEL = "minicpm-v"  # Ollama Vision 模型
 
 # %% [markdown]
 # # 缓存支持
@@ -87,12 +87,12 @@ __all__ = [
     "describe_images",
     "process_note_vision",
     "ollama_vision_describe",
-    "local_process_note",
+    "ollama_process_note",
     "enhance_note",
     "get_call_stats",
     "reset_call_stats",
-    "get_local_call_stats",
-    "reset_local_call_stats",
+    "get_ollama_call_stats",
+    "reset_ollama_call_stats",
 ]
 
 def get_cache_manager():
@@ -308,11 +308,11 @@ def _call_deepseek_api_directly(
 
 
 # %% [markdown]
-# ## _call_ollama_local(text: str, task: str, model: str) -> Optional[str]
+# ## _call_ollama(text: str, task: str, model: str) -> Optional[str]
 
 # %%
-def _call_ollama_local(text: str, task: str, model: str, ollama_host: str) -> Optional[str]:
-    """本地 Ollama 模型处理标签/摘要，复用与云端模型相同的 prompt"""
+def _call_ollama(text: str, task: str, model: str, ollama_host: str) -> Optional[str]:
+    """Ollama 模型处理标签/摘要，复用与云端模型相同的 prompt"""
     prompts = {
         "summary": "用1-3句话总结以下笔记核心内容，突出主题和结论：\n%s",
         "tags": """请从以下文本中提取3-5个核心关键词作为标签。
@@ -331,7 +331,7 @@ def _call_ollama_local(text: str, task: str, model: str, ollama_host: str) -> Op
     }
 
     if task not in prompts:
-        log.error(f"本地模型不支持的任务类型: {task}")
+        log.error(f"Ollama 模型不支持的任务类型: {task}")
         return None
 
     prompt = prompts[task] % text[:8000]
@@ -344,27 +344,27 @@ def _call_ollama_local(text: str, task: str, model: str, ollama_host: str) -> Op
                 options={"temperature": 0.3, "num_predict": 500},
             )
             result = response["message"]["content"].strip()
-            log.info(f"本地模型 {model}/{task} 完成，输出 {len(result)} 字符")
+            log.info(f"Ollama 模型 {model}/{task} 完成，输出 {len(result)} 字符")
             return result
         except Exception as e:
             if attempt == 0:
-                log.warning(f"本地Ollama处理失败({model}/{task}), 重试中: {e}")
+                log.warning(f"Ollama处理失败({model}/{task}), 重试中: {e}")
                 time.sleep(3)
             else:
-                log.error(f"本地Ollama处理失败({model}/{task}): {e}")
+                log.error(f"Ollama处理失败({model}/{task}): {e}")
                 return None
 
 
 # %% [markdown]
-# ## local_process_note(text, task, model, use_cache) -> Optional[str]
+# ## ollama_process_note(text, task, model, use_cache) -> Optional[str]
 
 # %%
-# 本地/云端模型调用统计（供向量化运行结束汇总）
-_call_stats = {"summary": {"local": 0, "cloud": 0}, "tags": {"local": 0, "cloud": 0}}
+# Ollama/Cloud 模型调用统计（供向量化运行结束汇总）
+_call_stats = {"summary": {"ollama": 0, "cloud": 0}, "tags": {"ollama": 0, "cloud": 0}}
 
 
 def get_call_stats() -> dict:
-    """返回当前运行的本地/云端模型调用统计"""
+    """返回当前运行的 Ollama/Cloud 模型调用统计"""
     return {
         "summary": dict(_call_stats["summary"]),
         "tags": dict(_call_stats["tags"]),
@@ -373,38 +373,37 @@ def get_call_stats() -> dict:
 
 def reset_call_stats():
     """重置调用统计（新运行开始时调用）"""
-    _call_stats["summary"]["local"] = 0
+    _call_stats["summary"]["ollama"] = 0
     _call_stats["summary"]["cloud"] = 0
-    _call_stats["tags"]["local"] = 0
+    _call_stats["tags"]["ollama"] = 0
     _call_stats["tags"]["cloud"] = 0
 
 
-# 保留旧名兼容
-def get_local_call_stats() -> dict:
-    """返回当前运行的本地模型调用统计"""
-    return {task: _call_stats[task]["local"] for task in _call_stats}
+def get_ollama_call_stats() -> dict:
+    """返回当前运行的 Ollama 模型调用统计"""
+    return {task: _call_stats[task]["ollama"] for task in _call_stats}
 
 
-def reset_local_call_stats():
-    """重置本地调用统计"""
+def reset_ollama_call_stats():
+    """重置 Ollama 调用统计"""
     for task in _call_stats:
-        _call_stats[task]["local"] = 0
+        _call_stats[task]["ollama"] = 0
 
 # %%
-def local_process_note(
+def ollama_process_note(
     text: str,
     task: str = "summary",
     model: str = "qwen2.5:1.5b",
     use_cache: bool = True,
     ollama_host: str = "",
 ) -> Optional[str]:
-    """本地 Ollama 模型处理笔记（标签/摘要），支持缓存。
+    """Ollama 模型处理笔记（标签/摘要），支持缓存。
 
-    与 deepseek_process_note 相同的接口，但使用本地 Ollama 模型。
+    与 deepseek_process_note 相同的接口，使用 Ollama 模型。
     ollama_host 由调用方从设备级云配置获取，确保跨主机路由正确。
     """
     if not use_cache:
-        return _call_ollama_local(text, task, model, ollama_host)
+        return _call_ollama(text, task, model, ollama_host)
 
     content_hash = compute_content_hash(text[:8000])
     cache_manager = get_cache_manager()
@@ -413,11 +412,11 @@ def local_process_note(
     if cache_result.content is not None:
         return cache_result.content
 
-    result = _call_ollama_local(text, task, model, ollama_host)
+    result = _call_ollama(text, task, model, ollama_host)
     if result:
         cache_manager.set(content_hash, task, result, model)
         if task in _call_stats:
-            _call_stats[task]["local"] += 1
+            _call_stats[task]["ollama"] += 1
     return result
 
 
@@ -436,15 +435,15 @@ def enhance_note(
     use_cache: bool = True,
     ollama_host: str = "",
 ) -> Optional[str]:
-    """统一增强入口：根据 provider 路由到本地或云端模型。
+    """统一增强入口：根据 provider 路由到 Ollama 或云端模型。
 
     Args:
         text: 笔记文本
         task: "summary" 或 "tags"
-        provider: "local" / "cloud" / "none"
-        model: 模型名（cloud 默认 deepseek-chat，local 默认 qwen2.5:1.5b）
+        provider: "ollama" / "cloud" / "none"
+        model: 模型名（cloud 默认 deepseek-chat，ollama 默认 qwen2.5:1.5b）
         use_cache: 是否使用缓存
-        ollama_host: provider=local 时的 Ollama 主机地址（由设备级云配置提供）
+        ollama_host: provider=ollama 时的 Ollama 主机地址（由设备级云配置提供）
     """
     if provider == "none":
         return None
@@ -461,14 +460,14 @@ def enhance_note(
             _call_stats[task]["cloud"] += 1
         return result
 
-    if provider == "local":
+    if provider == "ollama":
         if not model:
             model = "qwen2.5:1.5b"
         key = (task, provider)
         if key not in _enhance_provider_logged:
-            log.info(f"增强 [{task}] 路由: provider=local, model={model}, host={ollama_host}")
+            log.info(f"增强 [{task}] 路由: provider=ollama, model={model}, host={ollama_host}")
             _enhance_provider_logged.add(key)
-        return local_process_note(text, task=task, model=model, use_cache=use_cache, ollama_host=ollama_host)
+        return ollama_process_note(text, task=task, model=model, use_cache=use_cache, ollama_host=ollama_host)
 
     log.error(f"enhance_note 不支持的 provider: {provider}")
     return None
@@ -596,7 +595,7 @@ def process_note_vision(
 
 
 # %% [markdown]
-# # Ollama 本地 Vision API
+# # Ollama Vision API
 
 # %% [markdown]
 # ## _is_valid_vision_result(content: str) -> bool

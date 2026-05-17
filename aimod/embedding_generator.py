@@ -260,7 +260,7 @@ class EmbeddingGenerator:
     _enhance_model_logged = False
 
     def enhance_chunk_metadata(self, chunk_content: str, note_tags: str, config: Dict):
-        """增强生成小结和标签（provider-agnostic: cloud/local/none）
+        """增强生成小结和标签（provider-agnostic: cloud/ollama/none）
 
         Returns:
             enhanced_metadata: 增强后的元数据字典，包含 enhanced 标记
@@ -268,7 +268,7 @@ class EmbeddingGenerator:
         enhanced_metadata = {"enhanced": False}
 
         cloud_model = config.get("cloud_model", "deepseek-chat")
-        local_model = config.get("local_model", "qwen2.5:1.5b")
+        ollama_chat_model = config.get("ollama_chat_model", "qwen2.5:1.5b")
         summary_provider = config.get("summary_model", "cloud")
         tags_provider = config.get("tags_model", "cloud")
 
@@ -280,16 +280,16 @@ class EmbeddingGenerator:
         if not self._enhance_model_logged:
             log.info(
                 f"AI增强策略：摘要={summary_provider}"
-                f"({cloud_model if summary_provider == 'cloud' else local_model})"
+                f"({cloud_model if summary_provider == 'cloud' else ollama_chat_model})"
                 f"，标签={tags_provider}"
-                f"({cloud_model if tags_provider == 'cloud' else local_model})"
+                f"({cloud_model if tags_provider == 'cloud' else ollama_chat_model})"
             )
             self._enhance_model_logged = True
 
         # 摘要增强
         summary = enhance_note(
             chunk_content, task="summary", provider=summary_provider,
-            model=cloud_model if summary_provider == "cloud" else local_model,
+            model=cloud_model if summary_provider == "cloud" else ollama_chat_model,
             ollama_host=ollama_url,
         )
         if summary:
@@ -301,7 +301,7 @@ class EmbeddingGenerator:
         # 标签增强
         tags_str = enhance_note(
             chunk_content, task="tags", provider=tags_provider,
-            model=cloud_model if tags_provider == "cloud" else local_model,
+            model=cloud_model if tags_provider == "cloud" else ollama_chat_model,
             ollama_host=ollama_url,
         )
         if tags_str:

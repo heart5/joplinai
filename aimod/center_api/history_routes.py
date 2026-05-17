@@ -71,7 +71,7 @@ def history_finalize_run(data: dict):
             success, error_message
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
-            data["run_id"], data["timestamp"], data["embedding_model"],
+            data["run_id"], data["timestamp"], data["ollama_embedding_model"],
             data["notebook_count"], data["total_notes_processed"],
             data["total_chunks_processed"], data["total_notes_added"],
             data["total_notes_removed"], data.get("success", True),

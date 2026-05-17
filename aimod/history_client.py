@@ -96,7 +96,7 @@ class HistoryClient:
             return
         self._local_add_notebook_record(notebook_title, stats, run_id, timestamp)
 
-    def finalize_run(self, run_id: str, timestamp: str, embedding_model: str,
+    def finalize_run(self, run_id: str, timestamp: str, ollama_embedding_model: str,
                      notebook_count: int, total_notes_processed: int,
                      total_chunks_processed: int, total_notes_added: int,
                      total_notes_removed: int, success: bool = True,
@@ -104,7 +104,7 @@ class HistoryClient:
         payload = {
             "run_id": run_id,
             "timestamp": timestamp,
-            "embedding_model": embedding_model,
+            "ollama_embedding_model": ollama_embedding_model,
             "notebook_count": notebook_count,
             "total_notes_processed": total_notes_processed,
             "total_chunks_processed": total_chunks_processed,
@@ -116,7 +116,7 @@ class HistoryClient:
         if self._request("POST", "/history/finalize_run", json=payload):
             log.info(f"远程历史 finalize: {run_id}")
             return
-        self._local_finalize_run(run_id, timestamp, embedding_model, notebook_count,
+        self._local_finalize_run(run_id, timestamp, ollama_embedding_model, notebook_count,
                                  total_notes_processed, total_chunks_processed,
                                  total_notes_added, total_notes_removed, success, error_message)
 
@@ -178,7 +178,7 @@ class HistoryClient:
         except Exception as e:
             log.error(f"本地历史写入失败: {e}")
 
-    def _local_finalize_run(self, run_id: str, timestamp: str, embedding_model: str,
+    def _local_finalize_run(self, run_id: str, timestamp: str, ollama_embedding_model: str,
                             notebook_count: int, total_notes_processed: int,
                             total_chunks_processed: int, total_notes_added: int,
                             total_notes_removed: int, success: bool, error_message: str):
@@ -189,7 +189,7 @@ class HistoryClient:
                 total_notes_processed, total_chunks_processed,
                 total_notes_added, total_notes_removed, success, error_message
             ) VALUES (?,?,?,?,?,?,?,?,?,?)""", (
-                run_id, timestamp, embedding_model, notebook_count,
+                run_id, timestamp, ollama_embedding_model, notebook_count,
                 total_notes_processed, total_chunks_processed,
                 total_notes_added, total_notes_removed, success, error_message,
             ))

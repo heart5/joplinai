@@ -39,7 +39,7 @@ with pathmagic.Context():
 __all__ = ["CONFIG"]
 
 CONFIG = {
-    "embedding_model": getinivaluefromcloud("joplinai", "embedding_model") or "dengcao/bge-large-zh-v1.5",
+    "ollama_embedding_model": getinivaluefromcloud("joplinai", "ollama_embedding_model") or "dengcao/bge-large-zh-v1.5",
     "chat_model": chat_model
     if (chat_model := getinivaluefromcloud("joplinai", "chat_model"))
     else "qwen:1.8b",
@@ -63,6 +63,6 @@ CONFIG = {
 
 # %%
 model_name = (
-    CONFIG.get("embedding_model").replace(":", "_").replace("/", "_").replace("-", "_")
+    CONFIG.get("ollama_embedding_model").replace(":", "_").replace("/", "_").replace("-", "_")
 )
 CONFIG["collection_name"] = f"joplin_{model_name}"
