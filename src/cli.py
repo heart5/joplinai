@@ -30,6 +30,7 @@ with pathmagic.Context():
     try:
         from aimod.history_client import HistoryClient
         from aimod.run_tracker import RunTracker
+        from func.getid import getdeviceid
         from func.jpfuncs import getinivaluefromcloud
         from func.logme import log
         from func.wrapfuncs import timethis
@@ -87,6 +88,29 @@ def parse_args():
         help="指定笔记ID列表（用\",\"或\"，\"分割），作为虚拟笔记集处理（默认：空）",
     )
     return parser.parse_args()
+
+
+# %% [markdown]
+# # _resolve_center_url()
+
+
+# %%
+def _resolve_center_url() -> str:
+    """解析 center_api URL，本机为数据中心时走 localhost。
+
+    云端配置项 center_host_deviceid 与 func.getid.getdeviceid() 比对，
+    匹配则返回 http://127.0.0.1:5003，否则走云端 joplinai_center_url。
+    """
+    center_deviceid = getinivaluefromcloud("joplinai", "center_host_deviceid")
+    if center_deviceid:
+        local_id = getdeviceid()
+        if local_id and str(local_id) == str(center_deviceid):
+            log.info(f"本机 deviceid 匹配 center_host_deviceid，center_url 走 localhost")
+            return "http://127.0.0.1:5003"
+    remote_url = getinivaluefromcloud("joplinai", "joplinai_center_url")
+    if not remote_url:
+        remote_url = "http://127.0.0.1:5003"
+    return remote_url
 
 
 # %% [markdown]
@@ -148,12 +172,10 @@ def main() -> None:
         sys.exit(1)
 
     # 初始化历史数据库客户端（远程优先）
+    remote_url = _resolve_center_url()
+    api_key = getinivaluefromcloud("joplinai", "joplinai_center_api_key")
     history_client = None
     try:
-        remote_url = getinivaluefromcloud("joplinai", "joplinai_center_url")
-        if not remote_url:
-            remote_url = "http://127.0.0.1:5003"
-        api_key = getinivaluefromcloud("joplinai", "joplinai_center_api_key")
         if remote_url and api_key:
             history_client = HistoryClient(remote_url, api_key)
     except Exception:
@@ -162,10 +184,6 @@ def main() -> None:
     # 初始化笔记状态客户端（远程优先）
     state_client = None
     try:
-        remote_url = getinivaluefromcloud("joplinai", "joplinai_center_url")
-        if not remote_url:
-            remote_url = "http://127.0.0.1:5003"
-        api_key = getinivaluefromcloud("joplinai", "joplinai_center_api_key")
         if remote_url and api_key:
             from aimod.state_client import ProcessStateClient
             state_client = ProcessStateClient(remote_url, api_key)
