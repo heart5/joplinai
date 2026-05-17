@@ -75,7 +75,7 @@ aimod/                  # AI 核心包
 ├── chunk_optimizer.py      # 自适应分块（拆分自 embedding_generator）
 ├── text_splitter.py        # 文本切分（拆分自 embedding_generator）
 ├── vector_db_manager.py    # ChromaDB CRUD
-├── cache_manager.py        # 本地缓存回退
+├── cache_manager.py        # SQLite 本地缓存（单元测试用）
 ├── note_enhancer.py         # AI增强
 ├── run_tracker.py          # 运行追踪
 └── runner_config.py        # 运行器配置
@@ -116,7 +116,7 @@ python joplin_web_app.py
 
 - `aimod/` — AI 核心：文本分块与嵌入（`embedding_generator.py`、`chunk_optimizer.py`、`text_splitter.py`）、ChromaDB 操作（`vector_db_manager.py`）、AI 缓存（`cache_manager.py`）、AI增强（`note_enhancer.py`）、运行追踪（`run_tracker.py`）
 - `aimod/center_api/` — 数据中心 Flask 包（`cache_routes`、`history_routes`、`state_routes`、`user_routes`）
-- `aimod/center_client/` — 数据中心客户端（`CacheClient`、`ProbeCacheClient`、`HistoryClient`、`ProcessStateClient`、`UserManagerClient`），全部 remote-first + local fallback
+- `aimod/*_client.py` — 数据中心客户端（`CacheClient` 纯远程、`ProbeCacheClient`/`HistoryClient`/`UserManagerClient` remote-first + local fallback、`ProcessStateClient` 纯远程）
 - `src/` — 核心模块：用户管理（`user_manager.py`）、配置管理（`config_manager.py`）、统一报告（`report_writer.py`）、Q&A 系统（`qa_system.py`）
 - `src/web_app/` — Web 门户包（`create_app()` 工厂 + `routes`、`auth`、`admin`、`api`）
 - `func/` — 工具子模块（git submodule `heart5/func`）：Joplin API 封装、配置读取、日志、路径检测
