@@ -35,6 +35,21 @@ jupyter:
 - TECHNICAL_MANUAL.md：9处修正 — 拓扑图/序列图/协议表/ER schema/ChromaDB集合名和元数据字段/健康检查端口
 - CHANGELOG.md：拆分5月16-17日合并条目为独立日期
 
+**虚拟笔记集执行范围控制**（commit `44c8cef`）：
+
+- `src/cli.py`：用 `args.notebook_titles != CONFIG["notebook_titles"]` 区分用户意图
+- 显式 `--notebook_titles` → 仅处理指定笔记本，跳过虚拟笔记集 `[指定笔记]`
+- 显式 `--note_ids` → 仅处理指定笔记ID，跳过物理笔记本循环
+- 定时器全量模式不变：物理笔记本 + 虚拟集都处理
+
+**消除 JSON 状态文件 + embedding_model 云配置化**（commit `18a6892`）：
+
+- `aimod/state_client.py`：移除 `_local_load/_local_save` 本地 JSON fallback，失败时报错不静默降级
+- `aimod/center_api/state_routes.py`：新增 `/state/run_state/{load,save,delete}` 3 个端点，利用现有 `note_process_state` 表存取
+- `joplinai.py`：`embedding_model` 改为云端读取 + 硬编码 fallback；删除 `load/save_process_state` 函数及 `CONFIG["state_path"]`
+- `src/cli.py`：checkpoint/batch_progress 改走 `state_client.run_state`（DB），移除 `state_path` 及其文件依赖
+- `src/qa_config.py`：`embedding_model` 改为云端读取，与向量化侧同源
+
 
 ### 2026年5月16日
 
