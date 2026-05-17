@@ -257,6 +257,8 @@ class EmbeddingGenerator:
 # ## enhance_chunk_metadata(chunk_content: str, note_tags: str, config: Dict)
 
     # %%
+    _enhance_model_logged = False
+
     def enhance_chunk_metadata(self, chunk_content: str, note_tags: str, config: Dict):
         """增强生成小结和标签（provider-agnostic: cloud/local/none）
 
@@ -267,9 +269,20 @@ class EmbeddingGenerator:
 
         cloud_model = config.get("cloud_model", "deepseek-chat")
         local_model = config.get("local_model", "qwen2.5:1.5b")
+        summary_provider = config.get("summary_model", "cloud")
+        tags_provider = config.get("tags_model", "cloud")
+
+        # 首次调用时输出增强模型策略
+        if not self._enhance_model_logged:
+            log.info(
+                f"AI增强策略：摘要={summary_provider}"
+                f"({cloud_model if summary_provider == 'cloud' else local_model})"
+                f"，标签={tags_provider}"
+                f"({cloud_model if tags_provider == 'cloud' else local_model})"
+            )
+            self._enhance_model_logged = True
 
         # 摘要增强
-        summary_provider = config.get("summary_model", "cloud")
         summary = enhance_note(
             chunk_content, task="summary", provider=summary_provider,
             model=cloud_model if summary_provider == "cloud" else local_model,
@@ -281,7 +294,6 @@ class EmbeddingGenerator:
             enhanced_metadata["chunk_summary"] = ""
 
         # 标签增强
-        tags_provider = config.get("tags_model", "cloud")
         tags_str = enhance_note(
             chunk_content, task="tags", provider=tags_provider,
             model=cloud_model if tags_provider == "cloud" else local_model,
