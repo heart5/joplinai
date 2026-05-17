@@ -77,7 +77,7 @@ class TestCacheFlow:
             result = de.deepseek_process_note("测试", task="summary", use_cache=True)
             assert result == "新结果"
             mock_api.assert_called_once()
-            mock_cm.set.assert_called_once_with("miss123", "summary", "新结果")
+            mock_cm.set.assert_called_once_with("miss123", "summary", "新结果", "deepseek-chat")
 
     def test_bypass_cache_direct_api(self, de, monkeypatch):
         monkeypatch.setattr(de, "DEEPSEEK_API_KEY", "fake-key")

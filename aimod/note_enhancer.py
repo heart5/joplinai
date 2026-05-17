@@ -20,7 +20,6 @@
 # # 导入库
 
 # %%
-import os
 import time
 from typing import Optional
 
@@ -32,9 +31,7 @@ import pathmagic
 
 with pathmagic.Context():
     try:
-        from aimod.cache_manager import SQLiteCacheManager
         from func.datatools import compute_content_hash
-        from func.first import getdirmain
         from func.jpfuncs import getinivaluefromcloud
         from func.logme import log
     except ImportError as e:
@@ -63,18 +60,6 @@ DEFAULT_OLLAMA_VISION_MODEL = "minicpm-v"  # Ollama Vision 模型
 # %%
 # 初始化全局缓存管理器（单例模式）
 _CACHE_MANAGER = None
-CACHE_DIR = getdirmain() / "data"
-CACHE_FILE = CACHE_DIR / "joplinai_center.db"
-
-
-# %% [markdown]
-# ## _ensure_cache_dir()
-
-# %%
-def _ensure_cache_dir() -> None:
-    """确保缓存目录存在"""
-    if not os.path.exists(CACHE_DIR):
-        os.makedirs(CACHE_DIR, exist_ok=True)
 
 
 # %% [markdown]
@@ -96,7 +81,7 @@ __all__ = [
 ]
 
 def get_cache_manager():
-    """获取缓存管理器 — 云端未配 URL 则本机为生产主机走本地"""
+    """获取缓存管理器 — 云端未配 URL 则本机为生产主机走 localhost"""
     global _CACHE_MANAGER
     if _CACHE_MANAGER is not None:
         return _CACHE_MANAGER
@@ -111,9 +96,8 @@ def get_cache_manager():
         _CACHE_MANAGER = CacheClient(remote_url, api_key)
         return _CACHE_MANAGER
 
-    _ensure_cache_dir()
-    _CACHE_MANAGER = SQLiteCacheManager(db_path=CACHE_FILE)
-    return _CACHE_MANAGER
+    log.error("缓存管理器初始化失败：缺少 joplinai_center_url 或 joplinai_center_api_key")
+    return None
 
 
 # %% [markdown]
