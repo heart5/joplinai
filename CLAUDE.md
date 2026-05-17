@@ -45,7 +45,7 @@ All services are Flask apps。No Docker/containerization in production (docker-c
 Center API 的 gunicorn 入口：`"aimod.center_api:create_app()"`（app factory 模式）。
 Web App 入口：`joplin_web_app:app`（模块级 `app = create_app()`，勿放 `if __name__` 内——gunicorn 不执行该块）。
 
-Data flow: `joplinai.py` → TC 本地 (Joplin Server / ChromaDB / center_api) + 远程 HCX (Ollama embedding / 11434) + 外部 DeepSeek API (AI增强)。各 center_client 通过 HTTP + API Key → `aimod/center_api/` → `data/joplinai_center.db`
+Data flow: `joplinai.py` → TC 本地 (Joplin Server / ChromaDB / center_api) + 远程 HCX (Ollama embedding / 11434) + 外部 DeepSeek API (AI增强)。各 `aimod/*_client.py` 通过 HTTP + API Key → `aimod/center_api/` → `data/joplinai_center.db`
 
 `joplinai_center.db` 包含 10 张表：
 - 缓存与历史：`enhance_cache`、`probe_cache`、`notebook_history`、`global_run_history`
@@ -96,13 +96,6 @@ aimod/                  # AI 核心包
 │   ├── history_routes.py   # /history/* 端点
 │   ├── state_routes.py     # /state/* 端点
 │   └── user_routes.py      # /users/* /auth/* 端点
-├── center_client/          # 数据中心客户端（拆分为独立文件）
-│   ├── __init__.py         # 重新导出全部客户端
-│   ├── cache_client.py     # CacheClient
-│   ├── probe_cache.py      # ProbeCacheClient
-│   ├── history.py          # HistoryClient
-│   ├── process_state.py    # ProcessStateClient
-│   └── user_client.py      # UserManagerClient
 func/                   # 工具子模块 (git submodule heart5/func)
 static/                 # 前端静态资源
 templates/              # Jinja2 模板
@@ -121,9 +114,13 @@ log/                    # 日志 (gitignored)
 - `cache_manager.py` — SQLite LRU 缓存（本地回退用）
 - `note_enhancer.py` — AI增强 摘要/标签增强（cloud/local/none），含 Ollama vision 描述
 - `run_tracker.py` — RunTracker 类，运行数据采集和历史记录 (remote-first)
+- `cache_client.py` — CacheClient，增强缓存远程优先+本地回退
+- `history_client.py` — HistoryClient，运行历史远程存储
+- `probe_client.py` — ProbeCacheClient，探测缓存远程存储
+- `state_client.py` — ProcessStateClient，笔记处理状态远程存储（纯远程，无本地 fallback）
+- `user_client.py` — UserManagerClient，用户管理远程存储
 - `report_writer.py` — 统一报告生成（在 `src/`）
 - `center_api/` — 数据中心 Flask 包（5 个端点蓝图）
-- `center_client/` — 数据中心客户端（5 个独立类）
 - `__init__.py` — `get_logger(name)` 统一日志工厂，自动继承 func/logme 的 handler/level
 
 ### Utility Submodule (`func/`)
@@ -172,7 +169,7 @@ Production: systemd services managed via `deploy/deploy.sh`:
   - **重要 `.md` 文档同样关联 `.ipynb`**：`CLAUDE.md`、`README.md`、`docs/CHANGELOG.md`、`docs/TECHNICAL_MANUAL.md` 通过 YAML frontmatter 声明 `formats: ipynb,md`。内容变更后必须同步 ipynb（pre-commit hook 自动执行）。
   - `# %%` 标记代码 cell，`# %% [markdown]` 标记 markdown cell。**关键规则**：markdown cell 后的下一段代码前必须有显式 `# %%`，否则 jupytext sync 会把代码当作 markdown 注释掉。
       - **自动检测**：`tools/check_jupytext_comment.py` 扫描被误注释的 Flask route/endpoint。pre-commit hook（`.git/hooks/pre-commit`）在 jupytext sync 后自动执行，CI 兜底。
-- **`__all__`**: 所有 `aimod/`、`src/`、`aimod/center_api/`、`aimod/center_client/` 的公开模块都有 `__all__` 明确导出列表。
+- **`__all__`**: 所有 `aimod/`、`src/`、`aimod/center_api/` 的公开模块都有 `__all__` 明确导出列表。
 - **`__repr__`**: 5 个关键数据类有 `__repr__`：`CacheResult`, `VectorDBManager`, `EmbeddingGenerator`, `RunTracker`, `QASystem`。
 - **Type annotations**: 所有公开函数有返回类型标注 (`-> None`, `-> str`, `-> Optional[str]` 等)。
 - **`aimod.get_logger(name)`**: 统一日志工厂，自动继承 `func/logme` 的 handler 和 level。用法：`from aimod import get_logger; logger = get_logger(__name__)`。
