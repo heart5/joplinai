@@ -249,8 +249,8 @@ class VectorDBManager:
         # 尝试从Ollama获取模型信息
         try:
             # 通过生成一个简单嵌入来获取维度
-            test_response = ollama.embeddings(model=model_name, prompt="test")
-            dim = len(test_response["embedding"])
+            test_response = ollama.embed(model=model_name, input="test")
+            dim = len(test_response["embeddings"][0])
             self._model_dimension_cache[model_name] = dim
             log.info(f"通过测试嵌入获取模型维度: {model_name} -> {dim}D")
             return dim
@@ -618,10 +618,10 @@ class VectorDBManager:
             # 尝试生成嵌入，最多重试3次
             for attempt in range(3):
                 try:
-                    response = ollama.embeddings(model=self.embedding_model, prompt=query)
-                    if "embedding" in response and response["embedding"]:
-                        log.info(f"成功生成查询嵌入，维度: {len(response['embedding'])}")
-                        return response["embedding"]
+                    response = ollama.embed(model=self.embedding_model, input=query)
+                    if "embeddings" in response and response["embeddings"]:
+                        log.info(f"成功生成查询嵌入，维度: {len(response['embeddings'][0])}")
+                        return response["embeddings"][0]
                     else:
                         log.warning(f"第{attempt + 1}次尝试：返回的嵌入为空")
                 except Exception as e:

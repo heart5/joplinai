@@ -174,8 +174,8 @@ class EmbeddingGenerator:
         # 尝试从Ollama获取模型信息
         try:
             # 通过生成一个简单嵌入来获取维度
-            test_response = ollama.embeddings(model=self.model_name, prompt="test")
-            dim = len(test_response["embedding"])
+            test_response = ollama.embed(model=self.model_name, input="test")
+            dim = len(test_response["embeddings"][0])
             self._model_dimension_cache[self.model_name] = dim
             log.info(f"通过测试嵌入获取模型维度: {self.model_name} -> {dim}D")
             return dim
@@ -968,14 +968,14 @@ class EmbeddingGenerator:
         """调用远程恒创云Ollama生成嵌入"""
         host = self.config.get("ollama_host", host)
         port = self.config.get("ollama_port", port)
-        url = f"http://{host}:{port}/api/embeddings"
+        url = f"http://{host}:{port}/api/embed"
         model = self.model_name
         # print(host, port, model)
-        payload = {"model": model, "prompt": text}
+        payload = {"model": model, "input": text}
         try:
             resp = requests.post(url, json=payload, timeout=30)
             resp.raise_for_status()
-            return resp.json()["embedding"]
+            return resp.json()["embeddings"][0]
         except Exception as e:
             # 从响应体中提取 Ollama 详细错误信息（如"input length exceeds context length"）
             error_msg = str(e)
