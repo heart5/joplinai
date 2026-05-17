@@ -17,6 +17,7 @@
 # # Cache Blueprint — 增强缓存 + 探测缓存端点
 
 # %%
+import itertools
 import json
 import sqlite3
 from datetime import datetime
@@ -48,19 +49,19 @@ cache_bp = Blueprint("cache", __name__)
 
 # %%
 def enhance_cache_get(content_hash: str, task: str, model: str = "") -> dict:
-    cache_key = f"{content_hash}_{task}_{model}" if model else f"{content_hash}_{task}"
+    """按 content_hash + task 列匹配（不依赖 cache_key 格式）。"""
     conn = _init_db()
     row = conn.execute(
-        "SELECT result, hit_count, total_hits FROM enhance_cache "
-        "WHERE cache_key=? AND (julianday('now') - julianday(created_at)) < 90",
-        (cache_key,),
+        "SELECT result, hit_count, total_hits, cache_key FROM enhance_cache "
+        "WHERE content_hash=? AND task=? ORDER BY created_at DESC LIMIT 1",
+        (content_hash, task),
     ).fetchone()
 
     if not row:
         conn.close()
-        return {"found": False, "cache_key": cache_key}
+        return {"found": False, "cache_key": f"{content_hash}_{task}"}
 
-    cached_result, current_hit_count, total_hits = row
+    cached_result, current_hit_count, total_hits, effective_key = row
     new_hit_count = current_hit_count + 1
     new_total_hits = total_hits + 1
     now_iso = datetime.now().isoformat()
@@ -70,23 +71,37 @@ def enhance_cache_get(content_hash: str, task: str, model: str = "") -> dict:
         conn.execute(
             "UPDATE enhance_cache SET hit_count=0, total_hits=?, last_accessed=?, "
             "last_validated_at=?, validation_result='pending' WHERE cache_key=?",
-            (new_total_hits, now_iso, now_iso, cache_key),
+            (new_total_hits, now_iso, now_iso, effective_key),
         )
     else:
         conn.execute(
             "UPDATE enhance_cache SET hit_count=?, total_hits=?, last_accessed=? WHERE cache_key=?",
-            (new_hit_count, new_total_hits, now_iso, cache_key),
+            (new_hit_count, new_total_hits, now_iso, effective_key),
         )
     conn.commit()
     conn.close()
     return {
         "found": True,
-        "cache_key": cache_key,
+        "cache_key": effective_key,
         "content": cached_result,
         "requires_validation": should_validate,
         "current_hit_count": 0 if should_validate else new_hit_count,
         "total_hits": new_total_hits,
     }
+
+
+_enhance_set_counter = itertools.count()
+
+
+def _get_cache_limit() -> int:
+    try:
+        import pathmagic
+        with pathmagic.Context():
+            from func.jpfuncs import getinivaluefromcloud
+        val = getinivaluefromcloud("joplinai", "cache_limit")
+        return int(val) if val else 50000
+    except Exception:
+        return 50000
 
 
 def enhance_cache_set(content_hash: str, task: str, result: str, model: str = ""):
@@ -101,6 +116,20 @@ def enhance_cache_set(content_hash: str, task: str, result: str, model: str = ""
         (cache_key, content_hash, task, result, now_iso, now_iso),
     )
     conn.commit()
+
+    if next(_enhance_set_counter) % 1000 == 0:
+        limit = _get_cache_limit()
+        count = conn.execute("SELECT COUNT(*) FROM enhance_cache").fetchone()[0]
+        if count > limit:
+            delete_n = max(1, count // 10)
+            conn.execute(
+                "DELETE FROM enhance_cache WHERE cache_key IN ("
+                "SELECT cache_key FROM enhance_cache ORDER BY last_accessed ASC LIMIT ?"
+                ")", (delete_n,),
+            )
+            conn.commit()
+            log.info(f"[增强缓存] 淘汰 {delete_n} 条（总量 {count} > 上限 {limit}）")
+
     conn.close()
 
 

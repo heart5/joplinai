@@ -50,6 +50,16 @@ jupyter:
 - `src/cli.py`：checkpoint/batch_progress 改走 `state_client.run_state`（DB），移除 `state_path` 及其文件依赖
 - `src/qa_config.py`：`embedding_model` 改为云端读取，与向量化侧同源
 
+**enhance_cache 键格式兼容性修复 + 本地回退移除**：
+
+- 根因：旧缓存键 `{hash}_{task}`，新代码 `{hash}_{task}_{model}` → 11,712 条已缓存 AI 增强结果全部 miss
+- `aimod/cache_manager.py`：`get()` 改为按 `content_hash` + `task` 列匹配（走已有索引 `idx_hash_task`），不依赖 `cache_key` 格式；删除 90 天 freshness gate
+- `aimod/center_api/cache_routes.py`：`enhance_cache_get()` 同上改造；`enhance_cache_set()` 新增数量驱动清理（每 1000 次 set 检查，超 `cache_limit` 删 10%）
+- `aimod/cache_client.py`：删除本地 `SQLiteCacheManager` 回退，HTTP 失败直接返回 miss，不再静默降级到 `processing_cache` 表
+- `aimod/note_enhancer.py`：`get_cache_manager()` 删除本地 SQLite 兜底，删除 `os`/`getdirmain`/`CACHE_*`/`_ensure_cache_dir` 等仅服务于本地回退的代码
+- `set()` 保持 `cache_key = {hash}_{task}_{model}`（model 后缀保留供后续数据质量分析）
+- `tests/test_note_enhancer.py`：`test_cache_miss_calls_api` 更新 `set()` 调用断言匹配 4 参数
+
 
 ### 2026年5月16日
 

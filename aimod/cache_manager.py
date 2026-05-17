@@ -134,78 +134,50 @@ class SQLiteCacheManager:
 
     # %%
     def get(self, content_hash: str, task: str, model: str = "") -> CacheResult:
-        """
-        获取缓存结果。
-        核心职责：1. 返回缓存内容 2. 更新访问计数和时间 3. 判断并标记是否需要验证。
-        绝不包含任何API调用逻辑。
-        """
-        cache_key = f"{content_hash}_{task}_{model}" if model else f"{content_hash}_{task}"
+        """获取缓存结果，按 content_hash + task 列匹配（不依赖 cache_key 格式）。"""
         conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-
-        # 查询缓存内容和当前计数
-        cursor.execute(
-            """
-            SELECT result, hit_count, total_hits FROM processing_cache
-            WHERE cache_key = ? AND (julianday('now') - julianday(created_at)) < 90
-        """,
-            (cache_key,),
-        )
-        row = cursor.fetchone()
+        row = conn.execute(
+            "SELECT result, hit_count, total_hits, cache_key FROM processing_cache "
+            "WHERE content_hash=? AND task=? ORDER BY created_at DESC LIMIT 1",
+            (content_hash, task),
+        ).fetchone()
 
         if not row:
             conn.close()
-            # 未命中
             return CacheResult(
                 content=None,
                 requires_validation=False,
-                cache_key=cache_key,
+                cache_key=f"{content_hash}_{task}",
                 current_hit_count=0,
                 total_hits=0,
             )
 
-        cached_result, current_hit_count, total_hits = row
+        cached_result, current_hit_count, total_hits, effective_key = row
         new_hit_count = current_hit_count + 1
         new_total_hits = total_hits + 1
         now_iso = datetime.now().isoformat()
-
-        # 判断本次命中后是否达到验证阈值
         should_validate = new_hit_count >= self.VALIDATION_THRESHOLD
 
-        # 更新数据库：计数、最后访问时间
-        update_sql = """
-            UPDATE processing_cache
-            SET hit_count = ?, total_hits = ?, last_accessed = ?
-        """
-        update_params = [new_hit_count, new_total_hits, now_iso]
+        update_sql = (
+            "UPDATE processing_cache SET hit_count=0, total_hits=?, last_accessed=?, "
+            "last_validated_at=?, validation_result='pending' WHERE cache_key=?"
+            if should_validate else
+            "UPDATE processing_cache SET hit_count=?, total_hits=?, last_accessed=? WHERE cache_key=?"
+        )
+        update_params = (
+            [new_total_hits, now_iso, now_iso, effective_key] if should_validate
+            else [new_hit_count, new_total_hits, now_iso, effective_key]
+        )
 
-        if should_validate:
-            # 达到阈值，标记为需要验证，并重置周期计数
-            update_sql += (
-                ", hit_count = 0, last_validated_at = ?, validation_result = 'pending'"
-            )
-            update_params.extend([now_iso])
-            # 注意：这里将 hit_count 重置为0，开始新的计数周期
-
-        update_sql += " WHERE cache_key = ?"
-        update_params.append(cache_key)
-
-        cursor.execute(update_sql, update_params)
+        conn.execute(update_sql, update_params)
         conn.commit()
         conn.close()
 
-        # log.debug(
-        #     f"缓存查询: {cache_key[:12]}... (周期命中={new_hit_count}, 总计={new_total_hits}, 需验证={should_validate})"
-        # )
-
-        # 返回封装结果，告诉调用者缓存内容以及“是否需要验证”
         return CacheResult(
             content=cached_result,
             requires_validation=should_validate,
-            cache_key=cache_key,
-            current_hit_count=new_hit_count
-            if not should_validate
-            else 0,  # 返回重置前的计数或重置后的0
+            cache_key=effective_key,
+            current_hit_count=0 if should_validate else new_hit_count,
             total_hits=new_total_hits,
         )
 

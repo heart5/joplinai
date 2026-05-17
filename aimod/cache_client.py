@@ -15,7 +15,7 @@
 
 # %% [markdown]
 # # CacheClient
-# AI增强缓存客户端 — 远程优先 + 本地 SQLite 回退
+# AI增强缓存客户端 — 纯远程，无本地回退
 
 # %%
 import logging
@@ -28,27 +28,23 @@ import pathmagic
 
 with pathmagic.Context():
     try:
-        from aimod.cache_manager import CacheResult, SQLiteCacheManager
-        from func.first import getdirmain
+        from aimod.cache_manager import CacheResult
         from func.logme import log
     except ImportError as e:
         logging.basicConfig(level=logging.INFO)
         log = logging.getLogger(__name__)
         log.error(f"导入项目模块失败: {e}")
 
-CENTER_DB_PATH = getdirmain() / "data" / "joplinai_center.db"
-
 
 # %%
 __all__ = ["CacheClient"]
 
 class CacheClient:
-    """AI增强缓存客户端 — 远程优先 + 本地 SQLite 回退"""
+    """AI增强缓存客户端 — 纯远程，无本地回退"""
 
     def __init__(self, remote_url: str, api_key: str):
         self.remote_url = remote_url.rstrip("/")
         self.auth_headers = {"X-API-Key": api_key}
-        self.local = SQLiteCacheManager(db_path=str(CENTER_DB_PATH))
 
     def _request(self, method: str, path: str, **kwargs) -> Optional[requests.Response]:
         try:
@@ -81,7 +77,13 @@ class CacheClient:
                     current_hit_count=data["current_hit_count"],
                     total_hits=data["total_hits"],
                 )
-        return self.local.get(content_hash, task, model)
+        return CacheResult(
+            content=None,
+            requires_validation=False,
+            cache_key=f"{content_hash}_{task}",
+            current_hit_count=0,
+            total_hits=0,
+        )
 
     def set(self, content_hash: str, task: str, result: str, model: str = ""):
         if self._request(
@@ -90,7 +92,7 @@ class CacheClient:
             json={"content_hash": content_hash, "task": task, "result": result, "model": model},
         ):
             return
-        self.local.set(content_hash, task, result, model)
+        log.error(f"远程缓存写入失败: {content_hash[:12]}_{task}")
 
     def update_on_validation(
         self, cache_key: str, new_result: Optional[str], validation_successful: bool
@@ -105,14 +107,15 @@ class CacheClient:
             },
         ):
             return
-        self.local.update_on_validation(cache_key, new_result, validation_successful)
+        log.error(f"远程缓存验证更新失败: {cache_key}")
 
     def get_stats(self, cache_key: str = None) -> Dict[str, Any]:
         params = {"cache_key": cache_key} if cache_key else {}
         resp = self._request("GET", "/cache/enhance/stats", params=params)
         if resp is not None:
             return resp.json()
-        return self.local.get_stats(cache_key=cache_key)
+        log.warning("远程获取缓存统计失败")
+        return {}
 
     def get_report(self) -> Dict[str, Any]:
         resp = self._request("GET", "/cache/enhance/report")

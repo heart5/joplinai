@@ -52,7 +52,7 @@ Data flow: `joplinai.py` → TC 本地 (Joplin Server / ChromaDB / center_api) +
 - 笔记状态：`note_process_state`
 - 用户管理：`users`、`sessions`、`audit_log`、`qa_history`、`chat_sessions`
 
-Center client 拆分为 5 个独立文件 (`aimod/`)，各自提供 remote-first + local fallback：`CacheClient`, `ProbeCacheClient`, `HistoryClient`, `ProcessStateClient`, `UserManagerClient`。URL 发现逻辑：云端 `joplinai_center_url` 未配置则本机为生产主机走 `127.0.0.1:5003`。
+Center client 拆分为 5 个独立文件 (`aimod/`): `CacheClient`（纯远程，无本地回退），`ProbeCacheClient`（远程优先+本地回退），`HistoryClient`（远程优先+本地回退），`ProcessStateClient`（纯远程），`UserManagerClient`（远程优先+本地回退）。URL 发现逻辑：云端 `joplinai_center_url` 未配置则本机为生产主机走 `127.0.0.1:5003`。
 
 ### Source Layout
 
@@ -114,7 +114,7 @@ log/                    # 日志 (gitignored)
 - `cache_manager.py` — SQLite LRU 缓存（本地回退用）
 - `note_enhancer.py` — AI增强 摘要/标签增强（cloud/local/none），含 Ollama vision 描述
 - `run_tracker.py` — RunTracker 类，运行数据采集和历史记录 (remote-first)
-- `cache_client.py` — CacheClient，增强缓存远程优先+本地回退
+- `cache_client.py` — CacheClient，增强缓存纯远程（无本地回退）
 - `history_client.py` — HistoryClient，运行历史远程存储
 - `probe_client.py` — ProbeCacheClient，探测缓存远程存储
 - `state_client.py` — ProcessStateClient，笔记处理状态远程存储（纯远程，无本地 fallback）
