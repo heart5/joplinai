@@ -311,7 +311,7 @@ def _call_deepseek_api_directly(
 # ## _call_ollama_local(text: str, task: str, model: str) -> Optional[str]
 
 # %%
-def _call_ollama_local(text: str, task: str, model: str) -> Optional[str]:
+def _call_ollama_local(text: str, task: str, model: str, ollama_host: str) -> Optional[str]:
     """本地 Ollama 模型处理标签/摘要，复用与云端模型相同的 prompt"""
     prompts = {
         "summary": "用1-3句话总结以下笔记核心内容，突出主题和结论：\n%s",
@@ -338,7 +338,7 @@ def _call_ollama_local(text: str, task: str, model: str) -> Optional[str]:
 
     for attempt in range(2):
         try:
-            response = ollama.chat(
+            response = ollama.Client(host=ollama_host).chat(
                 model=model,
                 messages=[{"role": "user", "content": prompt}],
                 options={"temperature": 0.3, "num_predict": 500},
@@ -396,13 +396,15 @@ def local_process_note(
     task: str = "summary",
     model: str = "qwen2.5:1.5b",
     use_cache: bool = True,
+    ollama_host: str = "",
 ) -> Optional[str]:
     """本地 Ollama 模型处理笔记（标签/摘要），支持缓存。
 
     与 deepseek_process_note 相同的接口，但使用本地 Ollama 模型。
+    ollama_host 由调用方从设备级云配置获取，确保跨主机路由正确。
     """
     if not use_cache:
-        return _call_ollama_local(text, task, model)
+        return _call_ollama_local(text, task, model, ollama_host)
 
     content_hash = compute_content_hash(text[:8000])
     cache_manager = get_cache_manager()
@@ -411,7 +413,7 @@ def local_process_note(
     if cache_result.content is not None:
         return cache_result.content
 
-    result = _call_ollama_local(text, task, model)
+    result = _call_ollama_local(text, task, model, ollama_host)
     if result:
         cache_manager.set(content_hash, task, result, model)
         if task in _call_stats:
@@ -432,6 +434,7 @@ def enhance_note(
     provider: str = "cloud",
     model: str = "",
     use_cache: bool = True,
+    ollama_host: str = "",
 ) -> Optional[str]:
     """统一增强入口：根据 provider 路由到本地或云端模型。
 
@@ -441,6 +444,7 @@ def enhance_note(
         provider: "local" / "cloud" / "none"
         model: 模型名（cloud 默认 deepseek-chat，local 默认 qwen2.5:1.5b）
         use_cache: 是否使用缓存
+        ollama_host: provider=local 时的 Ollama 主机地址（由设备级云配置提供）
     """
     if provider == "none":
         return None
@@ -462,9 +466,9 @@ def enhance_note(
             model = "qwen2.5:1.5b"
         key = (task, provider)
         if key not in _enhance_provider_logged:
-            log.info(f"增强 [{task}] 路由: provider=local, model={model}")
+            log.info(f"增强 [{task}] 路由: provider=local, model={model}, host={ollama_host}")
             _enhance_provider_logged.add(key)
-        return local_process_note(text, task=task, model=model, use_cache=use_cache)
+        return local_process_note(text, task=task, model=model, use_cache=use_cache, ollama_host=ollama_host)
 
     log.error(f"enhance_note 不支持的 provider: {provider}")
     return None
