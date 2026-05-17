@@ -280,19 +280,22 @@ sequenceDiagram
 
 ### 4c. Remote-First 决策流程
 
+> **例外**: `CacheClient` 和 `ProcessStateClient` 为纯远程模式，HTTP 失败直接报错/返回 miss，
+> 不执行本地回退。其余客户端（`ProbeCacheClient`, `HistoryClient`, `UserManagerClient`）仍遵循以下流程。
+
 ```mermaid
 flowchart TD
     START["客户端发起请求"] --> CHECK_URL["cloud 配置中<br/>joplinai_center_url<br/>有值?"]
     CHECK_URL -->|"有值"| REMOTE["调用远程 center_api<br/>HTTP + X-API-Key"]
     CHECK_URL -->|"无值"| IS_TC["本机是生产主机?<br/>(TC 不配 URL)"]
     IS_TC -->|"是"| LOCALHOST["调用 localhost:5003<br/>本机 center_api"]
-    IS_TC -->|"否"| FALLBACK["使用本地 SQLite/JSON<br/>回退存储"]
+    IS_TC -->|"否"| FALLBACK["使用本地 SQLite/JSON<br/>回退存储<br/>(CacheClient/ProcessStateClient 除外)"]
 
     REMOTE --> RESULT_OK{"请求成功?"}
     RESULT_OK -->|"是"| RETURN["返回结果"]
     RESULT_OK -->|"否"| RETRY{"可重试错误?"}
     RETRY -->|"是"| REMOTE
-    RETRY -->|"否"| USE_FALLBACK["降级到本地回退"]
+    RETRY -->|"否"| USE_FALLBACK["降级到本地回退<br/>(CacheClient/ProcessStateClient 直接报错)"]
     USE_FALLBACK --> RETURN
     LOCALHOST --> RETURN
     FALLBACK --> RETURN
@@ -359,7 +362,7 @@ erDiagram
     }
 
     enhance_cache {
-        text cache_key PK
+        text cache_key PK "格式 {hash}_{task}_{model}"
         text content_hash
         text task
         text result
@@ -370,6 +373,14 @@ erDiagram
         text last_validated_at
         text validation_result
     }
+    note right of enhance_cache
+        查询按 content_hash+task 列匹配
+        (idx_hash_task 索引)，
+        不依赖 cache_key 格式。
+        set() 保留 model 后缀供分析。
+        每 1000 次 set 检查，超
+        cache_limit(默认50000)淘汰10%。
+    end note
 
     probe_cache {
         text text_md5 PK
