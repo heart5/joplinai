@@ -18,13 +18,10 @@
 
 # %%
 import argparse
-import json
 import logging
-import os
 import re
 import sys
 from datetime import datetime
-from typing import Optional, Tuple
 
 # %%
 import pathmagic
@@ -33,7 +30,6 @@ with pathmagic.Context():
     try:
         from aimod.history_client import HistoryClient
         from aimod.run_tracker import RunTracker
-        from func.first import getdirmain
         from func.jpfuncs import getinivaluefromcloud
         from func.logme import log
         from func.wrapfuncs import timethis
@@ -105,13 +101,6 @@ def main() -> None:
     dynamic_config = CONFIG.copy()
 
     dynamic_config["embedding_model"] = args.model
-    model_name_str = (
-        dynamic_config.get("embedding_model")
-        .replace(":", "_").replace("/", "_").replace("-", "_")
-    )
-    dynamic_config["state_path"] = (
-        getdirmain() / "data" / f"joplin_process_state_{model_name_str}.json"
-    )
 
     dynamic_config["max_workers"] = args.workers
     dynamic_config["summary_model"] = args.summary_model
@@ -138,7 +127,6 @@ def main() -> None:
 
     log.info(
         f"动态配置：模型={dynamic_config['embedding_model']}, "
-        f"处理状态文件={dynamic_config['state_path']}, "
         f"ollama server={dynamic_config['ollama_host']}, "
         f"ollama port={dynamic_config['ollama_port']}, "
         f"chroma server={dynamic_config['chroma_server_host']}, "
@@ -197,36 +185,33 @@ def main() -> None:
     try:
         batch_size = dynamic_config.get("batch_size", 0)
         is_batch = batch_size > 0 and dynamic_config.get("force_update", False)
-        batch_progress = None
         resume_index = 0
         if is_batch:
-            batch_progress = dynamic_config["state_path"].with_suffix(".batch_progress")
-            if batch_progress.exists():
-                try:
-                    with open(batch_progress) as f:
-                        progress = json.load(f)
-                    resume_index = progress.get("next_index", 0)
+            if state_client:
+                bp = state_client.load_run_state(model_name_str2, "batch_progress")
+                if bp:
+                    resume_index = bp.get("next_index", 0)
                     log.info(
                         f"分批处理检查点: 从第 {resume_index + 1} 个笔记本继续"
                         f"（共 {total_notebook_count} 个）"
                     )
-                except Exception as e:
-                    log.warning(f"读取分批处理检查点失败: {e}，从头开始")
+            else:
+                log.error("state_client 未配置，无法读取分批处理进度")
             batch = notebook_titles[resume_index:resume_index + batch_size]
             if not batch:
                 log.info("分批处理: 所有笔记本已处理完毕")
-                batch_progress.unlink()
+                if state_client:
+                    state_client.delete_run_state(model_name_str2, "batch_progress")
                 return
             notebook_titles = batch
             log.info(f"本轮分批处理 {len(batch)} 个笔记本: {batch}")
         elif batch_size > 0:
             log.warning("--batch-size 需配合 --enable_force_update 使用，本次忽略分批设置")
 
-        checkpoint_file = dynamic_config["state_path"].with_suffix(".checkpoint")
-        if checkpoint_file.exists():
-            with open(checkpoint_file, "r") as f:
-                checkpoint = json.load(f)
-            notebook_titles = notebook_titles[checkpoint["last_processed_index"]:]
+        if state_client:
+            cp = state_client.load_run_state(model_name_str2, "checkpoint")
+            if cp:
+                notebook_titles = notebook_titles[cp["last_processed_index"]:]
 
         if not user_explicit_note_ids:
             for i, notebook_title in enumerate(notebook_titles, 1):
@@ -236,14 +221,13 @@ def main() -> None:
                 )
                 task_reporter.add_notebook_record(notebook_title, stats)
 
-                if i % 2 == 0:
+                if i % 2 == 0 and state_client:
                     checkpoint_data = {
                         "notebook": notebook_title,
                         "last_processed_index": i,
                         "timestamp": datetime.now().isoformat(),
                     }
-                    with open(checkpoint_file, "w") as f:
-                        json.dump(checkpoint_data, f)
+                    state_client.save_run_state(model_name_str2, "checkpoint", checkpoint_data)
 
             log.info("===== 所有笔记本处理完成 =====")
         else:
@@ -269,15 +253,14 @@ def main() -> None:
         if is_batch:
             new_index = resume_index + len(notebook_titles)
             if new_index >= total_notebook_count:
-                if batch_progress.exists():
-                    batch_progress.unlink()
+                if state_client:
+                    state_client.delete_run_state(model_name_str2, "batch_progress")
                 log.info("分批处理完成: 所有笔记本已处理完毕")
-            else:
-                with open(batch_progress, "w") as f:
-                    json.dump({
-                        "next_index": new_index,
-                        "timestamp": datetime.now().isoformat(),
-                    }, f)
+            elif state_client:
+                state_client.save_run_state(model_name_str2, "batch_progress", {
+                    "next_index": new_index,
+                    "timestamp": datetime.now().isoformat(),
+                })
                 log.info(f"分批处理检查点已保存: 下次运行将从第 {new_index + 1} 个笔记本继续")
 
         task_reporter.finalize_run(success=True)
@@ -294,5 +277,5 @@ def main() -> None:
         log.critical(f"主流程执行失败: {e}", exc_info=True)
         return
 
-    if checkpoint_file.exists():
-        checkpoint_file.unlink()
+    if state_client:
+        state_client.delete_run_state(model_name_str2, "checkpoint")

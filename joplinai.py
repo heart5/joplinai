@@ -28,7 +28,6 @@
 # %%
 import atexit
 import hashlib
-import json
 import logging
 import os
 import re
@@ -91,7 +90,7 @@ CONFIG = {
     ),
     "chroma_server_port": getinivaluefromcloud("joplinai", "chroma_port"),
     "notebook_titles": "顺风顺水, 日新白异, 运营管理",  # 改为笔记本名称列表字符串
-    "embedding_model": "dengcao/bge-large-zh-v1.5",  # 嵌入模型（Ollama本地模型，优先选dengcao/bge-large-zh-v1.5
+    "embedding_model": getinivaluefromcloud("joplinai", "embedding_model") or "dengcao/bge-large-zh-v1.5",
     # "embedding_model": "qwen:1.8b",  # 嵌入模型（Ollama本地模型，优先选nomic-embed-text）
     # "chunk_size": 512,  # 文本分块大小（字符数，根据模型上下文调整）
     # "max_context": 512,  # 模型最大上下文（字符数）
@@ -121,56 +120,10 @@ CONFIG = {
     "vision_ollama_host": getinivaluefromcloud("joplinai", "vision_ollama_host") or "http://127.0.0.1:11434",
 }
 
-model_name_str = (
-    CONFIG.get("embedding_model").replace(":", "_").replace("/", "_").replace("-", "_")
-)
-CONFIG["state_path"] = str(
-    getdirmain() / "data" / f"joplin_process_state_{model_name_str}.json"
-)  # 处理状态文件路径
-
 # %% [markdown]
 # # 功能函数集
 # %% [markdown]
 # ## 工具小集合
-# %% [markdown]
-# ### load_process_state(state_path: Path) -> Dict[str, Dict]
-# %%
-def load_process_state(state_path: Path) -> Dict[str, Dict]:
-    """加载处理状态（笔记ID→{更新时间, 哈希, 处理时间}）"""
-    if state_path.exists():
-        try:
-            with open(state_path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception as e:
-            log.error(f"加载状态文件失败: {e}，将重置状态")
-    return {}
-
-
-# %% [markdown]
-# ### save_process_state(state: Dict, state_path: Path)
-# %%
-def save_process_state(state: Dict, state_path: Path) -> None:
-    """保存处理状态（增强序列化）"""
-
-    def serialize(obj):
-        if isinstance(obj, datetime):
-            return obj.isoformat()
-        if isinstance(obj, (int, float, str, bool, type(None))):
-            return obj
-        if isinstance(obj, (list, tuple)):
-            return [serialize(item) for item in obj]
-        if isinstance(obj, dict):
-            return {k: serialize(v) for k, v in obj.items()}
-        return str(obj)
-
-    try:
-        serialized_state = serialize(state)
-        with open(state_path, "w", encoding="utf-8") as f:
-            json.dump(serialized_state, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        log.error(f"保存状态文件{state_path}失败: {e}")
-
-
 # %% [markdown]
 # ### filter_notes(notes: List[Any]) -> List[Any]
 
@@ -555,13 +508,14 @@ def process_notes_incremental(notebook_title: str, config: Dict, note_ids: List[
         except Exception as e:
             log.warning(f"Ollama 连接失败: {e}，本地标签/摘要将不可用")
 
-    # 加载处理状态（远程优先 + 本地回退）
+    # 加载处理状态（纯远程，无本地 fallback）
     state_client = config.get("state_client")
     if state_client:
         model_name_str = config["embedding_model"].replace(":", "_").replace("/", "_").replace("-", "_")
-        process_state = state_client.batch_load(model_name_str, Path(config["state_path"]))
+        process_state = state_client.batch_load(model_name_str)
     else:
-        process_state = load_process_state(config["state_path"])
+        log.error("state_client 未配置，无法加载处理状态，本次运行视为全新处理")
+        process_state = {}
     # 重置增强调用统计
     from aimod.note_enhancer import reset_call_stats
     reset_call_stats()
@@ -717,13 +671,13 @@ def process_notes_incremental(notebook_title: str, config: Dict, note_ids: List[
             except Exception as e:
                 log.error(f"并发处理笔记 《{note_title}》 异常: {e}")
                 failed_notes.append(note_title)
-    # 保存状态（远程优先 + 本地回退）
+    # 保存状态（纯远程，无本地 fallback）
     state_client = config.get("state_client")
     if state_client:
         model_name_str = config["embedding_model"].replace(":", "_").replace("/", "_").replace("-", "_")
-        state_client.batch_save(model_name_str, process_state, Path(config["state_path"]))
+        state_client.batch_save(model_name_str, process_state)
     else:
-        save_process_state(process_state, config["state_path"])
+        log.error("state_client 未配置，处理状态未能持久化")
     log.info(
         f"增量处理笔记本【{notebook_title}】中的笔记完成情况小结："
         f"新日期需要更新 {len(new_time_notes)} 条，"
