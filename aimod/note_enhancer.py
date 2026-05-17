@@ -423,6 +423,9 @@ def local_process_note(
 # ## enhance_note(text, task, provider, model, use_cache) -> Optional[str]
 
 # %%
+_enhance_provider_logged = set()
+
+
 def enhance_note(
     text: str,
     task: str = "summary",
@@ -445,6 +448,10 @@ def enhance_note(
     if provider == "cloud":
         if not model:
             model = DEFAULT_CHAT_MODEL
+        key = (task, provider)
+        if key not in _enhance_provider_logged:
+            log.info(f"增强 [{task}] 路由: provider=cloud, model={model}")
+            _enhance_provider_logged.add(key)
         result = deepseek_process_note(text, task=task, model=model, use_cache=use_cache)
         if result and task in _call_stats:
             _call_stats[task]["cloud"] += 1
@@ -453,6 +460,10 @@ def enhance_note(
     if provider == "local":
         if not model:
             model = "qwen2.5:1.5b"
+        key = (task, provider)
+        if key not in _enhance_provider_logged:
+            log.info(f"增强 [{task}] 路由: provider=local, model={model}")
+            _enhance_provider_logged.add(key)
         return local_process_note(text, task=task, model=model, use_cache=use_cache)
 
     log.error(f"enhance_note 不支持的 provider: {provider}")
