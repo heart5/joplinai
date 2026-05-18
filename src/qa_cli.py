@@ -18,8 +18,8 @@ def parse_args():
     parser.add_argument("--question", "-q", type=str, help="直接提问的问题")
     parser.add_argument("--interactive", "-i", action="store_true", help="进入交互模式")
     parser.add_argument(
-        "--model", type=str, default=CONFIG["chat_model"],
-        help=f"聊天模型名称（默认：{CONFIG['chat_model']}）",
+        "--model", type=str, default=CONFIG["qa_ollama_chat_model"],
+        help=f"聊天模型名称（默认：{CONFIG['qa_ollama_chat_model']}）",
     )
     parser.add_argument(
         "--use-cloud", action="store_true", default=False,
@@ -64,7 +64,7 @@ def interactive_mode(qa_system: QASystem):
                 print(f"  数据库笔记数: {stats['total_notes_in_db']}")
                 print(f"  对话历史数: {stats['conversation_history_count']}")
                 print(f"  嵌入模型: {stats['config']['ollama_embedding_model']}")
-                print(f"  聊天模型: {stats['config']['chat_model']}")
+                print(f"  聊天模型: {stats['config']['qa_ollama_chat_model']}")
                 print(f"  使用云端模型: {stats['config']['using_cloud']}")
                 continue
             elif question.lower() == "/help":
@@ -117,7 +117,7 @@ def main():
 
     from joplinai import CONFIG as joplinai_config
     dynamic_config = {**CONFIG.copy(), **joplinai_config}
-    dynamic_config["chat_model"] = args.model
+    dynamic_config["qa_ollama_chat_model"] = args.model
     dynamic_config["cloud_model"] = args.use_cloud if args.use_cloud else dynamic_config.get("cloud_model", "deepseek-chat")
     dynamic_config["max_retrieved_notes"] = args.max_notes
 

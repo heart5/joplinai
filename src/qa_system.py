@@ -87,7 +87,7 @@ class QASystem:
         )
 
     def __repr__(self):
-        return f"QASystem(embed={self.config.get('ollama_embedding_model', '?')}, chat={self.config.get('chat_model', '?')})"
+        return f"QASystem(embed={self.config.get('ollama_embedding_model', '?')}, chat={self.config.get('qa_ollama_chat_model', '?')})"
 
 # %% [markdown]
 # ### ask(self, question: str, use_history: bool = True) -> Dict
@@ -401,26 +401,26 @@ class QASystem:
     # %%
     def _generate_optimized_answer(self, question: str, context: str) -> str:
         """生成优化答案"""
-        if self.config["cloud_model"] != "none" and self.config["deepseek_api_key"]:
+        if self.config["cloud_model"] != "none" and self.config["cloud_api_key"]:
             log.info(f"启用云端聊天模式")
-            return self._generate_answer_with_deepseek(question, context)
+            return self._generate_answer_with_cloud(question, context)
         else:
-            log.info(f"启用本地ollama调用的聊天大模型{self.config['chat_model']}")
+            log.info(f"启用本地ollama调用的聊天大模型{self.config['qa_ollama_chat_model']}")
             return self._generate_answer_with_ollama(question, context)
 
 # %% [markdown]
-# ### _generate_answer_with_deepseek(self, question: str, context: str) -> str
+# ### _generate_answer_with_cloud(self, question: str, context: str) -> str
 
     # %%
-    def _generate_answer_with_deepseek(
+    def _generate_answer_with_cloud(
         self, question: str, context: str
     ) -> str:
-        """优化版的DeepSeek答案生成"""
+        """优化版的云端答案生成"""
         try:
             import requests
 
             headers = {
-                "Authorization": f"Bearer {self.config['deepseek_api_key']}",
+                "Authorization": f"Bearer {self.config['cloud_api_key']}",
                 "Content-Type": "application/json",
             }
 
@@ -447,7 +447,7 @@ class QASystem:
             }
 
             response = requests.post(
-                "https://api.deepseek.com/v1/chat/completions",
+                self.config.get("cloud_api_url", "https://api.deepseek.com/v1/chat/completions"),
                 headers=headers,
                 json=payload,
                 timeout=60,
@@ -478,7 +478,7 @@ class QASystem:
             import requests
 
             headers = {
-                "Authorization": f"Bearer {self.config['deepseek_api_key']}",
+                "Authorization": f"Bearer {self.config['cloud_api_key']}",
                 "Content-Type": "application/json",
             }
 
@@ -492,7 +492,7 @@ class QASystem:
             }
 
             response = requests.post(
-                "https://api.deepseek.com/v1/chat/completions",
+                self.config.get("cloud_api_url", "https://api.deepseek.com/v1/chat/completions"),
                 headers=headers,
                 json=payload,
                 timeout=30,
@@ -524,7 +524,7 @@ class QASystem:
     def _generate_answer_with_ollama(self, question: str, context: str) -> str:
         """使用本地Ollama生成答案"""
         try:
-            model_name = self.config["chat_model"]
+            model_name = self.config["qa_ollama_chat_model"]
 
             # 构建消息
             messages = [
@@ -594,7 +594,7 @@ class QASystem:
                 "conversation_history_count": len(self.conversation_history),
                 "config": {
                     "ollama_embedding_model": self.config["ollama_embedding_model"],
-                    "chat_model": self.config["chat_model"],
+                    "qa_ollama_chat_model": self.config["qa_ollama_chat_model"],
                     "using_cloud": self.config["cloud_model"] != "none",
                 },
             }
