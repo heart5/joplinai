@@ -973,7 +973,7 @@ class EmbeddingGenerator:
         # print(host, port, model)
         payload = {"model": model, "input": text}
         try:
-            resp = requests.post(url, json=payload, timeout=30)
+            resp = requests.post(url, json=payload, timeout=45)
             resp.raise_for_status()
             return resp.json()["embeddings"][0]
         except Exception as e:

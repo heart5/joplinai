@@ -53,7 +53,7 @@ flowchart TB
         HCX_WEB --> HCX_QA
     end
 
-    DEEPSEEK["DeepSeek API (外部)"]
+    CLOUD["Cloud API (外部, 默认 DeepSeek)"]
     USERS["用户浏览器"]
 
     USERS --> HCX_WEB
@@ -61,7 +61,7 @@ flowchart TB
     HCX_QA -.-> TC_CHROMA
     HCX_WEB -.-> TC_CENTER
     TC_CLI -.-> HCX_OLLAMA
-    TC_CLI -.-> DEEPSEEK
+    TC_CLI -.-> CLOUD
 ```
 
 **要点：**
@@ -175,7 +175,7 @@ flowchart LR
         Q1["用户提问"] --> Q2["web_app<br/>POST /qa/ask"]
         Q2 --> Q3["qa_api<br/>向量检索 + LLM"]
         Q3 --> Q4["ChromaDB (TC)<br/>语义搜索 top-k"]
-        Q4 --> Q5["Ollama<br/>LLM 生成回答"]
+        Q4 --> Q5["Cloud API (DeepSeek)<br/>LLM 生成回答"]
         Q5 --> Q6["center_api<br/>记录 QA 历史"]
         Q6 --> Q7["返回用户"]
     end
@@ -200,7 +200,8 @@ flowchart LR
 | joplinai.py → center_api | TC 本地 (127.0.0.1:5003) | HTTP | X-API-Key |
 | joplinai.py → ChromaDB | TC 本地 (Docker 8009) | chromadb.HttpClient (HTTP) | 无 |
 | joplinai.py → Ollama | TC → HCX (公网 149.30.242.156:11434) | Ollama API | 无 |
-| joplinai.py → 云端模型 | 外部 API | HTTPS | API Key (配置) |
+| joplinai.py → Cloud API | 外部 (默认 DeepSeek) | HTTPS | API Key (配置 `cloud_api_key`) |
+| qa_api → Cloud API | HCX → 外部 | HTTPS | API Key (配置) |
 
 ---
 
@@ -219,7 +220,7 @@ sequenceDiagram
     participant EG as "EmbeddingGenerator"
     participant OLLAMA as "Ollama (HCX 公网)"
     participant DS as "NoteEnhancer"
-    participant DEEPSEEK as "DeepSeek API (外部)"
+    participant CLOUD as "DeepSeek API (外部)"
     participant CC as "CacheClient"
     participant CA as "center_api (TC, localhost)"
     participant VDB as "ChromaDB (TC)"
@@ -239,8 +240,8 @@ sequenceDiagram
     OLLAMA-->>EG: "嵌入向量 (1024维)"
     EG->>VDB: "批量写入向量"
     CLI->>DS: "生成摘要/标签"
-    DS->>DEEPSEEK: "POST /v1/chat/completions"
-    DEEPSEEK-->>DS: "摘要/标签 JSON"
+    DS->>CLOUD: "POST /v1/chat/completions"
+    CLOUD-->>DS: "摘要/标签 JSON"
     CLI->>CC: "写入 AI增强缓存"
     CC->>CA: "HTTP POST /cache/enhance/set"
     CLI->>RT: "记录运行历史"
@@ -256,7 +257,7 @@ sequenceDiagram
     participant WEB as "web_app (HCX)"
     participant QA as "qa_api (HCX)"
     participant VDB as "ChromaDB (TC)"
-    participant OLLAMA as "Ollama (HCX)"
+    participant CLOUD as "Cloud API"
     participant CA as "center_api (TC)"
 
     USER->>WEB: "POST /qa/ask (问题文本)"
@@ -268,8 +269,8 @@ sequenceDiagram
     VDB-->>QA: "相关文本块 + 元数据"
 
     QA->>QA: "组装 prompt"
-    QA->>OLLAMA: "生成回答 (流式/非流式)"
-    OLLAMA-->>QA: "LLM 回答"
+    QA->>CLOUD: "生成回答 (cloud_model)"
+    CLOUD-->>QA: "LLM 回答"
 
     QA->>CA: "POST /qa/record (记录问答)"
     CA-->>QA: "OK"
@@ -415,6 +416,8 @@ erDiagram
         text note_id UK
         text notebook_id
         text content_hash
+        text meta_hash "标签+笔记本标题的哈希"
+        text enhance_config "summary=X|tags=Y 格式"
         text process_status
         text error_message
         int retry_count
@@ -434,7 +437,9 @@ erDiagram
 
 | 集合名称 | 用途 | 元数据字段 |
 |---------|------|-----------|
-| `joplin_dengcao_bge_large_zh_v1.5` | 笔记文本块的向量索引 | `source_note_id`, `source_note_title`, `source_notebook_id`, `source_notebook_title`, `chunk_index`, `chunk_id`, `content_hash`, `meta_hash`, `note_author`, `note_type`, `tags`, `summary`, `enhanced`, `word_count`, `estimated_date` |
+| `joplin_{model_name}`（如 `joplin_dengcao_bge_large_zh_v1.5`） | 笔记文本块的向量索引 | `source_note_id`, `source_note_title`, `source_notebook_id`, `source_notebook_title`, `chunk_index`, `chunk_id`, `content_hash`, `meta_hash`, `note_author`, `note_type`, `tags`, `summary`, `enhanced`, `word_count`, `estimated_date` |
+
+> **元数据增量更新**：当仅 tags/summary 变更时（content_hash 匹配，meta_hash 不同），调用 `update_chunk_metadata()` 仅更新 ChromaDB metadata，不重新生成 embeddings。
 
 ---
 
@@ -455,22 +460,26 @@ flowchart TD
 
     CM --> GET_ALL["get_all() /<br/>get_config_snapshot()"]
     GET_ALL --> VALUE1["joplin_token"]
-    GET_ALL --> VALUE2["ollama_model"]
-    GET_ALL --> VALUE3["embedding_model"]
+    GET_ALL --> VALUE2["ollama_embedding_model"]
+    GET_ALL --> VALUE3["cloud_model / cloud_api_url / cloud_api_key"]
     GET_ALL --> VALUE4["joplinai_center_url"]
     GET_ALL --> VALUE5["joplinai_center_api_key"]
     GET_ALL --> VALUE6["qa_api_key"]
     GET_ALL --> VALUE7["imp_nbs / imp_note_ids"]
-    GET_ALL --> VALUE8["probe_cache_limit"]
+    GET_ALL --> VALUE8["summary_model / tags_model"]
+    GET_ALL --> VALUE9["enhance_override"]
+    GET_ALL --> VALUE10["probe_cache_limit"]
 
     VALUE1 --> JP["jpfuncs.getapi()"]
-    VALUE2 --> OLLAMA["Ollama 调用"]
-    VALUE3 --> EG["EmbeddingGenerator"]
+    VALUE2 --> OLLAMA["Ollama 嵌入推理 (11434)"]
+    VALUE3 --> CLOUD["Cloud API (QA + 增强)"]
     VALUE4 --> CC["CenterClient 各子客户端"]
     VALUE5 --> CC
     VALUE6 --> QA["qa_api 认证"]
     VALUE7 --> CLI["joplinai.py 过滤"]
-    VALUE8 --> CO["ChunkOptimizer"]
+    VALUE8 --> ENH["NoteEnhancer 策略选择"]
+    VALUE9 --> ENH
+    VALUE10 --> CO["ChunkOptimizer"]
 ```
 
 **配置优先级：** 命令行参数 > 本地 `data/joplinai.ini` > 云端 Joplin 笔记 INI > 代码硬编码默认值
@@ -750,4 +759,4 @@ flowchart TD
 
 ---
 
-> 最后更新：2026-05-17 | joplinai main 分支
+> 最后更新：2026-05-18 | joplinai main 分支
