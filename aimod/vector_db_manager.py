@@ -429,6 +429,32 @@ class VectorDBManager:
             f"来源位于【{db_metadata.get('source_notebook_title')}】笔记本中的笔记:"
             f"《{db_metadata.get('source_note_title')}》")
 
+    def update_chunk_metadata(self, chunk_id: str, tags: List[str], metadata: Dict):
+        """仅更新元数据，不重新生成嵌入向量（内容未变仅摘要/标签变更时使用）"""
+        if not self.collection:
+            log.error("集合未加载")
+            return
+
+        db_metadata = {
+            "chunk_id": chunk_id,
+            "tags": ",".join(tags),
+            "summary": metadata.get("chunk_summary", ""),
+            "source_note_title": metadata.get("source_note_title", ""),
+            "source_note_id": metadata.get("source_note_id", ""),
+            "chunk_index": metadata.get("chunk_index", 1),
+            "content_hash": metadata.get("content_hash", ""),
+            "meta_hash": metadata.get("meta_hash", ""),
+            "source_notebook_title": metadata.get("source_notebook_title", ""),
+            "source_notebook_id": metadata.get("source_notebook_id", ""),
+            "note_author": metadata.get("note_author", "白晔峰"),
+            "note_type": metadata.get("note_type", "个人笔记"),
+        }
+
+        self.collection.update(
+            ids=[chunk_id],
+            metadatas=[db_metadata],
+        )
+
 # %% [markdown]
 # ### delete_note(self, note_id: str)
 

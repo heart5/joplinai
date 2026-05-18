@@ -43,6 +43,17 @@ jupyter:
 - 模型变更检测从全局核武器改为字段级比对：只有增强配置真正变化时才触发重处理
 - 旧状态无此字段时自动触发一次迁移重扫（清理 ollama 垃圾摘要）
 
+**分块级元数据增量更新：跳过不必要的嵌入生成**：
+
+- 新增 `VectorDBManager.update_chunk_metadata()`：直接更新 ChromaDB metadata，不触碰 embeddings
+- `process_note_chunks` 三分支处理：内容变更→全量入库，仅元数据变更→仅更新 metadata，都匹配→跳过
+- 避免增强模型切换后所有 chunk 重新生成嵌入的开销
+
+**笔记本级增强策略覆盖 `enhance_override`**：
+
+- 云端 JSON 配置 `enhance_override`，格式 `{"笔记本标题": {"summary_model": "...", "tags_model": "..."}}`
+- `_resolve_enhance_config()` 合并全局配置与笔记本级覆盖，未指定笔记本沿用全局设置
+
 ### 2026年5月17日
 
 **文档全量更新至当前架构**（commit `f801188`）：

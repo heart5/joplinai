@@ -79,7 +79,9 @@ class ConfigManager:
             "summary_model",
             "tags_model",
             "cloud_model",
-            "ollama_chat_model",
+            "cloud_api_url",
+            "cloud_api_key",
+            "enhance_ollama_chat_model",
             # 可以根据需要无限扩展...
         ]
         self._fetch_and_update()  # 初始加载

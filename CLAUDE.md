@@ -47,9 +47,12 @@ Web App 入口：`joplin_web_app:app`（模块级 `app = create_app()`，勿放 
 
 Data flow: `joplinai.py` → TC 本地 (Joplin Server / ChromaDB / center_api) + 远程 HCX (Ollama embedding / 11434) + 外部 DeepSeek API (AI增强)。各 `aimod/*_client.py` 通过 HTTP + API Key → `aimod/center_api/` → `data/joplinai_center.db`
 
+向量化优化：chunk 内容未变仅元数据（tags/summary）变更时，跳过嵌入生成，仅通过 `VectorDBManager.update_chunk_metadata()` 更新 ChromaDB metadata（不含 embeddings），避免不必要的远程序列调用。
+
 `joplinai_center.db` 包含 10 张表：
 - 缓存与历史：`enhance_cache`、`probe_cache`、`notebook_history`、`global_run_history`
 - 笔记状态：`note_process_state`（含 `enhance_config` 字段追踪摘要/标签模型，模型变更时自动触发重处理；`meta_hash` 仅含标签+笔记本元数据，不含增强配置）
+- 笔记本级增强策略覆盖：`enhance_override` 云端 JSON 配置，格式 `{"笔记本标题": {"summary_model": "cloud|ollama|none", "tags_model": "cloud|ollama|none"}}`，`_resolve_enhance_config()` 合并全局配置与笔记本级覆盖
 - 用户管理：`users`、`sessions`、`audit_log`、`qa_history`、`chat_sessions`
 
 Center client 拆分为 5 个独立文件 (`aimod/`): `CacheClient`（纯远程，无本地回退），`ProbeCacheClient`（远程优先+本地回退），`HistoryClient`（远程优先+本地回退），`ProcessStateClient`（纯远程），`UserManagerClient`（远程优先+本地回退）。URL 发现逻辑：云端 `joplinai_center_url` 未配置则本机为生产主机走 `127.0.0.1:5003`。
