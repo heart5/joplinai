@@ -148,6 +148,25 @@ def filter_notes(notes) -> List:
 
 # %% [markdown]
 # ## 笔记处理核心逻辑（增量更新+入库）
+
+# %%
+def _resolve_enhance_config(config: dict, notebook_title: str) -> dict:
+    """解析笔记本级增强策略覆盖。
+
+    enhance_override 为 JSON 键，格式如：
+    {"笔记本A": {"summary_model": "none", "tags_model": "ollama"}}
+    未覆盖的笔记本回退全局 summary_model/tags_model。
+    """
+    import json
+    overrides_raw = config.get("enhance_override", "")
+    overrides = json.loads(overrides_raw) if overrides_raw else {}
+    nb = overrides.get(notebook_title, {})
+    resolved = {**config}
+    for key in ("summary_model", "tags_model"):
+        if key in nb:
+            resolved[key] = nb[key]
+    return resolved
+
 # %% [markdown]
 # ### process_note_chunks(note, vector_db: VectorDBManager, embedding_generator: EmbeddingGenerator, config: Dict,) -> bool
 # %%
@@ -262,7 +281,8 @@ def process_note_chunks(
                 )
 
         # 3. 遍历新分出的每个块，决定是否需要处理
-        chunks_to_upsert = []  # 存放需要更新/插入的块信息
+        chunks_to_upsert = []  # 内容变更或新块 → 全量处理
+        chunks_metadata_only = []  # 内容未变仅元数据变更 → 跳过嵌入
         new_chunk_hashes = {}  # 记录本次处理所有新块的 预期块ID -> 内容哈希
         skipped_chunks = 0
 
@@ -285,21 +305,22 @@ def process_note_chunks(
 
             # 检查是否需要处理此块
             need_process = True
+            metadata_only = False
             if expected_chunk_id in existing_chunks_map:
-                # 如果块ID已存在，且哈希值相同，则跳过
                 old_c_hash = existing_chunks_map[expected_chunk_id].get(
                     "content_hash", ""
                 )
                 old_m_hash = existing_chunks_map[expected_chunk_id].get("meta_hash", "")
-                if (old_c_hash and old_c_hash == chunk_hash) and (
-                    old_m_hash and old_m_hash == meta_hash
-                ):
-                    # log.debug(
-                    #     f"笔记《{note.title}》中的块 {metadata_chunk_idx_from_one} 内容"
-                    #     f"（长度：{len(chunk_content)}）未变，元数据也未变，跳过嵌入生成。"
-                    # )
-                    need_process = False
-                    skipped_chunks += 1
+                if old_c_hash and old_c_hash == chunk_hash:
+                    if old_m_hash and old_m_hash == meta_hash:
+                        need_process = False
+                        skipped_chunks += 1
+                    else:
+                        metadata_only = True
+                        log.debug(
+                            f"笔记《{note.title}》中的块 {metadata_chunk_idx_from_one} "
+                            f"内容未变，仅元数据变更→跳过嵌入，仅更新元数据。"
+                        )
                 else:
                     log.debug(
                         f"笔记《{note.title}》中的块 {metadata_chunk_idx_from_one} "
@@ -313,28 +334,73 @@ def process_note_chunks(
                     if not old_m_hash or old_m_hash != meta_hash:
                         base_metadata["meta_hash"] = meta_hash
             else:
-                # 如果块ID不存在，则是全新块，需要处理
                 log.debug(
                     f"笔记《{note.title}》中的块 {metadata_chunk_idx_from_one} "
                     f"内容（长度：{len(chunk_content)}）是新增块，执行嵌入入库。"
                 )
 
             if need_process:
-                # 此块需要处理，加入待处理列表
-                chunks_to_upsert.append(
-                    {
-                        "chunk_id": expected_chunk_id,
-                        "content": chunk_content,
-                        "base_metadata": base_metadata,
-                        "embedding": chunk_info.get("embedding"),
-                    }
-                )
+                if metadata_only:
+                    chunks_metadata_only.append(
+                        {
+                            "chunk_id": expected_chunk_id,
+                            "content": chunk_content,
+                            "base_metadata": base_metadata,
+                        }
+                    )
+                else:
+                    chunks_to_upsert.append(
+                        {
+                            "chunk_id": expected_chunk_id,
+                            "content": chunk_content,
+                            "base_metadata": base_metadata,
+                            "embedding": chunk_info.get("embedding"),
+                        }
+                    )
 
+        total_processed = len(chunks_to_upsert) + len(chunks_metadata_only)
         log.info(
-            f"笔记《{note.title}》共 {len(chunk_dicts)} 个块，其中 {skipped_chunks} 个跳过，{len(chunks_to_upsert)} 个需要处理。"
+            f"笔记《{note.title}》共 {len(chunk_dicts)} 个块，其中 {skipped_chunks} 个跳过，"
+            f"{total_processed} 个需要处理（{len(chunks_metadata_only)} 仅元数据更新，"
+            f"{len(chunks_to_upsert)} 全量更新）。"
         )
 
-        # 4. 处理所有需要更新的块
+        # 4a. 处理仅元数据更新的块（无需重新生成嵌入）
+        for chunk_data in chunks_metadata_only:
+            chunk_id = chunk_data["chunk_id"]
+            base_metadata = chunk_data["base_metadata"]
+            metadata_chunk_idx_from_one = base_metadata["chunk_index"]
+
+            notebook_dicts = get_notebook_ids_for_note(note.id)
+            notebook_dict = notebook_dicts[-1]
+            try:
+                notebook_id, notebook_title = next(iter(notebook_dict.items()))
+            except StopIteration:
+                notebook_id, notebook_title = "", ""
+            metadata = {
+                **base_metadata,
+                "source_note_id": note.id,
+                "source_notebook_id": notebook_id,
+                "source_notebook_title": notebook_title,
+            }
+            try:
+                vector_db.update_chunk_metadata(
+                    chunk_id=chunk_id,
+                    tags=[tag.strip() for tag in metadata.get("tags", "").split(",")],
+                    metadata=metadata,
+                )
+                log.info(
+                    f"笔记《{note.title}》的块 【{metadata_chunk_idx_from_one}/{len(chunk_dicts)}】"
+                    f"（仅元数据更新）成功，元数据：{metadata}"
+                )
+            except Exception as e:
+                log.error(
+                    f"笔记《{note.title}》元数据更新块 {metadata_chunk_idx_from_one}"
+                    f"（长度：{len(chunk_data['content'])}）失败: {e}",
+                    exc_info=True,
+                )
+
+        # 4b. 处理需要全量更新的块（重新生成嵌入并入库）
         successful_upserts = 0
         for chunk_data in chunks_to_upsert:
             chunk_id = chunk_data["chunk_id"]
@@ -523,6 +589,15 @@ def process_notes_incremental(notebook_title: str, config: Dict, note_ids: List[
     # 获取强制更新配置
     force_update = config.get("force_update", False)
 
+    # 解析笔记本级增强策略覆盖（enhance_override JSON 键）
+    effective_config = _resolve_enhance_config(config, notebook_title)
+    if effective_config.get("summary_model") != config.get("summary_model") or \
+       effective_config.get("tags_model") != config.get("tags_model"):
+        log.info(
+            f"笔记本【{notebook_title}】增强策略覆盖："
+            f"摘要={effective_config.get('summary_model')}，标签={effective_config.get('tags_model')}"
+        )
+
     # 获取笔记列表：物理笔记本或虚拟笔记集
     if note_ids is not None:
         notes_all = [getnote(nid) for nid in note_ids if getnote(nid)]
@@ -587,7 +662,8 @@ def process_notes_incremental(notebook_title: str, config: Dict, note_ids: List[
             current_meta_hash = compute_content_hash(f"{tags_str}{current_notebook_title}")
             # 4. 当前增强配置标识 (模型变更时自动重处理)
             current_enhance_config = (
-                f"summary={config.get('summary_model', '')}|tags={config.get('tags_model', '')}"
+                f"summary={effective_config.get('summary_model', '')}"
+                f"|tags={effective_config.get('tags_model', '')}"
             )
             # === 修改结束 ===
             # 获取上一次处理的状态（兼容旧格式）
@@ -602,7 +678,7 @@ def process_notes_incremental(notebook_title: str, config: Dict, note_ids: List[
             needs_meta_update = ("meta_hash" not in last_state)
 
             # 增强未完成时也需要强制重试
-            enhance_enabled = config.get("summary_model") != "none" or config.get("tags_model") != "none"
+            enhance_enabled = effective_config.get("summary_model") != "none" or effective_config.get("tags_model") != "none"
             needs_enhance_retry = (
                 enhance_enabled and last_enhance_missing
             ) or (
@@ -630,7 +706,7 @@ def process_notes_incremental(notebook_title: str, config: Dict, note_ids: List[
                     note,
                     vector_db,
                     embedding_gen,
-                    config,
+                    effective_config,
                 )
                 future_to_note[future] = (
                     note_id,

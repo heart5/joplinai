@@ -8,7 +8,7 @@ import pathmagic
 
 with pathmagic.Context():
     from aimod.vector_db_manager import VectorDBManager
-    from aimod.note_enhancer import local_process_note, deepseek_process_note
+    from aimod.note_enhancer import ollama_process_note, cloud_process_note
     from joplinai import CONFIG as CONFIG_JA
     from src.qa_config import CONFIG as CONFIG_QA
 
@@ -64,7 +64,7 @@ for nd in notes_data:
         # 本地模型
         print(f"    🖥️  本地 qwen2.5:1.5b ...", end=" ", flush=True)
         t0 = time.time()
-        local_result = local_process_note(nd["text"], task=task,
+        local_result = ollama_process_note(nd["text"], task=task,
                                           model="qwen2.5:1.5b", use_cache=False,
                                           ollama_host="http://127.0.0.1:11434")
         local_time = round(time.time() - t0, 1)
@@ -74,7 +74,7 @@ for nd in notes_data:
         # DeepSeek API
         print(f"    ☁️  DeepSeek API ...", end=" ", flush=True)
         t0 = time.time()
-        ds_result = deepseek_process_note(nd["text"], task=task, use_cache=False)
+        ds_result = cloud_process_note(nd["text"], task=task, use_cache=False)
         ds_time = round(time.time() - t0, 1)
         print(f"({ds_time}s)")
         print(f"    {ds_result[:200] if ds_result else 'ERROR: 无结果'}")
