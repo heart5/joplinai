@@ -558,30 +558,33 @@ def process_notes_incremental(notebook_title: str, config: Dict, note_ids: List[
 
     embedding_gen = process_notes_incremental.embedding_gen
 
-    # 本地模型可用性检查（摘要/标签配了本地模型时）
-    ollama_chat_model = config.get("enhance_ollama_chat_model")
-    if config.get("summary_model") == "ollama" or config.get("tags_model") == "ollama":
-        import time
-        import ollama
-        ollama_ready = False
-        for attempt in range(1, 4):
-            try:
-                installed = [m["name"] for m in ollama.list().get("models", [])]
-                ollama_ready = True
-                if ollama_chat_model in installed:
-                    log.info(f"Ollama 标签/摘要模型 {ollama_chat_model} 可用")
-                else:
-                    log.warning(
-                        f"Ollama 模型 {ollama_chat_model} 未安装，标签/摘要将不可用。"
-                        f"安装: ollama pull {ollama_chat_model}"
-                    )
-                break
-            except Exception as e:
-                if attempt < 3:
-                    log.warning(f"Ollama 连接失败 (第{attempt}次): {e}，2秒后重试...")
-                    time.sleep(2)
-                else:
-                    log.warning(f"Ollama 连接失败 (3次重试均失败): {e}，标签/摘要将不可用")
+    # 本地模型可用性检查（摘要/标签配了本地模型时，整个运行周期仅检查一次）
+    if not hasattr(process_notes_incremental, "ollama_checked"):
+        process_notes_incremental.ollama_checked = True
+        ollama_chat_model = config.get("enhance_ollama_chat_model")
+        if config.get("summary_model") == "ollama" or config.get("tags_model") == "ollama":
+            import time
+            import ollama
+            ollama_host = config.get("ollama_host", "149.30.242.156")
+            ollama_port = config.get("ollama_port", "11434")
+            ollama_client = ollama.Client(host=f"http://{ollama_host}:{ollama_port}")
+            for attempt in range(1, 4):
+                try:
+                    installed = [m["name"] for m in ollama_client.list().get("models", [])]
+                    if ollama_chat_model in installed:
+                        log.info(f"Ollama 标签/摘要模型 {ollama_chat_model} 可用")
+                    else:
+                        log.warning(
+                            f"Ollama 模型 {ollama_chat_model} 未安装，标签/摘要将不可用。"
+                            f"安装: ollama pull {ollama_chat_model}"
+                        )
+                    break
+                except Exception as e:
+                    if attempt < 3:
+                        log.warning(f"Ollama 连接失败 (第{attempt}次): {e}，2秒后重试...")
+                        time.sleep(2)
+                    else:
+                        log.warning(f"Ollama 连接失败 (3次重试均失败): {e}，标签/摘要将不可用")
 
     # 加载处理状态（纯远程，无本地 fallback）
     state_client = config.get("state_client")
