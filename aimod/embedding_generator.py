@@ -25,6 +25,7 @@ import hashlib
 import logging
 import re
 from functools import lru_cache
+from threading import Semaphore
 from typing import Dict, List, Optional, Tuple
 
 import ollama
@@ -54,6 +55,8 @@ with pathmagic.Context():
 
 # %%
 __all__ = ["EmbeddingGenerator"]
+
+_ollama_embed_semaphore = Semaphore(2)  # 限制并发嵌入请求，避免HCX CPU过载
 
 class EmbeddingGenerator:
     """嵌入生成器，支持长文本分块处理"""
@@ -973,7 +976,8 @@ class EmbeddingGenerator:
         # print(host, port, model)
         payload = {"model": model, "input": text}
         try:
-            resp = requests.post(url, json=payload, timeout=45)
+            with _ollama_embed_semaphore:
+                resp = requests.post(url, json=payload, timeout=45)
             resp.raise_for_status()
             return resp.json()["embeddings"][0]
         except Exception as e:
