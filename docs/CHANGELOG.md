@@ -30,7 +30,7 @@ jupyter:
 
 **AI增强策略切换：摘要走云端，标签留本地**（commit `0a45050`）：
 
-- `summary_model=cloud`（DeepSeek API），`tags_model=ollama`（qwen2.5:1.5b）
+- `summary_model=cloud`（Cloud API，默认 DeepSeek），`tags_model=ollama`（qwen2.5:1.5b）
 - 原因：本地 1.5B 模型摘要质量灾难级，标签提取够用
 - 全量重命名：`deepseek_*` → `cloud_*`、`chat_model` → `qa_ollama_chat_model`、`ollama_chat_model` → `enhance_ollama_chat_model`
 - API Key 从硬编码 `deepseek_token` 改为动态 `cloud_api_key`（回退 `deepseek_token`）
@@ -53,6 +53,20 @@ jupyter:
 
 - 云端 JSON 配置 `enhance_override`，格式 `{"笔记本标题": {"summary_model": "...", "tags_model": "..."}}`
 - `_resolve_enhance_config()` 合并全局配置与笔记本级覆盖，未指定笔记本沿用全局设置
+
+**Ollama 连接检查修复 + 嵌入超时调优**：
+
+- `ollama.list()` 默认 localhost → `ollama.Client(host=remote_host)` 指定远程 HCX
+- 新版 ollama 包 `list()` 返回对象而非 dict，兼容 `model` / `name` 双字段
+- `hasattr` 缓存检查结果，全周期仅查一次（之前每笔记本都重复检查）
+- 嵌入超时 30s → 45s，减少大文本 Read timeout
+
+**数据质量验证**（2026-05-18）：
+
+随机抽样 ChromaDB 100 个 chunk + 30 个 tags：
+- Summary 质量：19/20 正常（语义准确、信息具体），1 条偏短但正确
+- Tags：0/30 空值，0/30 异常
+- 结论：无 ollama 垃圾摘要残留，向量库数据质量良好。`enhance_config` 追踪字段覆盖缺口（75% 笔记缺该字段）不影响实际数据——增强结果已通过 cloud API 覆盖写入，仅 state 追踪未同步。
 
 ### 2026年5月17日
 

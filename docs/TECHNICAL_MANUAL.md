@@ -175,7 +175,7 @@ flowchart LR
         Q1["用户提问"] --> Q2["web_app<br/>POST /qa/ask"]
         Q2 --> Q3["qa_api<br/>向量检索 + LLM"]
         Q3 --> Q4["ChromaDB (TC)<br/>语义搜索 top-k"]
-        Q4 --> Q5["Cloud API (DeepSeek)<br/>LLM 生成回答"]
+        Q4 --> Q5["Cloud API<br/>LLM 生成回答"]
         Q5 --> Q6["center_api<br/>记录 QA 历史"]
         Q6 --> Q7["返回用户"]
     end
@@ -220,7 +220,7 @@ sequenceDiagram
     participant EG as "EmbeddingGenerator"
     participant OLLAMA as "Ollama (HCX 公网)"
     participant DS as "NoteEnhancer"
-    participant CLOUD as "DeepSeek API (外部)"
+    participant CLOUD as "Cloud API (外部)"
     participant CC as "CacheClient"
     participant CA as "center_api (TC, localhost)"
     participant VDB as "ChromaDB (TC)"
@@ -430,6 +430,19 @@ erDiagram
     users ||--o{ chat_sessions : "username"
     users ||--o{ audit_log : "username"
 ```
+
+**`note_process_state` 关键字段说明：**
+
+| 字段 | 用途 |
+|------|------|
+| `content_hash` | 笔记标题+正文的哈希，内容变更时触发重新 embedding |
+| `meta_hash` | 标签+笔记本标题的哈希，元数据变更时触发 metadata-only 更新 |
+| `enhance_config` | 格式 `summary=X\|tags=Y`，追踪增强模型配置。模型切换（如 ollama→cloud）时自动触发重处理，无需人工干预 |
+| `enhance_missing` | 增强任务是否完成。`False` 表示增强成功，`True` 下次运行自动重试 |
+
+**`enhance_override` 笔记本级增强策略覆盖：**
+
+云端 JSON 配置，格式 `{"笔记本标题": {"summary_model": "cloud|ollama|none", "tags_model": "cloud|ollama|none"}}`。`_resolve_enhance_config()` 运行时合并全局配置与笔记本级覆盖，未指定的笔记本沿用全局设置。适用于：某笔记本质量要求高走 cloud，某笔记本纯本地不要 API 开销等场景。
 
 ### 5b. ChromaDB 向量集合
 
