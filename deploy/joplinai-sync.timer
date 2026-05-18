@@ -1,0 +1,13 @@
+[Unit]
+Description=Run Joplin vector sync every 8 hours
+Requires=joplinai-sync.service
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=8h
+Unit=joplinai-sync.service
+AccuracySec=1min
+RandomizedDelaySec=540
+
+[Install]
+WantedBy=timers.target
