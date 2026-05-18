@@ -49,7 +49,7 @@ Data flow: `joplinai.py` → TC 本地 (Joplin Server / ChromaDB / center_api) +
 
 `joplinai_center.db` 包含 10 张表：
 - 缓存与历史：`enhance_cache`、`probe_cache`、`notebook_history`、`global_run_history`
-- 笔记状态：`note_process_state`
+- 笔记状态：`note_process_state`（含 `enhance_config` 字段追踪摘要/标签模型，模型变更时自动触发重处理；`meta_hash` 仅含标签+笔记本元数据，不含增强配置）
 - 用户管理：`users`、`sessions`、`audit_log`、`qa_history`、`chat_sessions`
 
 Center client 拆分为 5 个独立文件 (`aimod/`): `CacheClient`（纯远程，无本地回退），`ProbeCacheClient`（远程优先+本地回退），`HistoryClient`（远程优先+本地回退），`ProcessStateClient`（纯远程），`UserManagerClient`（远程优先+本地回退）。URL 发现逻辑：云端 `joplinai_center_url` 未配置则本机为生产主机走 `127.0.0.1:5003`。
@@ -189,26 +189,30 @@ Production: systemd services managed via `deploy/deploy.sh`:
 | `qwen2.5:1.5b` | 986 MB | 标签提取、内容分类 | ~40-80秒/条 |
 | `minicpm-v:latest` | 5.5 GB | 笔记图片描述（`vision_enabled=False` 默认关闭） | ~数分钟/图 |
 
-- **`qwen2.5:1.5b`** 通过 `local_tag_model` 配置键指定，供向量化管线离线批量任务使用
-- **无本地 QA 回退**：`chat_model=none`，DeepSeek API 不可用时直接返回服务不可用，不尝试本地模型
+- **`qwen2.5:1.5b`** 通过 `enhance_ollama_chat_model` 配置键指定，供向量化管线离线批量任务使用
+- **无本地 QA 回退**：`qa_ollama_chat_model=none`，DeepSeek API 不可用时直接返回服务不可用，不尝试本地模型
 - 之前使用后删除的模型：`qwen:1.8b`（架构旧）、`qwen3:8b`（12分钟太慢）、`deepseek-r1:7b`（RAG误判）、`gemma3:4b-it-qat`（中文幻觉）
 
-### 云端模型（DeepSeek API）
+### 云端模型（OpenAI-compatible API，默认 DeepSeek）
 
 | 模型 | 用途 | 速度 |
 |------|------|------|
 | `deepseek-chat` | QA 对话主路（`cloud_model=deepseek-chat`） | ~5秒/次 |
 | `deepseek-v4-pro` | 图片精细描述（备用） | ~数秒/图 |
 
+可通过 `cloud_api_url` + `cloud_api_key` + `cloud_model` 切换至 Qwen/ChatGPT 等兼容提供者。
+
 ### 配置要点
 
 | 配置键 | 当前值 | 说明 |
 |--------|--------|------|
-| `chat_model` | `none` | 无本地 QA 回退 |
+| `qa_ollama_chat_model` | `none` | 无本地 QA 回退 |
 | `cloud_model` | `deepseek-chat` | 云端大模型 |
+| `cloud_api_url` | `https://api.deepseek.com/v1/chat/completions` | 云端 API 端点 |
+| `cloud_api_key` | 回退 `deepseek_token` | 云端 API Key |
 | `summary_model` | `cloud` | 摘要模型: cloud/ollama/none |
 | `tags_model` | `cloud` | 标签模型: cloud/ollama/none |
-| `ollama_chat_model` | `qwen2.5:1.5b` | Ollama 标签/分类模型 |
+| `enhance_ollama_chat_model` | `qwen2.5:1.5b` | Ollama 标签/分类模型 |
 | `vision_enabled` | `false` | CPU 跑视觉太慢，默认关闭 |
 
 ## Testing & CI
@@ -244,7 +248,7 @@ Main config stored in cloud-synced Joplin note (INI format). Local override: `da
 
 **数据中心配置**：`joplinai_center_url`（非生产主机配，指向 TC 公网IP；生产主机不配则自动走 localhost）、`joplinai_center_api_key`（认证密钥）、`probe_cache_limit`（探测缓存上限，默认 10000）。
 
-**模型配置**：`chat_model`（本地对话模型，当前 `none` 无本地回退）、`ollama_chat_model`（Ollama 标签/分类小模型）、`ollama_embedding_model`（嵌入模型）、`vision_model`（视觉模型）、`cloud_model` / `summary_model` / `tags_model`（cloud/ollama/none 三态切换）。详见上方 Model Strategy 章节。
+**模型配置**：`qa_ollama_chat_model`（本地 QA 对话模型，当前 `none` 无本地回退）、`enhance_ollama_chat_model`（Ollama 标签/分类小模型）、`ollama_embedding_model`（嵌入模型）、`vision_model`（视觉模型）、`cloud_model` / `summary_model` / `tags_model`（cloud/ollama/none 三态切换）、`cloud_api_url` / `cloud_api_key`（云端 API 端点/密钥，支持切换提供者）。详见上方 Model Strategy 章节。
 
 ### Remote Joplin fallback
 

@@ -583,10 +583,11 @@ def process_notes_incremental(notebook_title: str, config: Dict, note_ids: List[
             current_notebook_title = next(iter(notebook_dict.values()), "")
             # 2. 计算内容哈希 (基于标题和正文)
             current_content_hash = compute_content_hash(f"{note.title}{note.body}")
-            # 3. 计算元数据哈希 (含标签、笔记本标题、增强模型——模型变更时自动重处理)
-            current_meta_hash = compute_content_hash(
-                f"{tags_str}{current_notebook_title}"
-                f"{config.get('summary_model', '')}{config.get('tags_model', '')}"
+            # 3. 计算元数据哈希 (基于标签和笔记本标题)
+            current_meta_hash = compute_content_hash(f"{tags_str}{current_notebook_title}")
+            # 4. 当前增强配置标识 (模型变更时自动重处理)
+            current_enhance_config = (
+                f"summary={config.get('summary_model', '')}|tags={config.get('tags_model', '')}"
             )
             # === 修改结束 ===
             # 获取上一次处理的状态（兼容旧格式）
@@ -595,15 +596,20 @@ def process_notes_incremental(notebook_title: str, config: Dict, note_ids: List[
             last_content_hash = last_state.get("content_hash")
             last_meta_hash = last_state.get("meta_hash")
             last_enhance_missing = last_state.get("enhance_missing", True)
+            last_enhance_config = last_state.get("enhance_config", "")
 
             # 如果状态文件是旧的（没有meta_hash字段），则视为需要更新元数据
             needs_meta_update = ("meta_hash" not in last_state)
 
             # 增强未完成时也需要强制重试
             enhance_enabled = config.get("summary_model") != "none" or config.get("tags_model") != "none"
-            needs_enhance_retry = enhance_enabled and last_enhance_missing
+            needs_enhance_retry = (
+                enhance_enabled and last_enhance_missing
+            ) or (
+                enhance_enabled and last_enhance_config != current_enhance_config
+            )
 
-            # 判断是否需要处理：强制更新 或 元数据缺失 或 增强缺失 或 内容变更
+            # 判断是否需要处理：强制更新 或 元数据缺失 或 增强缺失/模型变更 或 内容变更
             if force_update or needs_meta_update or needs_enhance_retry or not (
                 last_update_time == current_update_time
                 and last_content_hash == current_content_hash
@@ -612,7 +618,8 @@ def process_notes_incremental(notebook_title: str, config: Dict, note_ids: List[
                 log.info(
                     f"笔记《{note.title}》需要更新。"
                     f"原因: force={force_update}, meta_missing={needs_meta_update}, "
-                    f"enhance_missing={needs_enhance_retry}, "
+                    f"enhance_missing={last_enhance_missing}, "
+                    f"enhance_config_change={last_enhance_config != current_enhance_config}, "
                     f"时间变化={last_update_time != current_update_time}, "
                     f"内容变化={last_content_hash != current_content_hash}, "
                     f"元数据变化={last_meta_hash != current_meta_hash}"
@@ -631,6 +638,7 @@ def process_notes_incremental(notebook_title: str, config: Dict, note_ids: List[
                     current_update_time,
                     current_content_hash,
                     current_meta_hash,
+                    current_enhance_config,
                 )
                 log.info(
                     f"开始处理笔记本【{notebook_title}】下的第（{i}/{len(notes)}）条笔记: 《{note.title}》…………"
@@ -639,7 +647,7 @@ def process_notes_incremental(notebook_title: str, config: Dict, note_ids: List[
 
         # 收集处理结果
         for future in as_completed(future_to_note):
-            note_id, note_title, update_time, content_hash, meta_hash = future_to_note[future]
+            note_id, note_title, update_time, content_hash, meta_hash, enhance_config = future_to_note[future]
             try:
                 result_dict = future.result() # 现在接收的是字典
                 success = result_dict.get("success", False)
@@ -660,6 +668,7 @@ def process_notes_incremental(notebook_title: str, config: Dict, note_ids: List[
                         "meta_hash": meta_hash,
                         "processed_time": datetime.now().timestamp(),
                         "enhance_missing": result_dict.get("enhance_missing", False),
+                        "enhance_config": enhance_config,
                     }
                     # 仅当有实际块变更（新增/更新/清理孤儿）时才计入 updated_count
                     note_upserted = note_chunk_stats.get("upserted", 0)
