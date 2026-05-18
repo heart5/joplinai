@@ -570,7 +570,9 @@ def process_notes_incremental(notebook_title: str, config: Dict, note_ids: List[
             ollama_client = ollama.Client(host=f"http://{ollama_host}:{ollama_port}")
             for attempt in range(1, 4):
                 try:
-                    installed = [m["name"] for m in ollama_client.list().get("models", [])]
+                    result = ollama_client.list()
+                    models_list = result.models if hasattr(result, 'models') else result.get("models", [])
+                    installed = [m.model if hasattr(m, 'model') else m["name"] for m in models_list]
                     if ollama_chat_model in installed:
                         log.info(f"Ollama 标签/摘要模型 {ollama_chat_model} 可用")
                     else:
