@@ -60,6 +60,7 @@ jupyter:
 - 新版 ollama 包 `list()` 返回对象而非 dict，兼容 `model` / `name` 双字段
 - `hasattr` 缓存检查结果，全周期仅查一次（之前每笔记本都重复检查）
 - 嵌入超时 30s → 45s，减少大文本 Read timeout
+- 嵌入并发控制：`Semaphore(2)` 限制同时发往 HCX Ollama 的嵌入请求，避免纯 CPU 8核排队导致 Read timeout，提升大笔记处理完好度
 
 **数据质量验证**（2026-05-18）：
 
