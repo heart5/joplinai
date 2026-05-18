@@ -43,13 +43,20 @@ with pathmagic.Context():
 # # 模型配置
 
 # %%
-DEEPSEEK_API_KEY = getinivaluefromcloud("joplinai", "deepseek_token")
-DEEPSEEK_EMBED_URL = "https://api.deepseek.com/v1/embeddings"  # 嵌入API端点
-DEEPSEEK_CHAT_URL = "https://api.deepseek.com/v1/chat/completions"  # 大模型API端点
-DEFAULT_EMBED_MODEL = "deepseek-embedding"  # DeepSeek嵌入模型（示例）
-DEFAULT_CHAT_MODEL = "deepseek-chat"  # DeepSeek大模型（示例）
-DEFAULT_VISION_MODEL = "deepseek-v4-pro"  # DeepSeek Vision 多模态模型
 DEFAULT_OLLAMA_VISION_MODEL = "minicpm-v"  # Ollama Vision 模型
+_DEFAULT_CLOUD_API_URL = "https://api.deepseek.com/v1/chat/completions"
+_DEFAULT_CLOUD_MODEL = "deepseek-chat"
+_DEFAULT_VISION_MODEL = "deepseek-v4-pro"
+
+
+def _get_cloud_api_url() -> str:
+    """获取云端大模型 API URL，默认 DeepSeek"""
+    return getinivaluefromcloud("joplinai", "cloud_api_url") or _DEFAULT_CLOUD_API_URL
+
+
+def _get_cloud_api_key() -> str:
+    """获取云端大模型 API Key，优先 cloud_api_key，回退 deepseek_token（向后兼容）"""
+    return getinivaluefromcloud("joplinai", "cloud_api_key") or getinivaluefromcloud("joplinai", "deepseek_token")
 
 # %% [markdown]
 # # 缓存支持
@@ -68,7 +75,7 @@ _CACHE_MANAGER = None
 # %%
 __all__ = [
     "get_cache_manager",
-    "deepseek_process_note",
+    "cloud_process_note",
     "describe_images",
     "process_note_vision",
     "ollama_vision_describe",
@@ -106,25 +113,29 @@ def get_cache_manager():
 # # 大模型（笔记智能加工）
 
 # %% [markdown]
-# ## deepseek_process_note(text: str, task: str = "summary", model: str = DEFAULT_CHAT_MODEL, max_retries: int = 3, use_cache: bool = True,) -> Optional[str]
+# ## cloud_process_note(text: str, task: str = "summary", model: str = DEFAULT_CHAT_MODEL, max_retries: int = 3, use_cache: bool = True,) -> Optional[str]
 
 # %%
 # @timethis
-def deepseek_process_note(
+def cloud_process_note(
     text: str,
     task: str = "summary",
-    model: str = DEFAULT_CHAT_MODEL,
+    model: str = "",
     max_retries: int = 3,
     use_cache: bool = True,
 ) -> Optional[str]:
     """大模型处理（集成智能验证机制）"""
-    if not DEEPSEEK_API_KEY:
-        log.warning("未配置AI API Key")
+    api_key = _get_cloud_api_key()
+    if not api_key:
+        log.warning("未配置云端 API Key")
         return None
+
+    if not model:
+        model = getinivaluefromcloud("joplinai", "cloud_model") or _DEFAULT_CLOUD_MODEL
 
     if not use_cache:
         # 不使用缓存，直接调用API
-        return _call_deepseek_api_directly(text, task, model, max_retries)
+        return _call_cloud_api(text, task, model, max_retries)
 
     # 使用缓存流程
     content_hash = compute_content_hash(text[:8000])
@@ -159,7 +170,7 @@ def deepseek_process_note(
 
     # 缓存未命中，调用API获取新结果
     log.info(f"增强缓存未命中，调用API: {task} for {content_hash[:12]}")
-    new_result = _call_deepseek_api_directly(text, task, model, max_retries)
+    new_result = _call_cloud_api(text, task, model, max_retries)
 
     if new_result:
         # 将新结果保存到缓存
@@ -188,7 +199,7 @@ def _validate_cache_entry_async(
     # 这里为了简化，展示同步逻辑。生产环境应使用 threading.Thread 或 asyncio。
     try:
         # 发起一次新的、不经过缓存的API调用
-        new_result = _call_deepseek_api_directly(
+        new_result = _call_cloud_api(
             original_text, task, model, max_retries, use_cache=False
         )
 
@@ -219,18 +230,19 @@ def _validate_cache_entry_async(
 
 
 # %% [markdown]
-# ## _call_deepseek_api_directly(text: str, task: str, model: str, max_retries: int, use_cache: bool = False) -> Optional[str]
+# ## _call_cloud_api(text: str, task: str, model: str, max_retries: int, use_cache: bool = False) -> Optional[str]
 
 # %%
-def _call_deepseek_api_directly(
+def _call_cloud_api(
     text: str, task: str, model: str, max_retries: int, use_cache: bool = False
 ) -> Optional[str]:
-    """DeepSeek大模型处理
-    直接调用DeepSeek API的核心函数。
+    """云端大模型处理
+    直接调用云端 API 的核心函数。
     注意：这个函数内部不应该再调用缓存逻辑，避免循环。
     """
-    if not DEEPSEEK_API_KEY:
-        log.warning("未配置DeepSeek API Key")
+    api_key = _get_cloud_api_key()
+    if not api_key:
+        log.warning("未配置云端 API Key")
         return None
 
     # 添加个人笔记QA提示词
@@ -244,10 +256,10 @@ def _call_deepseek_api_directly(
     4. 用英文逗号分隔，不要编号
     5. 优先提取文本中反复出现的关键概念、实体和**关键地点**
     6. 对于地名，仅提取在文中作为核心要素出现的地点（如事件发生地、主要研究对象所在地、重要机构所在地等）
-    
+
     文本内容：
     %s
-    
+
     请直接输出标签，不要有其他说明。""",
     }
 
@@ -259,7 +271,7 @@ def _call_deepseek_api_directly(
     safe_text = text[:8000]
     prompt = prompts[task] % safe_text
     headers = {
-        "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+        "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
     payload = {
@@ -268,24 +280,23 @@ def _call_deepseek_api_directly(
         "temperature": 0.3,
         "max_tokens": 500,
     }
-    # print(payload)
 
+    api_url = _get_cloud_api_url()
     for attempt in range(max_retries):
         try:
             response = requests.post(
-                DEEPSEEK_CHAT_URL, headers=headers, json=payload, timeout=30
+                api_url, headers=headers, json=payload, timeout=30
             )
             if response.status_code == 400:
-                log.error(f"增强API 400错误: {response.text}")
+                log.error(f"云端API 400错误: {response.text}")
                 return None
             response.raise_for_status()
-            # print(response.json())
             result = response.json()["choices"][0]["message"]["content"].strip()
 
             return result
         except Exception as e:
             log.warning(
-                f"增强大模型调用失败({attempt + 1}/{max_retries}): {str(e)[:100]}"
+                f"云端大模型调用失败({attempt + 1}/{max_retries}): {str(e)[:100]}"
             )
             time.sleep(2**attempt)
     return None
@@ -383,7 +394,7 @@ def ollama_process_note(
 ) -> Optional[str]:
     """Ollama 模型处理笔记（标签/摘要），支持缓存。
 
-    与 deepseek_process_note 相同的接口，使用 Ollama 模型。
+    与 cloud_process_note 相同的接口，使用 Ollama 模型。
     ollama_host 由调用方从设备级云配置获取，确保跨主机路由正确。
     """
     if not use_cache:
@@ -434,12 +445,12 @@ def enhance_note(
 
     if provider == "cloud":
         if not model:
-            model = DEFAULT_CHAT_MODEL
+            model = getinivaluefromcloud("joplinai", "cloud_model") or _DEFAULT_CLOUD_MODEL
         key = (task, provider)
         if key not in _enhance_provider_logged:
             log.info(f"增强 [{task}] 路由: provider=cloud, model={model}")
             _enhance_provider_logged.add(key)
-        result = deepseek_process_note(text, task=task, model=model, use_cache=use_cache)
+        result = cloud_process_note(text, task=task, model=model, use_cache=use_cache)
         if result and task in _call_stats:
             _call_stats[task]["cloud"] += 1
         return result
@@ -461,26 +472,30 @@ def enhance_note(
 # # DeepSeek Vision API（图片处理）
 
 # %% [markdown]
-# ## _call_deepseek_vision_api(messages: list[dict], model: str, max_retries: int)
+# ## _call_cloud_vision_api(messages: list[dict], model: str, max_retries: int)
 
 # %%
-def _call_deepseek_vision_api(
+def _call_cloud_vision_api(
     messages: list[dict],
-    model: str = DEFAULT_VISION_MODEL,
+    model: str = "",
     max_retries: int = 2,
 ) -> Optional[str]:
-    """Call DeepSeek V4 vision API with native multimodal format.
+    """Call vision API with native multimodal format.
 
     Each message dict has top-level 'image_data' (pure base64, no prefix)
     or 'image_url' field alongside 'role' and 'content':
     {"role": "user", "content": "描述图片", "image_data": "base64..."}
     """
-    if not DEEPSEEK_API_KEY:
-        log.warning("未配置DeepSeek API Key")
+    api_key = _get_cloud_api_key()
+    if not api_key:
+        log.warning("未配置云端 API Key")
         return None
 
+    if not model:
+        model = _DEFAULT_VISION_MODEL
+
     headers = {
-        "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+        "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
     payload = {
@@ -490,20 +505,21 @@ def _call_deepseek_vision_api(
         "max_tokens": 800,
     }
 
+    api_url = _get_cloud_api_url()
     for attempt in range(max_retries):
         try:
             response = requests.post(
-                DEEPSEEK_CHAT_URL, headers=headers, json=payload, timeout=60
+                api_url, headers=headers, json=payload, timeout=60
             )
             if response.status_code == 400:
-                log.error(f"DeepSeek Vision API 400错误: {response.text[:200]}")
+                log.error(f"云端 Vision API 400错误: {response.text[:200]}")
                 return None
             response.raise_for_status()
             result = response.json()["choices"][0]["message"]["content"].strip()
             return result
         except Exception as e:
             log.warning(
-                f"DeepSeek Vision API调用失败({attempt + 1}/{max_retries}): {str(e)[:100]}"
+                f"云端 Vision API调用失败({attempt + 1}/{max_retries}): {str(e)[:100]}"
             )
             time.sleep(2 ** attempt)
     return None
@@ -516,21 +532,24 @@ def _call_deepseek_vision_api(
 def describe_images(
     images: dict[str, dict],
     context: str = "",
-    model: str = DEFAULT_VISION_MODEL,
+    model: str = "",
 ) -> Optional[str]:
-    """Describe a set of images using DeepSeek V4 Vision API (native format).
+    """Describe a set of images using Vision API (native multimodal format).
 
     Args:
         images: {resource_id: {'b64': str, 'mime': str}} dict
         context: surrounding text context for better descriptions
-        model: DeepSeek model name
+        model: vision model name
 
     Returns concatenated image description text, or None if all fail.
     """
     if not images:
         return None
 
-    # One message per image (DeepSeek V4: image_data is top-level message field)
+    if not model:
+        model = _DEFAULT_VISION_MODEL
+
+    # One message per image
     image_items = list(images.items())
     descriptions = []
 
@@ -547,7 +566,7 @@ def describe_images(
             "content": prompt,
             "image_data": img_data["b64"],
         }
-        result = _call_deepseek_vision_api([message], model=model)
+        result = _call_cloud_vision_api([message], model=model)
         if result:
             descriptions.append(result)
         else:
@@ -566,14 +585,14 @@ def process_note_vision(
     note_content: str,
     images: dict[str, dict],
     context: str = "",
-    model: str = DEFAULT_VISION_MODEL,
+    model: str = "",
 ) -> Optional[str]:
     """Generate a comprehensive note enhancement using vision + text.
 
-    Combines note text and embedded images, sends to DeepSeek V4,
+    Combines note text and embedded images, sends to vision model,
     returns a description that enriches the text-only understanding.
 
-    Use cache-friendly: wrap with deepseek_process_note for caching.
+    Use cache-friendly: wrap with cloud_process_note for caching.
     """
     return describe_images(images, context=context or note_content, model=model)
 
@@ -726,7 +745,7 @@ def ollama_vision_describe(
 
 # %%
 if __name__ == "__main__":
-    result = deepseek_process_note(
+    result = cloud_process_note(
         "请在100字之内介绍joplin笔记软件", task="summary", model="deepseek-chat"
     )
     print(result)

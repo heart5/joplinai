@@ -40,9 +40,9 @@ __all__ = ["CONFIG"]
 
 CONFIG = {
     "ollama_embedding_model": getinivaluefromcloud("joplinai", "ollama_embedding_model") or "dengcao/bge-large-zh-v1.5",
-    "chat_model": chat_model
-    if (chat_model := getinivaluefromcloud("joplinai", "chat_model"))
-    else "qwen:1.8b",
+    "qa_ollama_chat_model": qa_ollama_chat_model
+    if (qa_ollama_chat_model := getinivaluefromcloud("joplinai", "qa_ollama_chat_model"))
+    else "qwen2.5:1.5b",
     "db_path": getdirmain() / "data" / "joplin_vector_db",
     "max_retrieved_notes": 10,
     "max_retrieved_chunks": max_retrieved_chunks
@@ -51,7 +51,12 @@ CONFIG = {
     )
     else 20,
     "similarity_threshold": 0.5,
-    "deepseek_api_key": getinivaluefromcloud("joplinai", "deepseek_token"),
+    "cloud_api_key": cloud_api_key
+    if (cloud_api_key := getinivaluefromcloud("joplinai", "cloud_api_key"))
+    else getinivaluefromcloud("joplinai", "deepseek_token"),
+    "cloud_api_url": cloud_api_url
+    if (cloud_api_url := getinivaluefromcloud("joplinai", "cloud_api_url"))
+    else "https://api.deepseek.com/v1/chat/completions",
     "cloud_model": cloud_model
     if (cloud_model := getinivaluefromcloud("joplinai", "cloud_model"))
     else "deepseek-chat",
