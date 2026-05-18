@@ -45,7 +45,7 @@ All services are Flask apps。No Docker/containerization in production (docker-c
 Center API 的 gunicorn 入口：`"aimod.center_api:create_app()"`（app factory 模式）。
 Web App 入口：`joplin_web_app:app`（模块级 `app = create_app()`，勿放 `if __name__` 内——gunicorn 不执行该块）。
 
-Data flow: `joplinai.py` → TC 本地 (Joplin Server / ChromaDB / center_api) + 远程 HCX (Ollama embedding / 11434) + 外部 DeepSeek API (AI增强)。各 `aimod/*_client.py` 通过 HTTP + API Key → `aimod/center_api/` → `data/joplinai_center.db`
+Data flow: `joplinai.py` → TC 本地 (Joplin Server / ChromaDB / center_api) + 远程 HCX (Ollama embedding / 11434) + 外部 Cloud API (AI增强, 默认 DeepSeek)。各 `aimod/*_client.py` 通过 HTTP + API Key → `aimod/center_api/` → `data/joplinai_center.db`
 
 向量化优化：chunk 内容未变仅元数据（tags/summary）变更时，跳过嵌入生成，仅通过 `VectorDBManager.update_chunk_metadata()` 更新 ChromaDB metadata（不含 embeddings），避免不必要的远程序列调用。
 
@@ -193,7 +193,7 @@ Production: systemd services managed via `deploy/deploy.sh`:
 | `minicpm-v:latest` | 5.5 GB | 笔记图片描述（`vision_enabled=False` 默认关闭） | ~数分钟/图 |
 
 - **`qwen2.5:1.5b`** 通过 `enhance_ollama_chat_model` 配置键指定，供向量化管线离线批量任务使用
-- **无本地 QA 回退**：`qa_ollama_chat_model=none`，DeepSeek API 不可用时直接返回服务不可用，不尝试本地模型
+- **无本地 QA 回退**：`qa_ollama_chat_model=none`，Cloud API 不可用时直接返回服务不可用，不尝试本地模型
 - 之前使用后删除的模型：`qwen:1.8b`（架构旧）、`qwen3:8b`（12分钟太慢）、`deepseek-r1:7b`（RAG误判）、`gemma3:4b-it-qat`（中文幻觉）
 
 ### 云端模型（OpenAI-compatible API，默认 DeepSeek）
@@ -216,7 +216,7 @@ Production: systemd services managed via `deploy/deploy.sh`:
 | `summary_model` | `cloud` | 摘要模型: cloud/ollama/none |
 | `tags_model` | `cloud` | 标签模型: cloud/ollama/none |
 | `enhance_ollama_chat_model` | `qwen2.5:1.5b` | Ollama 标签/分类模型 |
-| `vision_enabled` | `false` | CPU 跑视觉太慢，默认关闭 |
+| `vision_enabled` | `true` | 视觉描述，默认开启（CPU太慢可云配置关闭） |
 
 ## Testing & CI
 

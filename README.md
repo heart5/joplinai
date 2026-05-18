@@ -138,7 +138,7 @@ python joplin_web_app.py
 
 - **后端**: Flask, requests, Jinja2
 - **向量库**: ChromaDB
-- **LLM**: Ollama（本地 embedding + LLM）+ DeepSeek API（云端对话/增强）
+- **LLM**: Ollama（本地 embedding + 离线标签）+ Cloud API（云端 QA 对话 + 摘要/标签增强，默认 DeepSeek）
 - **配置**: Joplin 云端笔记（INI 格式），支持热更新
 - **部署**: systemd + rsync，`deploy/deploy.sh` 一键部署
 - **CI/CD**: GitHub Actions (lint + test)
