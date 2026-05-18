@@ -99,14 +99,14 @@ CONFIG = {
         8, (os.cpu_count() or 1) * 2
     ),  # 动态设置最大工作者数：CPU核心数 * 2，上限为16
     "db_path": str(getdirmain() / "data" / "joplin_vector_db"),  # ChromaDB存储路径
-    # "enable_deepseek_embed": False,  # 是否用DeepSeek嵌入替代本地嵌入（增强向量质量）
+
     # provider-agnostic 增强模型配置: "cloud" / "ollama" / "none"
     "summary_model": getinivaluefromcloud("joplinai", "summary_model") or "cloud",
     "tags_model": getinivaluefromcloud("joplinai", "tags_model") or "cloud",
     "cloud_model": getinivaluefromcloud("joplinai", "cloud_model") or "deepseek-chat",
-    "ollama_chat_model": getinivaluefromcloud("joplinai", "ollama_chat_model") or "qwen2.5:1.5b",
-    "deepseek_api_key": getinivaluefromcloud("joplinai", "deepseek_token"),
-    "deepseek_embed_model": "deepseek-embedding",
+    "enhance_ollama_chat_model": getinivaluefromcloud("joplinai", "enhance_ollama_chat_model") or "qwen2.5:1.5b",
+    "cloud_api_key": getinivaluefromcloud("joplinai", "cloud_api_key") or getinivaluefromcloud("joplinai", "deepseek_token"),
+
     "force_update": False,  # 新增：强制更新开关，默认关闭
     "chunk_overlap": 50,
     # 【新增】自适应分块配置
@@ -493,7 +493,7 @@ def process_notes_incremental(notebook_title: str, config: Dict, note_ids: List[
     embedding_gen = process_notes_incremental.embedding_gen
 
     # 本地模型可用性检查（摘要/标签配了本地模型时）
-    ollama_chat_model = config.get("ollama_chat_model")
+    ollama_chat_model = config.get("enhance_ollama_chat_model")
     if config.get("summary_model") == "ollama" or config.get("tags_model") == "ollama":
         try:
             import ollama
@@ -583,8 +583,11 @@ def process_notes_incremental(notebook_title: str, config: Dict, note_ids: List[
             current_notebook_title = next(iter(notebook_dict.values()), "")
             # 2. 计算内容哈希 (基于标题和正文)
             current_content_hash = compute_content_hash(f"{note.title}{note.body}")
-            # 3. 计算元数据哈希 (基于标签和笔记本标题)
-            current_meta_hash = compute_content_hash(f"{tags_str}{current_notebook_title}")
+            # 3. 计算元数据哈希 (含标签、笔记本标题、增强模型——模型变更时自动重处理)
+            current_meta_hash = compute_content_hash(
+                f"{tags_str}{current_notebook_title}"
+                f"{config.get('summary_model', '')}{config.get('tags_model', '')}"
+            )
             # === 修改结束 ===
             # 获取上一次处理的状态（兼容旧格式）
             last_state = process_state.get(note_id, {})
