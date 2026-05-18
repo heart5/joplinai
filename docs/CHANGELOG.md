@@ -26,6 +26,23 @@ jupyter:
 本文档记录 Claude Code 协助下的所有项目变更。
 
 
+### 2026年5月18日
+
+**AI增强策略切换：摘要走云端，标签留本地**（commit `0a45050`）：
+
+- `summary_model=cloud`（DeepSeek API），`tags_model=ollama`（qwen2.5:1.5b）
+- 原因：本地 1.5B 模型摘要质量灾难级，标签提取够用
+- 全量重命名：`deepseek_*` → `cloud_*`、`chat_model` → `qa_ollama_chat_model`、`ollama_chat_model` → `enhance_ollama_chat_model`
+- API Key 从硬编码 `deepseek_token` 改为动态 `cloud_api_key`（回退 `deepseek_token`）
+- `qa_ollama_chat_model` fallback 值更新为 `qwen2.5:1.5b`（原 `qwen:1.8b` 已删除）
+
+**meta_hash 精准化：增强配置独立追踪**（commit `92a20ac` → 本次修正）：
+
+- `meta_hash` 恢复为仅含标签+笔记本标题元数据，不含增强模型
+- `note_process_state` 新增 `enhance_config` 字段（格式 `summary=cloud|tags=ollama`）
+- 模型变更检测从全局核武器改为字段级比对：只有增强配置真正变化时才触发重处理
+- 旧状态无此字段时自动触发一次迁移重扫（清理 ollama 垃圾摘要）
+
 ### 2026年5月17日
 
 **文档全量更新至当前架构**（commit `f801188`）：
@@ -60,6 +77,33 @@ jupyter:
 - `set()` 保持 `cache_key = {hash}_{task}_{model}`（model 后缀保留供后续数据质量分析）
 - `tests/test_note_enhancer.py`：`test_cache_miss_calls_api` 更新 `set()` 调用断言匹配 4 参数
 
+**配置键重命名：消除 QA/增强 Ollama 模型键歧义**：
+
+- `chat_model` → `qa_ollama_chat_model`（QA 本地 Ollama 对话模型 fallback，当前 `none`）
+- `ollama_chat_model` → `enhance_ollama_chat_model`（向量化增强 Ollama 标签/摘要模型，当前 `qwen2.5:1.5b`）
+- 涉及文件：`src/qa_config.py`、`src/qa_system.py`、`src/qa_cli.py`、`joplinai.py`、`aimod/embedding_generator.py`、`src/config_manager.py`
+- 文档更新：CLAUDE.md 配置表、模型策略章节、Configuration 章节
+- 云端配置 Joplin note 需手动同步重命名两个键
+
+**云端 API 可配置化 — 支持切换 OpenAI-compatible 提供者**：
+
+- 新增云配置键 `cloud_api_url`（默认 `https://api.deepseek.com/v1/chat/completions`）、`cloud_api_key`（回退 `deepseek_token`）
+- `aimod/note_enhancer.py`：模块级常量 `DEEPSEEK_API_KEY`/`DEEPSEEK_CHAT_URL`/`DEEPSEEK_EMBED_URL`/`DEFAULT_CHAT_MODEL`/`DEFAULT_EMBED_MODEL`/`DEFAULT_VISION_MODEL` → `_get_cloud_api_url()`/`_get_cloud_api_key()` 函数 + 模块级默认值
+- `src/qa_system.py`：2处硬编码 `https://api.deepseek.com/v1/chat/completions` → `self.config["cloud_api_url"]`；`deepseek_api_key` → `cloud_api_key`
+- `src/qa_config.py`/`joplinai.py`：配置键 `deepseek_api_key` → `cloud_api_key`（先读 `cloud_api_key` 回退 `deepseek_token`）
+- `src/config_manager.py`：监控 `cloud_api_url`、`cloud_api_key` 新键
+- `tests/test_note_enhancer.py`：`DEEPSEEK_API_KEY` mock → `_get_cloud_api_key` mock
+- 日志 "DeepSeek" → "云端" 通用化
+- 可通过 `cloud_api_url` + `cloud_api_key` + `cloud_model` 三键切换 Qwen/ChatGPT 等提供者
+
+**函数名通用化 + 死代码清理**：
+
+- `deepseek_process_note` → `cloud_process_note`（`aimod/note_enhancer.py` + `__all__` 导出）
+- `_call_deepseek_api_directly` → `_call_cloud_api`
+- `_call_deepseek_vision_api` → `_call_cloud_vision_api`
+- `_generate_answer_with_deepseek` → `_generate_answer_with_cloud`（`src/qa_system.py`）
+- 测试文件同步更新：`test_note_enhancer.py`（10处）、`model_compare_local_vs_cloud.py`（import + call）
+- 删除 `joplinai.py` 中已废弃的 `deepseek_embed_model` 配置项及 `enable_deepseek_embed` 注释
 
 ### 2026年5月16日
 
