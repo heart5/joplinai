@@ -8,6 +8,7 @@ OnUnitActiveSec=8h
 Unit=joplinai-sync.service
 AccuracySec=1min
 RandomizedDelaySec=540
+Persistent=true
 
 [Install]
 WantedBy=timers.target
