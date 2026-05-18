@@ -216,7 +216,7 @@ Production: systemd services managed via `deploy/deploy.sh`:
 | `summary_model` | `cloud` | 摘要模型: cloud/ollama/none |
 | `tags_model` | `cloud` | 标签模型: cloud/ollama/none |
 | `enhance_ollama_chat_model` | `qwen2.5:1.5b` | Ollama 标签/分类模型 |
-| `vision_enabled` | `true` | 视觉描述，默认开启（CPU太慢可云配置关闭） |
+| `vision_enabled` | `false` | CPU 跑视觉太慢，默认关闭 |
 
 ## Testing & CI
 
