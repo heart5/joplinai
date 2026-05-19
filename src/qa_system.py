@@ -397,9 +397,9 @@ class QASystem:
                         {"role": "user", "content": prompt},
                     ],
                     "temperature": 0.1,
-                    "max_tokens": 600,
+                    "max_tokens": 4000,
                 },
-                timeout=30,
+                timeout=60,
             )
             resp.raise_for_status()
             text = resp.json()["choices"][0]["message"]["content"].strip()
