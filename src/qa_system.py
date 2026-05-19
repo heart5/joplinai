@@ -193,19 +193,23 @@ class QASystem:
 
     # %%
     def _extract_keywords(self, text: str) -> List[str]:
-        """提取关键词（简单实现）"""
+        """提取关键词"""
         import re
-        text = re.sub(r"[^\w\s]", "", text)
-        words = text.split()
+        try:
+            import jieba
+            words = jieba.lcut(text)
+        except ImportError:
+            words = text.split()
+        words = [w.strip() for w in words if re.search(r"\w", w) and len(w.strip()) > 1]
         from collections import Counter
         word_counts = Counter(words)
         stop_words = {"的", "了", "在", "是", "我", "你", "他", "她", "它", "这", "那"}
         keywords = [
             word
             for word, count in word_counts.most_common(10)
-            if word not in stop_words and len(word) > 1
+            if word not in stop_words
         ]
-        return keywords[:3]
+        return keywords[:5]
 
 # %% [markdown]
 # ### _filter_and_rank_chunks(self, chunks: List[Dict], question: str) -> List[Dict]
