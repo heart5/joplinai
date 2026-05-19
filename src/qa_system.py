@@ -122,6 +122,14 @@ class QASystem:
         if not query_embedding:
             return {"answer": "无法生成问题嵌入，请检查配置。", "relevant_chunks": []}
 
+        # 2.5 HyDE 增强嵌入
+        if self.config.get("hyde_enabled", True):
+            hyde = self._generate_hyde(question)
+            if hyde:
+                fused = self._fuse_hyde_embedding(processed_question, hyde)
+                if fused:
+                    query_embedding = fused
+
         # 3. 搜索相似块
         similar_chunks = self.vector_db.search_similar_chunks(
             query_embedding,
@@ -210,6 +218,92 @@ class QASystem:
             if word not in stop_words
         ]
         return keywords[:5]
+
+# %% [markdown]
+# ### HyDE (Hypothetical Document Embedding)
+
+    # %%
+    def _generate_hyde(self, question: str) -> dict:
+        """调用云端 LLM 生成 search_query + 假设答案，失败返回 None"""
+        if self.config.get("cloud_model", "none") == "none" or not self.config.get("cloud_api_key"):
+            return None
+        try:
+            import requests
+            prompt = (
+                "你是个人笔记助手。用户提问后，请帮助优化向量检索。\n"
+                f"用户问题：{question}\n\n"
+                "请生成两个字段：\n"
+                "1. search_query：3-8个关键词，用于向量检索\n"
+                "2. hypothetical_answer：假设用户笔记中可能如何记录这个主题，"
+                "生成一段100-200字的假设笔记\n\n"
+                '严格返回JSON：{"search_query": "...", "hypothetical_answer": "..."}'
+            )
+            resp = requests.post(
+                self.config.get("cloud_api_url", "https://api.deepseek.com/v1/chat/completions"),
+                headers={
+                    "Authorization": f"Bearer {self.config['cloud_api_key']}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": self.config["cloud_model"],
+                    "messages": [
+                        {"role": "system", "content": "你是检索优化助手，只返回JSON。"},
+                        {"role": "user", "content": prompt},
+                    ],
+                    "temperature": 0.3,
+                    "max_tokens": 500,
+                },
+                timeout=30,
+            )
+            resp.raise_for_status()
+            text = resp.json()["choices"][0]["message"]["content"].strip()
+            # 提取JSON
+            import re as _re
+            m = _re.search(r"\{[^{}]*\}", text, _re.DOTALL)
+            if m:
+                result = json.loads(m.group())
+                if result.get("search_query") and result.get("hypothetical_answer"):
+                    log.info(f"[HyDE] search_query={result['search_query'][:60]}")
+                    return result
+            log.warning(f"[HyDE] 解析失败: {text[:200]}")
+            return None
+        except Exception as e:
+            log.warning(f"[HyDE] 生成失败: {e}")
+            return None
+
+    # %%
+    def _fuse_hyde_embedding(self, question: str, hyde: dict) -> Optional[List[float]]:
+        """融合原始问题 + search_query + 假设答案的嵌入向量"""
+        from func.datatools import compute_content_hash as _hash
+
+        texts = {
+            "original": (question, 0.3),
+            "search": (hyde["search_query"], 0.4),
+            "hypo": (hyde["hypothetical_answer"], 0.3),
+        }
+        vectors = {}
+        for label, (text, _weight) in texts.items():
+            chunk_dict = {
+                "content": text,
+                "base_metadata": {
+                    "content_hash": _hash(text),
+                    "source_note_title": f"hyde_{label}",
+                    "chunk_index": 0,
+                },
+            }
+            vec = self.embedding_generator.get_merged_embedding(chunk_dict)
+            if not vec:
+                log.warning(f"[HyDE] {label} 嵌入失败，降级为原始问题")
+                return None
+            vectors[label] = vec
+
+        dim = len(vectors["original"])
+        fused = [0.0] * dim
+        for label, (_, weight) in texts.items():
+            for i in range(dim):
+                fused[i] += vectors[label][i] * weight
+        log.info(f"[HyDE] 三向量融合完成 dim={dim}")
+        return fused
 
 # %% [markdown]
 # ### _filter_and_rank_chunks(self, chunks: List[Dict], question: str) -> List[Dict]
