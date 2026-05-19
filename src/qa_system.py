@@ -396,8 +396,8 @@ class QASystem:
                         {"role": "system", "content": "你是排序助手。只返回逗号分隔的数字编号，不要解释。"},
                         {"role": "user", "content": prompt},
                     ],
-                    "temperature": 0,
-                    "max_tokens": 200,
+                    "temperature": 0.1,
+                    "max_tokens": 600,
                 },
                 timeout=30,
             )
