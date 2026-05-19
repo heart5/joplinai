@@ -2,6 +2,7 @@
 # jupyter:
 #   jupytext:
 #     formats: ipynb,py:percent
+#     split_at_heading: true
 #     text_representation:
 #       extension: .py
 #       format_name: percent
@@ -232,9 +233,12 @@ class QASystem:
             for chunk in filtered:
                 score = chunk["similarity"]
                 content = chunk["content"].lower()
+                tags = (chunk.get("metadata", {}).get("tags") or "").lower()
                 for keyword in keywords:
                     if keyword in content:
-                        score += 0.1
+                        score += 0.10
+                    if keyword in tags:
+                        score += 0.15
                 scored_chunks.append((score, chunk))
             scored_chunks.sort(key=lambda x: x[0], reverse=True)
             filtered = [chunk for _, chunk in scored_chunks]
