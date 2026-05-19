@@ -29,6 +29,23 @@ jupyter:
 
 ### 2026年5月19日
 
+**QA 检索四步增强**（commits `ac87b9a` → `a68f988`）：
+
+- **#1 标签/summary 关键词加分**：`_filter_and_rank_chunks` 评分时同步检查 `metadata.tags` (+0.15) 和 `metadata.summary` (+0.15)，不再仅检查正文 (+0.10)。AI 增强生成的标签和摘要参与检索排序。
+- **#1 中文分词 jieba**：`_extract_keywords` 改用 `jieba.lcut()` 分词，替换无效的 `text.split()`。中文词间无空格，不分词则整句为单"词"，标签/summary 匹配全部失效。
+- **#2 HyDE 假设文档嵌入**：新增 `_generate_hyde()` + `_fuse_hyde_embedding()`。LLM 对问题脑补假设答案→三向量加权融合 (0.3/0.4/0.3)→融合向量替代原始问题向量检索。解决口语问题与书面笔记间的语义差距。
+- **#4 LLM 精排 RankGPT**：新增 `_rerank_by_llm()`。top-20 候选块交给 DeepSeek V4 直接按相关性排序，纠正关键词加分的虚高误判。适配 V4 推理模型需 `max_tokens=4000`（~530 reasoning tokens 开销）。
+- **上下文嵌入摘要预览**：`_build_optimized_context` 在每个 chunk 前插入 `[摘要] xxx`，帮助 LLM 快速定位 chunk 核心内容。
+- 新增配置开关：`hyde_enabled`（默认 true）、`rerank_enabled`（默认 true）。
+- 全部改动在 `src/qa_system.py`，~250 行新增。
+
+**QA 检索链路技术手册**（`docs/QA_PIPELINE.md`）：
+
+- 新增完整技术手册，覆盖从提问到答案生成的 7 步链路
+- mermaid 架构图 + ASCII 流程图 + 真实评分表 + 性能剖析
+- 代码位置索引 + 配置开关参考
+- jupytext 同步至 ipynb
+
 **DeepSeek V4 模型迁移：`deepseek-chat` → `deepseek-v4-flash`**：
 
 - DeepSeek V4 已发布，旧模型名 `deepseek-chat` / `deepseek-reasoner` 将于 2026-07-24 退役
