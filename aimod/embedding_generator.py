@@ -24,6 +24,7 @@
 import hashlib
 import logging
 import re
+import time
 from functools import lru_cache
 from threading import Semaphore
 from typing import Dict, List, Optional, Tuple
@@ -56,7 +57,7 @@ with pathmagic.Context():
 # %%
 __all__ = ["EmbeddingGenerator"]
 
-_ollama_embed_semaphore = Semaphore(2)  # 限制并发嵌入请求，避免HCX CPU过载
+_ollama_embed_semaphore = Semaphore(1)  # HCX CPU-only，串行化嵌入请求避免超时
 
 class EmbeddingGenerator:
     """嵌入生成器，支持长文本分块处理"""
@@ -990,7 +991,7 @@ class EmbeddingGenerator:
                         error_msg = f"{error_msg} | {body}"
                 except Exception:
                     pass
-            log.error(f"[远程Ollama] 嵌入调用失败(token超限): {error_msg}")
+            log.error(f"[远程Ollama] 嵌入调用失败: {error_msg}")
             raise Exception(error_msg) from e
 
 # %% [markdown]
@@ -1075,6 +1076,9 @@ class EmbeddingGenerator:
                     break
                 else:
                     log.warning(f"[嵌入重试] 第{attempt}次获取嵌入失败: {e}")
+                    backoff = min(2 ** attempt, 30)
+                    log.info(f"[嵌入重试] 等待 {backoff}s 后重试...")
+                    time.sleep(backoff)
                 continue
 
         if not embedding:
