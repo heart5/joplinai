@@ -238,10 +238,13 @@ class QASystem:
                 score = chunk["similarity"]
                 content = chunk["content"].lower()
                 tags = (chunk.get("metadata", {}).get("tags") or "").lower()
+                summary = (chunk.get("metadata", {}).get("summary") or "").lower()
                 for keyword in keywords:
                     if keyword in content:
                         score += 0.10
                     if keyword in tags:
+                        score += 0.15
+                    if keyword in summary:
                         score += 0.15
                 scored_chunks.append((score, chunk))
             scored_chunks.sort(key=lambda x: x[0], reverse=True)
@@ -307,7 +310,14 @@ class QASystem:
                     )
             note_tags = ",".join(list(all_tags))
 
-            combined_content = "\n---\n".join([c["content"] for c in chunk_list])
+            parts = []
+            for c in chunk_list:
+                s = c.get("metadata", {}).get("summary", "")
+                if s:
+                    parts.append(f"[摘要] {s}\n{c['content']}")
+                else:
+                    parts.append(c["content"])
+            combined_content = "\n---\n".join(parts)
 
             note_context = f"""【笔记：{note_title} | 类型：{note_type} | 作者：{note_author}】
 标签：{note_tags}
