@@ -626,7 +626,7 @@ sudo journalctl -u joplin-web-app -f      # Web 门户实时日志
 
 # === 腾讯云 (TC) ===
 ssh tc "sudo systemctl status joplinai-center-api"
-ssh tc "sudo systemctl restart joplinai-center-api"
+ssh tc "sudo systemctl restart --no-block joplinai-center-api"
 ssh tc "sudo journalctl -u joplinai-center-api -f"
 
 # ChromaDB (TC)

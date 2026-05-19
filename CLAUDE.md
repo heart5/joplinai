@@ -233,6 +233,8 @@ Pre-commit (`.pre-commit-config.yaml`): jupytext 误注释检测 + flake8。
 - **`static/favicon.ico*`**: 3 domain-specific favicon copies at 3.5MB each. Only the default `favicon.ico` should be tracked; the `_for_*` variants are in `.gitignore`.
 - **TC git pull 可能需要代理**: 直连偶尔失败（GnuTLS recv error），回退方案是 `HTTPS_PROXY=http://127.0.0.1:7890 git pull`。`deploy/deploy.sh` 已包含三级回退策略。
 - **HCX `joplin-qa-api`/`joplin-web-app` 代码更新后需手动重启**: gunicorn 进程不自动 reload，git pull 后必须 `sudo systemctl restart`。
+- **SSH 远程 systemctl restart 会 hang**: `systemctl restart` 默认等待服务停止→启动，SSH 会话会阻塞超时。远程重启必须加 `--no-block`：`ssh tc "sudo systemctl restart --no-block <svc>"`。本地 `deploy.sh` 已内置此参数。
+- **TC 配置更新流程**：修改云端 INI → `ssh tc "source /usr/miniconda3/etc/profile.d/conda.sh && conda activate newlsp && joplin sync"` → `ssh tc "sudo systemctl restart --no-block joplinai-sync"`。joplinai-sync 是 timer 触发的 oneshot 服务，需手动 start/restart。
 - **center_api 日志查看**：TC 上 `sudo journalctl -u joplinai-center-api -f`。logger 配置在 `aimod/center_api/__init__.py`：`propagate=False` 避免 `func/logme` root handler 双重输出。
 - **ChromaDB 在 TC 以 Docker 运行**：`docker run chromadb/chroma`，端口映射 8009→8000。配置中 `chroma_port=8009`，但 `vector_db_manager.py` 硬编码默认 8000——依赖云端配置覆盖。直接 `chromadb.HttpClient(host='127.0.0.1', port=8009)` 才能连上。
 - **Ollama 在 HCX 以公网 IP 暴露**：TC 向量化通过 `149.30.242.156:11434` 远程调 HCX 的 Ollama 生成嵌入。端口 11434 需对外网开放。

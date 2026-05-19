@@ -736,8 +736,15 @@ def process_notes_incremental(notebook_title: str, config: Dict, note_ids: List[
                 new_time_notes.append(note.title)
 
         # 收集处理结果
+        total_notes = len(future_to_note)
+        completed_count = 0
         for future in as_completed(future_to_note):
+            completed_count += 1
             note_id, note_title, update_time, content_hash, meta_hash, enhance_config = future_to_note[future]
+            log.info(
+                f"[进度: {completed_count}/{total_notes} ({completed_count * 100 // total_notes}%)] "
+                f"《{note_title}》完成"
+            )
             try:
                 result_dict = future.result() # 现在接收的是字典
                 success = result_dict.get("success", False)

@@ -26,6 +26,21 @@ jupyter:
 本文档记录 Claude Code 协助下的所有项目变更。
 
 
+### 2026年5月19日
+
+**SSH systemctl restart 卡死修复 + 配置更新流程文档化**：
+
+- **根因**：`ssh tc "sudo systemctl restart <svc>"` 默认等待服务停止→启动，SSH 会话阻塞超时（exit 143）
+- **修复**：`deploy/deploy.sh` 的 `systemctl_cmd()` SSH 路径加 `--no-block`，秒返 exit 0
+- **文档同步**：`CLAUDE.md` 新增 `--no-block` 已知问题条目 + TC 配置更新完整流程（joplin sync → restart）；`TECHNICAL_MANUAL.md` TC 重启命令同步更新
+
+**双层进度追踪机制**：
+
+- `joplinai.py` — 笔记级：`as_completed` 循环中输出 `[进度: 47/54 (87%)] 《xxx》完成`
+- `cli.py` — 笔记本级：每本处理完后输出 `[笔记本进度: 2/5 (40%)] 【xxx】处理完成`
+- 目的：SSH 登录后 `grep` 进度行即可快速判断完成度+预估剩余时间
+
+
 ### 2026年5月18日
 
 **AI增强策略切换：摘要走云端，标签留本地**（commit `0a45050`）：
