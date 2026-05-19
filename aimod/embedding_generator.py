@@ -2,6 +2,7 @@
 # jupyter:
 #   jupytext:
 #     formats: ipynb,py:percent
+#     split_at_heading: true
 #     text_representation:
 #       extension: .py
 #       format_name: percent
@@ -37,7 +38,6 @@ import requests
 # %%
 with pathmagic.Context():
     try:
-        from aimod.chunk_optimizer import AdaptiveChunkOptimizer
         from aimod.note_enhancer import enhance_note
         from aimod.text_preprocessor import TextPreprocessor
         from aimod.text_splitter import ContextAwareSplitter
@@ -103,25 +103,6 @@ class EmbeddingGenerator:
         self.text_prep = TextPreprocessor(chunk_size=self.chunk_size)
         self._set_chunk_size()
 
-        # 初始化探测缓存客户端（远程优先，失败不影响运行）
-        probe_client = None
-        try:
-            remote_url = getinivaluefromcloud("joplinai", "joplinai_center_url")
-            if not remote_url:
-                remote_url = "http://127.0.0.1:5003"
-            api_key = getinivaluefromcloud("joplinai", "joplinai_center_api_key")
-            if remote_url and api_key:
-                from aimod.probe_client import ProbeCacheClient
-                probe_client = ProbeCacheClient(remote_url, api_key)
-                log.info("[自适应探测] 远程缓存客户端已连接")
-        except Exception:
-            pass
-
-        self.adaptive_optimizer = AdaptiveChunkOptimizer(
-            embedding_generator=self,
-            enabled=enable_adaptive_chunking,
-            probe_client=probe_client,
-        )
         self.enable_adaptive_chunking = enable_adaptive_chunking
 
     def __repr__(self):
@@ -129,28 +110,110 @@ class EmbeddingGenerator:
 
     @property
     def _safe_net_chars(self) -> int:
-        """单块净文本安全字符上限（不含上下文注入头部）。
-
-        与 _iterative_chunking 内部 margin 完全一致：
-        margin = int(chunk_size * 0.85 * 0.9) = int(chunk_size * 0.765)
-        注入头部后总长仍 <= 模型token上下文，不会触发API超限。
-        """
+        """单块净文本安全字符上限（不含上下文注入头部）。"""
         return int(self.chunk_size * 0.765)
 
-    def _try_embed_chunk(self, chunk_text: str) -> None:
-        """分块阶段预生成嵌入并缓存，后续 get_merged_embedding 可直接取用。
-        失败静默跳过——嵌入阶段仍可重试。
+    def _chunk_and_embed(
+        self, text: str, pos: int, note_title: str, source_date: str,
+        safe_len: int, ctx_splitter
+    ) -> tuple:
+        """切分+上下文注入+嵌入 三合一。每轮迭代最多重试3次。
+
+        与旧机制的关键区别：
+        - 嵌入对象是 头部+正文（直接测注入后文本，token开销精确）
+        - 成功时向量已在 _chunk_embedding_cache 中，后续 get_merged_embedding 零开销
+        - 失败时 safe_len × 0.7 指数递减，自动收敛到安全长度
+        - 成功后 safe_len × 1.05 渐进行探索，爬升至 chunk_size×2
+
+        Returns: (chunk_ctx, chunk_end, new_safe_len, ok)
         """
-        if not self.enable_adaptive_chunking:
-            return
+        MAX_RETRIES = 3
+        MIN_SAFE = max(100, self._safe_net_chars // 2)
+
+        remaining = text[pos:]
+        remaining_len = len(remaining)
+        text_len = len(text)
+
+        # 精确测量上下文注入头部长度
+        header_overhead = len(
+            ctx_splitter._inject_context("", note_title, source_date)
+        )
+
+        for retry in range(MAX_RETRIES + 1):
+            # header_body_equiv: 头部字符按token密度折算为正文等价长度
+            header_body_equiv = int(header_overhead * self.chunk_size / 512)
+            margin = max(MIN_SAFE, int((safe_len - header_body_equiv) * 0.95))
+
+            # 灰色地带：剩余文本整体可放入margin
+            if remaining_len <= margin:
+                chunk_ctx = ctx_splitter._inject_context(
+                    remaining, note_title, source_date
+                )
+                if self._try_embed_or_fail(chunk_ctx):
+                    new_safe_len = min(int(safe_len * 1.05), self.chunk_size * 2)
+                    chunk_end = text_len  # 全取完了
+                    return (chunk_ctx, chunk_end, new_safe_len, True)
+                # 剩余文本作为末块超长，缩小重试
+                safe_len = max(MIN_SAFE, int(safe_len * 0.7))
+                continue
+
+            # 在 margin 窗口内找句子边界
+            window_text = remaining[:margin]
+            best_split = ctx_splitter._find_best_split_position(window_text)
+
+            MIN_FRACTION = 0.4
+            min_split = max(100, int(margin * MIN_FRACTION))
+            if best_split >= min_split:
+                actual_chunk = remaining[:best_split]
+                chunk_end = pos + best_split
+            else:
+                log.debug(
+                    f"  [chunk-embed] 句子边界({best_split}字符)过短"
+                    f"(阈值{min_split}字符)，改用 margin={margin}字符 硬截断"
+                )
+                actual_chunk = window_text
+                chunk_end = pos + margin
+
+            chunk_ctx = ctx_splitter._inject_context(
+                actual_chunk, note_title, source_date
+            )
+
+            if self._try_embed_or_fail(chunk_ctx):
+                new_safe_len = min(int(safe_len * 1.05), self.chunk_size * 2)
+                log.debug(
+                    f"[chunk-embed] pos={pos}chars, 块={len(actual_chunk)}chars"
+                    f"(+header={header_overhead}chars), "
+                    f"safe_len {safe_len}→{new_safe_len}"
+                )
+                return (chunk_ctx, chunk_end, new_safe_len, True)
+
+            log.debug(
+                f"[chunk-embed] pos={pos}chars 长度超限, "
+                f"safe_len {safe_len}→{max(MIN_SAFE, int(safe_len * 0.7))} (retry={retry+1})"
+            )
+            safe_len = max(MIN_SAFE, int(safe_len * 0.7))
+
+        log.error(f"[chunk-embed] 笔记《{note_title}》pos={pos}处{MAX_RETRIES+1}次重试全部失败")
+        return (None, pos, MIN_SAFE, False)
+
+    def _try_embed_or_fail(self, chunk_text: str) -> bool:
+        """预生成嵌入并缓存。成功→True，长度超限→False并记warning。"""
         key = hashlib.md5(chunk_text.encode("utf-8")).hexdigest()
         if key in self._chunk_embedding_cache:
-            return
+            return True
         try:
             processed = self.text_prep.preprocess_for_embedding(chunk_text)
             self._chunk_embedding_cache[key] = self.get_ollama_embedding(processed)
-        except Exception:
-            pass
+            return True
+        except Exception as e:
+            msg = str(e).lower()
+            if any(kw in msg for kw in ["context length", "input length", "too long"]):
+                log.warning(
+                    f"[chunk嵌入] 长度超限({len(chunk_text)}字符): {str(e)[:100]}"
+                )
+                return False
+            log.debug(f"[chunk嵌入] 非长度错误: {str(e)[:100]}")
+            return False
 
 # %% [markdown]
 # ## _get_model_dimension(self)
@@ -464,21 +527,17 @@ class EmbeddingGenerator:
         self, text: str, note_title: str, source_date: str
     ) -> list:
         """
-        统一迭代分块策略（自适应探测 or 固定安全大小）。
-        逐段提取安全可嵌入的块 → 注入上下文 → 重叠 → 继续，
-        直到全部处理完毕。完全消除二次拆分路径。
-        启用自适应时逐块探测，否则用 chunk_size*0.9 作固定安全大小。
+        统一迭代分块：自适应→chunk-and-embed 三合一；固定→header-aware margin.
+        逐段提取安全可嵌入的块 → 注入上下文 → 重叠 → 继续。
         返回：已注入上下文的文本块列表。
         """
-        can_adaptive = (
-            self.enable_adaptive_chunking and self.adaptive_optimizer.enabled
-        )
+        can_adaptive = self.enable_adaptive_chunking
 
         chunks = []
         pos = 0
         text_len = len(text)
         MIN_SIZE = 100
-        last_safe_len = None  # 温启动：用上一次的安全长度
+        last_safe_len = None  # 温启动
         sentence_end_pat = re.compile(r"[。！？.!?]+")
         ctx_splitter = ContextAwareSplitter(max_chunk_size=self.chunk_size)
 
@@ -486,78 +545,83 @@ class EmbeddingGenerator:
             remaining = text[pos:]
             remaining_len = len(remaining)
 
-            # 快速路径：保守阈值以下，无需探测
+            # 快速路径：剩余文本 ≤ 安全上限，直接作为末块
             if remaining_len <= self._safe_net_chars:
                 chunk_ctx = ctx_splitter._inject_context(
                     remaining, note_title, source_date
                 )
                 chunks.append(chunk_ctx)
-                self._try_embed_chunk(chunk_ctx)
+                self._try_embed_or_fail(chunk_ctx)
                 log.debug(
                     f"[迭代分块] 剩余文本({remaining_len}字符)≤安全净字符上限"
                     f"({self._safe_net_chars}字符)，直接作为末块"
                 )
                 break
 
-            # 1. 确定安全长度：探测 or 固定值
             if can_adaptive:
-                safe_len = self.adaptive_optimizer.probe_max_safe_length(
-                    remaining, self.model_name, start_len=last_safe_len
+                # ─── 自适应路径：chunk-and-embed 三合一 ───
+                safe_len = last_safe_len or self.chunk_size
+                chunk_ctx, chunk_end, new_safe_len, ok = self._chunk_and_embed(
+                    text, pos, note_title, source_date, safe_len, ctx_splitter
                 )
-                last_safe_len = safe_len
+                if not ok:
+                    log.error(
+                        f"[迭代分块] 笔记《{note_title}》pos={pos}处"
+                        f"无法安全分块，跳过剩余{remaining_len}字符"
+                    )
+                    break
+                last_safe_len = new_safe_len
             else:
-                safe_len = int(self.chunk_size * 0.85)  # 固定安全大小
+                # ─── 固定大小路径：header-aware margin ───
+                safe_len = int(self.chunk_size * 0.85)
+                header_overhead = len(
+                    ctx_splitter._inject_context("", note_title, source_date)
+                )
+                header_body_equiv = int(header_overhead * self.chunk_size / 512)
+                margin = max(MIN_SIZE, int((safe_len - header_body_equiv) * 0.95))
 
-            # 2. 预留头部空间(上下文注入约增加30~50字符)，并在窗口内找句子边界
-            margin = int(safe_len * 0.9)  # 留10%余量
+                if remaining_len <= margin:
+                    chunk_ctx = ctx_splitter._inject_context(
+                        remaining, note_title, source_date
+                    )
+                    chunks.append(chunk_ctx)
+                    self._try_embed_or_fail(chunk_ctx)
+                    log.debug(
+                        f"[迭代分块] 剩余文本({remaining_len}字符)≤固定margin"
+                        f"({margin}字符)，直接作为末块"
+                    )
+                    break
 
-            # 灰色地带：探测后可能发现剩余文本仍在margin内
-            if remaining_len <= margin:
+                window_text = remaining[:margin]
+                best_split = ctx_splitter._find_best_split_position(window_text)
+                MIN_FRACTION = 0.4
+                min_split = max(MIN_SIZE, int(margin * MIN_FRACTION))
+                if best_split >= min_split:
+                    actual_chunk = remaining[:best_split]
+                    chunk_end = pos + best_split
+                else:
+                    log.debug(
+                        f"  [迭代分块] 句子边界({best_split}字符)过短"
+                        f"(阈值{min_split}字符)，改用 margin={margin}字符 硬截断"
+                    )
+                    actual_chunk = window_text
+                    chunk_end = pos + margin
+
                 chunk_ctx = ctx_splitter._inject_context(
-                    remaining, note_title, source_date
+                    actual_chunk, note_title, source_date
                 )
-                chunks.append(chunk_ctx)
-                self._try_embed_chunk(chunk_ctx)
+                self._try_embed_or_fail(chunk_ctx)
                 log.debug(
-                    f"[迭代分块] 剩余文本({remaining_len}字符)≤探测margin"
-                    f"({margin}字符)，直接作为末块"
+                    f"[迭代分块] pos={pos}字符, 剩余={remaining_len}字符, "
+                    f"固定安全长度={safe_len}字符, 实际取={len(actual_chunk)}字符"
                 )
-                break
-            window_text = remaining[:margin]
 
-            # 复用现有标点感知切分逻辑找最佳切分位置
-            best_split = ctx_splitter._find_best_split_position(window_text)
-
-            # 最小块尺寸保护：句子边界太靠前时用 margin 截断，避免过短块
-            MIN_FRACTION = 0.4
-            if best_split >= max(MIN_SIZE, int(margin * MIN_FRACTION)):
-                actual_chunk = remaining[:best_split]
-                chunk_end = pos + best_split
-            else:
-                log.debug(
-                    f"  [迭代分块] 句子边界({best_split}字符)过短"
-                    f"(阈值{max(MIN_SIZE, int(margin * MIN_FRACTION))}字符)，"
-                    f"改用 margin={margin}字符 硬截断"
-                )
-                actual_chunk = window_text
-                chunk_end = pos + margin
-
-            # 3. 注入上下文
-            chunk_ctx = ctx_splitter._inject_context(
-                actual_chunk, note_title, source_date
-            )
             chunks.append(chunk_ctx)
-            self._try_embed_chunk(chunk_ctx)
-            log.debug(
-                f"[迭代分块] pos={pos}字符, 剩余={remaining_len}字符, "
-                f"安全块大小({'探测' if can_adaptive else '固定'})={safe_len}字符, "
-                f"实际取={len(actual_chunk)}字符"
-            )
 
             if chunk_end >= text_len:
                 break
 
-            # 4. 计算重叠: 从 chunk_end 往回找句子边界（1句重叠）
+            # 计算重叠: 从 chunk_end 往回找句子边界（1句重叠）
             lookback_start = max(pos, chunk_end - 300)
             lookback_text = text[lookback_start:chunk_end]
             sentence_ends = [
@@ -577,7 +641,7 @@ class EmbeddingGenerator:
 
         log.info(
             f"[迭代分块完成] 笔记《{note_title}》"
-            f"（{'自适应探测' if can_adaptive else '固定大小'}），"
+            f"（{'自适应chunk-embed' if can_adaptive else '固定大小'}），"
             f"共{len(chunks)}块，各块字符数: {[len(c) for c in chunks]}"
         )
         return chunks
@@ -753,19 +817,15 @@ class EmbeddingGenerator:
                     converted_chunk, note_title, unit_date
                 )
                 final_chunks.append(chunk_with_context)
-                self._try_embed_chunk(chunk_with_context)
-            elif (self.enable_adaptive_chunking
-                  and len(converted_chunk) <= int(self.chunk_size * 0.9)):
-                # 第2档：灰色地带 → 用探测结果争取更大直通块
-                safe_len = self.adaptive_optimizer.probe_max_safe_length(
-                    converted_chunk, self.model_name
+                self._try_embed_or_fail(chunk_with_context)
+            elif self.enable_adaptive_chunking \
+                    and len(converted_chunk) <= int(self.chunk_size * 0.9):
+                # 第2档：灰色地带 → 尝试直接嵌入（chunk-embed），失败则迭代分块
+                chunk_with_context = context_splitter._inject_context(
+                    converted_chunk, note_title, unit_date
                 )
-                if len(converted_chunk) <= int(safe_len * 0.9):
-                    chunk_with_context = context_splitter._inject_context(
-                        converted_chunk, note_title, unit_date
-                    )
+                if self._try_embed_or_fail(chunk_with_context):
                     final_chunks.append(chunk_with_context)
-                    self._try_embed_chunk(chunk_with_context)
                 else:
                     sub_chunks = self._iterative_chunking(
                         converted_chunk, note_title, unit_date

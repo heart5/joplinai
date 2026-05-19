@@ -27,6 +27,19 @@ jupyter:
 本文档记录 Claude Code 协助下的所有项目变更。
 
 
+### 2026年5月20日
+
+**分块嵌入三合一重构（chunk-and-embed）**：
+
+- **问题根因**：原机制探测阶段（`_probe_at`）嵌入文本裸前缀 `text[:N]`，但最终嵌入的是注入上下文头部后的 `header + text[pos:pos+M]`。头部开销未被精确预留——`margin = safe_len × 0.9` 一刀切，当头部为中文（token 密度高）而正文为中英混合时，10% 余量不够，导致 `_try_embed_chunk` 静默失败→该块缺失→"处理不完整"。
+- **探测向量 100% 浪费**：探测 `text[:test_len]` 与分块 `header + text[pos:pos+M]` 字符串不同→MD5 不同→`_chunk_embedding_cache` 永远打不中。每次探测生成 3-6 个向量全部丢弃。
+- **新机制 `_chunk_and_embed`**：切分+注入+嵌入三合一。直接对注入头部后的文本调 `get_ollama_embedding`→成功则向量直接存入 `_chunk_embedding_cache`→0 浪费；失败则 `safe_len × 0.7` 指数缩小重试；成功后 `safe_len × 1.05` 渐进行探索（上限 `chunk_size × 2`），确保英文文本不受 512 字符硬上限压制。
+- **header-aware margin**：`margin = (safe_len - header_body_equiv) × 0.95`，先精确扣头部 token 等价开销再留 5% 安全余量。非自适应路径同步修复。
+- **删除 `AdaptiveChunkOptimizer` 依赖**：`_iterative_chunking` 不再调用 `probe_max_safe_length`，`split_into_semantic_chunks` 第2档简化为 `_try_embed_or_fail`。`aimod/chunk_optimizer.py` 已无引用，待 TC 确认稳定后删除。
+- **日志可观测**：`_try_embed_or_fail` 长度超限记 `warning`（含 chunk 字符数和错误摘要），不再静默吞掉。
+- Ollama 调用量预计减少 35-50%（消除冗余探测阶段）。
+- 改动文件：`aimod/embedding_generator.py`（+159/-100 行）。
+
 ### 2026年5月19日
 
 **QA 检索四步增强**（commits `ac87b9a` → `a68f988`）：

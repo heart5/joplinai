@@ -16,6 +16,10 @@ jupyter:
 
 # joplinai 分块策略深度分析
 
+> **⚠️ 2026-05-20 更新：本文档分析的自适应探测机制已被 chunk-and-embed 三合一重构替代。**
+> `chunk_optimizer.py` 已无引用，待 TC 确认稳定后删除。新机制详见 CHANGELOG 2026-05-20。
+> 下文保留作为历史记录。
+
 > 基于 2026-05-19 全量向量化运行数据，分析自适应分块在 RAG 管道中的价值与代价。
 > 数据来源：TC 服务器 `joplinai-sync` journalctl 日志 + `joplinai_center.db`。
 
