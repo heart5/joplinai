@@ -2,6 +2,7 @@
 # jupyter:
 #   jupytext:
 #     formats: ipynb,py:percent
+#     split_at_heading: true
 #     text_representation:
 #       extension: .py
 #       format_name: percent
@@ -195,6 +196,18 @@ def enhance_cache_report() -> dict:
     report["by_task"] = [dict(r) for r in conn.execute(
         "SELECT task, COUNT(*) as count FROM enhance_cache GROUP BY task"
     ).fetchall()]
+
+    # 按模型细分：从 cache_key 解析模型名（格式: {hash}_{task}_{model}）
+    model_counts = {}
+    rows = conn.execute("SELECT cache_key, task FROM enhance_cache").fetchall()
+    for r in rows:
+        ck, task = r["cache_key"], r["task"]
+        model = ck.split(f"_{task}_", 1)[1] if f"_{task}_" in ck else "未知"
+        model_counts[model] = model_counts.get(model, 0) + 1
+    report["by_model"] = sorted(
+        [{"model": m, "count": c} for m, c in model_counts.items()],
+        key=lambda x: x["count"], reverse=True,
+    )
     report["validation_status"] = [dict(r) for r in conn.execute(
         "SELECT validation_result, COUNT(*) as count FROM enhance_cache "
         "WHERE validation_result IS NOT NULL GROUP BY validation_result"

@@ -252,6 +252,16 @@ class ReportWriter:
             md_lines.append("*暂无数据*")
         md_lines.append("")
 
+        # 按模型细分
+        by_model = report.get("by_model", [])
+        if by_model:
+            md_lines.append("## 🤖 按模型细分")
+            md_lines.append("| 模型 | 条目数 |")
+            md_lines.append("|------|--------|")
+            for m in by_model:
+                md_lines.append(f"| {m['model']} | {m['count']} |")
+            md_lines.append("")
+
         # 验证状态分析
         md_lines.append("## ✅ 验证状态分析")
         if validation_status:
