@@ -237,6 +237,7 @@ def main() -> None:
                 stats = process_notes_incremental(
                     notebook_title=notebook_title, config=dynamic_config
                 )
+                log.info(f"[笔记本进度: {i}/{len(notebook_titles)} ({i * 100 // len(notebook_titles)}%)] 【{notebook_title}】处理完成")
                 task_reporter.add_notebook_record(notebook_title, stats)
 
                 if i % 2 == 0 and state_client:

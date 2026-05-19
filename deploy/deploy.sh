@@ -40,7 +40,7 @@ systemctl_cmd() {
     if [ "$host" = "local" ]; then
         sudo systemctl "$action" "$svc"
     else
-        ssh "$host" "sudo systemctl $action $svc"
+        ssh "$host" "sudo systemctl $action --no-block $svc"
     fi
 }
 
