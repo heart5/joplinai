@@ -59,7 +59,7 @@ CONFIG = {
     else "https://api.deepseek.com/v1/chat/completions",
     "cloud_model": cloud_model
     if (cloud_model := getinivaluefromcloud("joplinai", "cloud_model"))
-    else "deepseek-chat",
+    else "deepseek-v4-flash",
     "context_max_length": context_max_length
     if (context_max_length := getinivaluefromcloud("joplinai", "context_max_length"))
     else 4000,

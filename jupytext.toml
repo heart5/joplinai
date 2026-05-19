@@ -1,2 +1,3 @@
 # Default format for jupytext pairs: .ipynb ↔ .py (percent format)
 formats = "ipynb,py:percent"
+split_at_heading = true

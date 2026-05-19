@@ -219,82 +219,59 @@ class ReportWriter:
         md_lines.append(f"**生成时间**: {datetime.now().isoformat()}")
         md_lines.append("")
 
-        # 执行摘要
-        basic = report.get("basic_stats", {})
-        time_ana = report.get("time_analysis", {})
-        valid_ana = report.get("validation_analysis", {})
-        perf = report.get("performance_metrics", {})
+        total = report.get("total", 0)
+        recent_active = report.get("recent_active", 0)
+        avg_hits = report.get("avg_hits", 0)
+        validation_threshold = report.get("validation_threshold", 0)
+        by_task = report.get("by_task", [])
+        validation_status = report.get("validation_status", [])
+        hit_distribution = report.get("hit_distribution", [])
         growth = report.get("growth_trends", {})
 
-        md_lines.append("## 🎯 执行摘要")
-        md_lines.append(f"- **总缓存条目**: {basic.get('total_entries', 0)}")
-        md_lines.append(f"- **总命中次数**: {basic.get('total_hits', 0)}")
-        md_lines.append(f"- **平均命中率**: {basic.get('avg_hits_per_entry', 0):.2f} hits/entry")
-        md_lines.append(f"- **近期活跃**: {time_ana.get('recent_active', 0)} entries (last 7 days)")
+        # 执行摘要
         validated_count = sum(
-            v.get("count", 0) for v in valid_ana.get("validation_states", [])
-            if v.get("validation_state") != "not_validated"
+            s.get("count", 0) for s in validation_status
         )
+        md_lines.append("## 🎯 执行摘要")
+        md_lines.append(f"- **总缓存条目**: {total}")
+        md_lines.append(f"- **平均命中率**: {avg_hits:.2f} hits/entry")
+        md_lines.append(f"- **近期活跃（7天）**: {recent_active} entries")
         md_lines.append(f"- **验证覆盖率**: {validated_count} entries validated")
-        md_lines.append(f"- **估算大小**: {perf.get('estimated_size_mb', 0)} MB")
+        md_lines.append(f"- **验证阈值**: {validation_threshold} hits")
         md_lines.append(f"- **预测周增长**: {growth.get('predicted_weekly_growth', 0)} entries/week")
         md_lines.append("")
 
-        # 基础统计
-        md_lines.append("## 📈 基础统计")
-        md_lines.append(f"- **总记录数**: {basic.get('total_entries', 0)}")
-        md_lines.append(f"- **总命中次数**: {basic.get('total_hits', 0)}")
-        md_lines.append(f"- **当前周期命中**: {basic.get('current_hits', 0)}")
-        md_lines.append(f"- **平均每条目命中**: {basic.get('avg_hits_per_entry', 0):.2f}")
-        md_lines.append("")
-        md_lines.append("### 任务类型分布")
-        md_lines.append("| 任务类型 | 条目数 | 总命中 | 平均命中 |")
-        md_lines.append("|----------|--------|--------|----------|")
-        for task in basic.get("task_distribution", []):
-            md_lines.append(f"| {task['task']} | {task['count']} | {task.get('hits', 0) or 0} | {task.get('avg_hits', 0) or 0:.1f} |")
+        # 任务类型分布
+        md_lines.append("## 📈 任务类型分布")
+        if by_task:
+            md_lines.append("| 任务类型 | 条目数 |")
+            md_lines.append("|----------|--------|")
+            for task in by_task:
+                md_lines.append(f"| {task['task']} | {task['count']} |")
+        else:
+            md_lines.append("*暂无数据*")
         md_lines.append("")
 
-        # 时间分析
-        md_lines.append("## ⏰ 时间分析")
-        md_lines.append(f"- **最近活跃缓存（7天内）**: {time_ana.get('recent_active', 0)}")
-        md_lines.append("")
-        md_lines.append("### 缓存年龄分布")
-        md_lines.append("| 年龄分组 | 条目数 | 平均命中 |")
-        md_lines.append("|----------|--------|----------|")
-        for age in time_ana.get("age_distribution", []):
-            md_lines.append(f"| {age['age_group']} | {age['count']} | {age.get('avg_hits', 0) or 0:.1f} |")
-        md_lines.append("")
-
-        # 验证分析
+        # 验证状态分析
         md_lines.append("## ✅ 验证状态分析")
-        md_lines.append("### 验证结果分布")
-        md_lines.append("| 验证状态 | 条目数 | 平均命中 | 平均年龄(天) |")
-        md_lines.append("|----------|--------|----------|--------------|")
-        for state in valid_ana.get("validation_states", []):
-            md_lines.append(
-                f"| {state['validation_state']} | {state['count']} | "
-                f"{state.get('avg_hits', 0) or 0:.1f} | {state.get('avg_age_days', 0) or 0:.1f} |"
-            )
-        md_lines.append("")
-        md_lines.append(f"- **接近验证阈值**: {valid_ana.get('nearing_validation', 0)} 条")
-        md_lines.append(f"- **最后验证时间**: {valid_ana.get('last_validation_time') or '从未验证'}")
+        if validation_status:
+            md_lines.append("| 验证结果 | 条目数 |")
+            md_lines.append("|----------|--------|")
+            for state in validation_status:
+                md_lines.append(f"| {state['validation_result']} | {state['count']} |")
+        else:
+            md_lines.append("*暂无验证数据*")
         md_lines.append("")
 
-        # 性能指标
-        md_lines.append("## 🚀 性能指标")
-        md_lines.append(f"- **估算缓存大小**: {perf.get('estimated_size_mb', 0)} MB")
-        md_lines.append(f"- **陈旧条目（30天未访问且零命中）**: {perf.get('stale_entries', 0)}")
-        md_lines.append("")
-        md_lines.append("### 高命中缓存（Top 10）")
-        md_lines.append("| 内容预览 | 任务 | 总命中 | 周期命中 | 创建时间 | 最近命中 |")
-        md_lines.append("|----------|------|--------|----------|----------|----------|")
-        for hit in perf.get("top_hitters", [])[:10]:
-            created = (hit.get("created_at") or "")[:10]
-            accessed = (hit.get("last_accessed") or "")[:10]
-            md_lines.append(
-                f"| `{hit.get('result_preview', '')}` | {hit.get('task', '')} | "
-                f"{hit.get('total_hits', 0)} | {hit.get('hit_count', 0)} | {created} | {accessed} |"
-            )
+        # 命中分布
+        md_lines.append("## 🎯 命中次数分布")
+        if hit_distribution:
+            md_lines.append("| 命中范围 | 条目数 |")
+            md_lines.append("|----------|--------|")
+            for h in hit_distribution:
+                md_lines.append(f"| {h['range']} | {h['count']} |")
+        else:
+            md_lines.append("*暂无数据*")
         md_lines.append("")
 
         # 增长趋势
@@ -310,41 +287,21 @@ class ReportWriter:
             for d in reversed(daily_growth[-10:]):
                 cum_val = cum_by_date.get(d["date"], "N/A")
                 md_lines.append(f"| {d['date']} | {d['new_entries']} | {cum_val} |")
+        else:
+            md_lines.append("*暂无增长数据*")
+        md_lines.append("")
 
         # 洞察建议
-        md_lines.append("")
         md_lines.append("## 💡 洞察与建议")
         insights = []
-        if perf.get("stale_entries", 0) > 100:
-            insights.append("**清理建议**: 发现较多陈旧条目，考虑运行 `cleanup_old_entries()` 或调整清理策略")
-        if valid_ana.get("nearing_validation", 0) > 50:
-            insights.append("**验证提醒**: 大量缓存接近验证阈值，建议安排批量验证")
-        total = basic.get("total_entries", 1)
-        if time_ana.get("recent_active", 0) / max(total, 1) < 0.3:
+        if recent_active / max(total, 1) < 0.3 and total > 100:
             insights.append("**活跃度低**: 近期活跃缓存比例较低，考虑优化缓存策略或检查数据新鲜度")
+        if avg_hits > 100:
+            insights.append("**高命中率**: 缓存命中率很高，系统运行良好")
         if not insights:
             insights.append("缓存系统运行良好，继续保持当前策略")
         for insight in insights:
             md_lines.append(f"- {insight}")
-
-        # 数据快照
-        md_lines.append("")
-        md_lines.append("## 🔍 数据快照")
-        md_lines.append("```json")
-        md_lines.append(
-            json.dumps(
-                {
-                    "timestamp": datetime.now().isoformat(),
-                    "total_entries": basic.get("total_entries", 0),
-                    "total_hits": basic.get("total_hits", 0),
-                    "validation_states": [
-                        s.get("validation_state") for s in valid_ana.get("validation_states", [])
-                    ],
-                },
-                indent=2,
-            )
-        )
-        md_lines.append("```")
 
         return "\n".join(md_lines)
 
@@ -536,13 +493,12 @@ def main():
                 try:
                     stats = writer.cache.get_report()
                     if stats:
-                        basic = stats.get("basic_stats", {}) or {}
-                        time_ana = stats.get("time_analysis", {}) or {}
+                        total = stats.get("total", 0)
+                        recent = stats.get("recent_active", 0)
                         growth = stats.get("growth_trends", {}) or {}
                         log.info(
-                            f"AI增强缓存统计: 总条目={basic.get('total_entries', 0)}, "
-                            f"总命中={basic.get('total_hits', 0)}, "
-                            f"近期活跃(7天)={time_ana.get('recent_active', 0)}, "
+                            f"AI增强缓存统计: 总条目={total}, "
+                            f"近期活跃(7天)={recent}, "
                             f"预测周增长={growth.get('predicted_weekly_growth', 0)}"
                         )
                 except Exception as e:

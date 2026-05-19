@@ -77,7 +77,7 @@ class TestCacheFlow:
             result = de.cloud_process_note("测试", task="summary", use_cache=True)
             assert result == "新结果"
             mock_api.assert_called_once()
-            mock_cm.set.assert_called_once_with("miss123", "summary", "新结果", "deepseek-chat")
+            mock_cm.set.assert_called_once_with("miss123", "summary", "新结果", "deepseek-v4-flash")
 
     def test_bypass_cache_direct_api(self, de, monkeypatch):
         monkeypatch.setattr(de, "_get_cloud_api_key", lambda: "fake-key")
@@ -106,7 +106,7 @@ class TestValidationAsync:
                 task="summary",
                 cache_key="key123",
                 cached_content="旧结果",
-                model="deepseek-chat",
+                model="deepseek-v4-flash",
                 max_retries=1,
             )
 
@@ -126,7 +126,7 @@ class TestValidationAsync:
                 task="summary",
                 cache_key="key456",
                 cached_content="相同结果",
-                model="deepseek-chat",
+                model="deepseek-v4-flash",
                 max_retries=1,
             )
 
@@ -146,7 +146,7 @@ class TestValidationAsync:
                 task="summary",
                 cache_key="key789",
                 cached_content="结果",
-                model="deepseek-chat",
+                model="deepseek-v4-flash",
                 max_retries=1,
             )
 
@@ -166,7 +166,7 @@ class TestValidationAsync:
                 task="summary",
                 cache_key="key_err",
                 cached_content="结果",
-                model="deepseek-chat",
+                model="deepseek-v4-flash",
                 max_retries=1,
             )
 

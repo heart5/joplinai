@@ -2,6 +2,7 @@
 jupyter:
   jupytext:
     formats: ipynb,md
+    split_at_heading: true
     text_representation:
       extension: .md
       format_name: markdown
@@ -200,8 +201,8 @@ Production: systemd services managed via `deploy/deploy.sh`:
 
 | 模型 | 用途 | 速度 |
 |------|------|------|
-| `deepseek-chat` | QA 对话主路（`cloud_model=deepseek-chat`） | ~5秒/次 |
-| `deepseek-v4-pro` | 图片精细描述（备用） | ~数秒/图 |
+| `deepseek-v4-flash` | QA 对话主路 + AI增强（`cloud_model=deepseek-v4-flash`） | ~5秒/次 |
+| `deepseek-v4-pro` | 图片精细描述（`vision_model`） | ~数秒/图 |
 
 可通过 `cloud_api_url` + `cloud_api_key` + `cloud_model` 切换至 Qwen/ChatGPT 等兼容提供者。
 
@@ -210,7 +211,7 @@ Production: systemd services managed via `deploy/deploy.sh`:
 | 配置键 | 当前值 | 说明 |
 |--------|--------|------|
 | `qa_ollama_chat_model` | `none` | 无本地 QA 回退 |
-| `cloud_model` | `deepseek-chat` | 云端大模型 |
+| `cloud_model` | `deepseek-v4-flash` | 云端大模型（QA+增强） |
 | `cloud_api_url` | `https://api.deepseek.com/v1/chat/completions` | 云端 API 端点 |
 | `cloud_api_key` | 回退 `deepseek_token` | 云端 API Key |
 | `summary_model` | `cloud` | 摘要模型: cloud/ollama/none |

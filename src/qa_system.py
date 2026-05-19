@@ -463,7 +463,12 @@ class QASystem:
             return answer
 
         except Exception as e:
-            log.error(f"云端模型生成答案失败: {e}")
+            resp_body = ""
+            try:
+                resp_body = e.response.text[:500]
+            except Exception:
+                pass
+            log.error(f"云端模型生成答案失败: {e} | body: {resp_body}")
             return f"抱歉，生成答案时出错: {str(e)[:100]}"
 
 # %% [markdown]
