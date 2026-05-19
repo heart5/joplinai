@@ -2,6 +2,7 @@
 jupyter:
   jupytext:
     formats: ipynb,md
+    split_at_heading: true
     text_representation:
       extension: .md
       format_name: markdown
@@ -28,6 +29,13 @@ jupyter:
 
 ### 2026年5月19日
 
+**DeepSeek V4 模型迁移：`deepseek-chat` → `deepseek-v4-flash`**：
+
+- DeepSeek V4 已发布，旧模型名 `deepseek-chat` / `deepseek-reasoner` 将于 2026-07-24 退役
+- 全量替换默认模型名：视觉保持 `deepseek-v4-pro`，其余（QA + AI增强）→ `deepseek-v4-flash`
+- 影响文件：`aimod/note_enhancer.py`（`_DEFAULT_CLOUD_MODEL`）、`src/qa_config.py`、`joplinai.py`、`aimod/embedding_generator.py`、`src/qa_cli.py`、`tests/test_note_enhancer.py`、`CLAUDE.md`
+- Base URL 和 API Key 不变，仅模型名变更
+
 **SSH systemctl restart 卡死修复 + 配置更新流程文档化**：
 
 - **根因**：`ssh tc "sudo systemctl restart <svc>"` 默认等待服务停止→启动，SSH 会话阻塞超时（exit 143）
@@ -39,6 +47,19 @@ jupyter:
 - `joplinai.py` — 笔记级：`as_completed` 循环中输出 `[进度: 47/54 (87%)] 《xxx》完成`
 - `cli.py` — 笔记本级：每本处理完后输出 `[笔记本进度: 2/5 (40%)] 【xxx】处理完成`
 - 目的：SSH 登录后 `grep` 进度行即可快速判断完成度+预估剩余时间
+
+**jupytext 配置：`split_at_heading = true`**：
+
+- `jupytext.toml` 新增 `split_at_heading = true`（参考 ops 项目配置）
+- 效果：`.md` ↔ `.ipynb` 同步时按 `##`/`###` 标题自动拆分单元格
+- 影响范围：`CLAUDE.md`、`README.md`、`docs/CHANGELOG.md`、`docs/TECHNICAL_MANUAL.md`、`docs/CHUNKING_ANALYSIS.md`
+
+**分块策略分析报告全面升级**（`docs/CHUNKING_ANALYSIS.md`）：
+
+- SSH 登录 TC 提取最新 journalctl 日志 + `joplinai_center.db` 数据
+- 全部 ASCII 流程图替换为 **Mermaid 图表**（flowchart、gantt、pie、xychart-beta）
+- 数据刷新：1,019 块分布分析（avg 425, p50 417, p90 699, p95 759）、2,342 次探测缓存命中（100% 命中率）、4/31 笔记本处理实测（99.5% 跳过率）
+- 新增：meta_hash 增量判断 mermaid 流程图、退避恢复策略流程图、单条笔记耗时 pie 图
 
 
 ### 2026年5月18日

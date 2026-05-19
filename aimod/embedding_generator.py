@@ -271,7 +271,7 @@ class EmbeddingGenerator:
         """
         enhanced_metadata = {"enhanced": False}
 
-        cloud_model = config.get("cloud_model", "deepseek-chat")
+        cloud_model = config.get("cloud_model", "deepseek-v4-flash")
         ollama_chat_model = config.get("enhance_ollama_chat_model", "qwen2.5:1.5b")
         summary_provider = config.get("summary_model", "cloud")
         tags_provider = config.get("tags_model", "cloud")

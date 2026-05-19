@@ -45,7 +45,7 @@ with pathmagic.Context():
 # %%
 DEFAULT_OLLAMA_VISION_MODEL = "minicpm-v"  # Ollama Vision 模型
 _DEFAULT_CLOUD_API_URL = "https://api.deepseek.com/v1/chat/completions"
-_DEFAULT_CLOUD_MODEL = "deepseek-chat"
+_DEFAULT_CLOUD_MODEL = "deepseek-v4-flash"
 _DEFAULT_VISION_MODEL = "deepseek-v4-pro"
 
 
@@ -436,7 +436,7 @@ def enhance_note(
         text: 笔记文本
         task: "summary" 或 "tags"
         provider: "ollama" / "cloud" / "none"
-        model: 模型名（cloud 默认 deepseek-chat，ollama 默认 qwen2.5:1.5b）
+        model: 模型名（cloud 默认 deepseek-v4-flash，ollama 默认 qwen2.5:1.5b）
         use_cache: 是否使用缓存
         ollama_host: provider=ollama 时的 Ollama 主机地址（由设备级云配置提供）
     """
@@ -746,6 +746,6 @@ def ollama_vision_describe(
 # %%
 if __name__ == "__main__":
     result = cloud_process_note(
-        "请在100字之内介绍joplin笔记软件", task="summary", model="deepseek-chat"
+        "请在100字之内介绍joplin笔记软件", task="summary", model="deepseek-v4-flash"
     )
     print(result)

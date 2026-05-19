@@ -23,7 +23,7 @@ def parse_args():
     )
     parser.add_argument(
         "--use-cloud", action="store_true", default=False,
-        help=f"使用云端模型（默认：{CONFIG.get('cloud_model', 'deepseek-chat')}）",
+        help=f"使用云端模型（默认：{CONFIG.get('cloud_model', 'deepseek-v4-flash')}）",
     )
     parser.add_argument(
         "--max-notes", type=int, default=CONFIG["max_retrieved_notes"],
@@ -118,7 +118,7 @@ def main():
     from joplinai import CONFIG as joplinai_config
     dynamic_config = {**CONFIG.copy(), **joplinai_config}
     dynamic_config["qa_ollama_chat_model"] = args.model
-    dynamic_config["cloud_model"] = args.use_cloud if args.use_cloud else dynamic_config.get("cloud_model", "deepseek-chat")
+    dynamic_config["cloud_model"] = args.use_cloud if args.use_cloud else dynamic_config.get("cloud_model", "deepseek-v4-flash")
     dynamic_config["max_retrieved_notes"] = args.max_notes
 
     log.info("初始化Joplin问答系统...")

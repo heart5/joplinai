@@ -103,7 +103,7 @@ CONFIG = {
     # provider-agnostic 增强模型配置: "cloud" / "ollama" / "none"
     "summary_model": getinivaluefromcloud("joplinai", "summary_model") or "cloud",
     "tags_model": getinivaluefromcloud("joplinai", "tags_model") or "cloud",
-    "cloud_model": getinivaluefromcloud("joplinai", "cloud_model") or "deepseek-chat",
+    "cloud_model": getinivaluefromcloud("joplinai", "cloud_model") or "deepseek-v4-flash",
     "enhance_ollama_chat_model": getinivaluefromcloud("joplinai", "enhance_ollama_chat_model") or "qwen2.5:1.5b",
     "cloud_api_key": getinivaluefromcloud("joplinai", "cloud_api_key") or getinivaluefromcloud("joplinai", "deepseek_token"),
 
