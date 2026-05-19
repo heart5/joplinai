@@ -198,11 +198,21 @@ def enhance_cache_report() -> dict:
     ).fetchall()]
 
     # 按模型细分：从 cache_key 解析模型名（格式: {hash}_{task}_{model}）
+    # 迁移日 (2026-05-19) 前的无模型历史记录 → 推断为 deepseek-chat；之后的保留"未知"
     model_counts = {}
-    rows = conn.execute("SELECT cache_key, task FROM enhance_cache").fetchall()
+    rows = conn.execute(
+        "SELECT cache_key, task, created_at FROM enhance_cache"
+    ).fetchall()
     for r in rows:
-        ck, task = r["cache_key"], r["task"]
-        model = ck.split(f"_{task}_", 1)[1] if f"_{task}_" in ck else "未知"
+        ck, task, created = r["cache_key"], r["task"], r["created_at"]
+        if f"_{task}_" in ck:
+            model = ck.split(f"_{task}_", 1)[1]
+        elif task.startswith("vision_desc:"):
+            model = task.split(":", 1)[1]
+        elif created and created < "2026-05-19":
+            model = "deepseek-chat"
+        else:
+            model = "未知"
         model_counts[model] = model_counts.get(model, 0) + 1
     report["by_model"] = sorted(
         [{"model": m, "count": c} for m, c in model_counts.items()],
