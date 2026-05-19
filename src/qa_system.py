@@ -140,6 +140,14 @@ class QASystem:
         # 4. 过滤和重排序块
         filtered_chunks = self._filter_and_rank_chunks(similar_chunks, question)
 
+        # 4.5 LLM 精排
+        if self.config.get("rerank_enabled", True):
+            before = [c.get("metadata", {}).get("source_note_title", "") for c in filtered_chunks[:5]]
+            filtered_chunks = self._rerank_by_llm(filtered_chunks, question)
+            after = [c.get("metadata", {}).get("source_note_title", "") for c in filtered_chunks[:5]]
+            if before != after:
+                log.info(f"[精排] 排名变化: {before[:3]} → {after[:3]}")
+
         # 5. 构建优化上下文（基于块）
         context = self._build_optimized_context_from_chunks(
             filtered_chunks,
@@ -345,6 +353,79 @@ class QASystem:
             filtered = [chunk for _, chunk in scored_chunks]
 
         return filtered
+
+# %% [markdown]
+# ### LLM 精排 (RankGPT 风格)
+
+    # %%
+    def _rerank_by_llm(self, chunks: List[Dict], question: str) -> List[Dict]:
+        """LLM 直接对候选块打分排序，失败返回原序"""
+        if len(chunks) <= 3:
+            return chunks
+        if self.config.get("cloud_model", "none") == "none" or not self.config.get("cloud_api_key"):
+            return chunks
+        try:
+            import requests
+
+            candidates = []
+            for i, c in enumerate(chunks[:20]):
+                meta = c.get("metadata", {})
+                title = meta.get("source_note_title", "?")
+                tags = meta.get("tags", "N/A")
+                content_preview = c["content"][:200].replace("\n", " ")
+                candidates.append(
+                    f"[{i}] 【{title}】\n标签：{tags}\n内容：{content_preview}..."
+                )
+
+            prompt = (
+                f"请根据问题对以下笔记片段进行相关性排序，返回最相关片段的编号列表。\n\n"
+                f"问题：{question}\n\n"
+                + "\n\n".join(candidates)
+                + "\n\n按相关性从高到低列出编号（逗号分隔，如 0,3,1,5,2,...）："
+            )
+
+            resp = requests.post(
+                self.config.get("cloud_api_url", "https://api.deepseek.com/v1/chat/completions"),
+                headers={
+                    "Authorization": f"Bearer {self.config['cloud_api_key']}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": self.config["cloud_model"],
+                    "messages": [
+                        {"role": "system", "content": "你是排序助手。只返回逗号分隔的数字编号，不要解释。"},
+                        {"role": "user", "content": prompt},
+                    ],
+                    "temperature": 0,
+                    "max_tokens": 200,
+                },
+                timeout=30,
+            )
+            resp.raise_for_status()
+            text = resp.json()["choices"][0]["message"]["content"].strip()
+            # 提取数字
+            import re as _re
+            indices = [int(x) for x in _re.findall(r"\d+", text)]
+            if len(indices) < 3:
+                log.warning(f"[精排] 解析结果不足3个: {text[:100]}")
+                return chunks
+
+            # 按LLM排序重建列表
+            ranked = []
+            seen = set()
+            for idx in indices:
+                if 0 <= idx < len(chunks) and idx not in seen:
+                    ranked.append(chunks[idx])
+                    seen.add(idx)
+            # 未排到的追加在后面
+            for i, c in enumerate(chunks):
+                if i not in seen:
+                    ranked.append(c)
+            log.info(f"[精排] LLM重排完成 top-3: {indices[:3]}")
+            return ranked
+        except Exception as e:
+            log.warning(f"[精排] 失败，保留原序: {e}")
+            return chunks
 
 # %% [markdown]
 # ### _build_optimized_context_from_chunks(self, chunks, question, user_identity)
