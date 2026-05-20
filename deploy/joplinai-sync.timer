@@ -4,7 +4,7 @@ Requires=joplinai-sync.service
 
 [Timer]
 OnBootSec=10min
-OnUnitActiveSec=8h
+OnUnitInactiveSec=8h
 Unit=joplinai-sync.service
 AccuracySec=1min
 RandomizedDelaySec=540

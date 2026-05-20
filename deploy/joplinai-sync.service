@@ -1,0 +1,29 @@
+[Unit]
+Description=Joplin Notes Vectorization Sync Service (Conda)
+After=network-online.target docker.service joplinai-center-api.service
+Wants=network-online.target joplinai-center-api.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=baiyefeng
+Group=club
+Environment="PATH=/usr/miniconda3/envs/newlsp/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+WorkingDirectory=/home/baiyefeng/work/joplinai
+# 上游依赖健康检查：Docker ChromaDB, HCX Ollama, 本地 center_api
+ExecStartPre=/usr/bin/curl -sf http://localhost:8009/api/v2/heartbeat
+ExecStartPre=/usr/bin/curl -sf http://149.30.242.156:11434/api/tags
+ExecStartPre=/usr/bin/curl -sf --retry 30 --retry-delay 3 --retry-max-time 120 --retry-connrefused http://localhost:5003/health
+ExecStart=/usr/miniconda3/envs/newlsp/bin/python joplinai.py
+
+StandardOutput=journal
+StandardError=journal
+TimeoutStopSec=5400
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/home/baiyefeng/work/joplinai/data /home/baiyefeng/chroma_data
+
+[Install]
+WantedBy=multi-user.target
