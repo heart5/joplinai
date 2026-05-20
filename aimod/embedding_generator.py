@@ -1051,7 +1051,7 @@ class EmbeddingGenerator:
                         error_msg = f"{error_msg} | {body}"
                 except Exception:
                     pass
-            log.error(f"[远程Ollama] 嵌入调用失败: {error_msg}")
+            log.debug(f"[远程Ollama] 嵌入调用失败: {error_msg}")
             raise Exception(error_msg) from e
 
 # %% [markdown]
