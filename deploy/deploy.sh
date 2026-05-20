@@ -106,7 +106,8 @@ deploy_tc() {
 
     # 4. 检查 sync 是否正在运行
     if [ "$dry" = "false" ]; then
-        if ssh "$TC_HOST" "systemctl is-active --quiet joplinai-sync.service" 2>/dev/null; then
+        # Type=oneshot 运行时 SubState=start，is-active 返回非零（activating≠active）
+        if ssh "$TC_HOST" 'test "$(systemctl show -p SubState joplinai-sync.service | cut -d= -f2)" = "start"' 2>/dev/null; then
             yellow "注意: joplinai-sync 正在运行中，center_api 重启期间其状态保存可能暂时失败（有错误处理兜底）"
         fi
     else
