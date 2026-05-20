@@ -2,6 +2,7 @@
 # jupyter:
 #   jupytext:
 #     formats: ipynb,py:percent
+#     split_at_heading: true
 #     text_representation:
 #       extension: .py
 #       format_name: percent
@@ -400,10 +401,38 @@ def process_note_chunks(
                     exc_info=True,
                 )
 
+        def _upsert_with_embedding(chunk_data, embedding, extra_metadata=None):
+            """将块写入 ChromaDB，返回 True 表示成功。"""
+            chunk_id = chunk_data["chunk_id"]
+            chunk_content = chunk_data["content"]
+            base_metadata = chunk_data["base_metadata"]
+
+            notebook_dicts = get_notebook_ids_for_note(note.id)
+            notebook_dict = notebook_dicts[-1]
+            try:
+                nb_id, nb_title = next(iter(notebook_dict.items()))
+            except StopIteration:
+                nb_id, nb_title = "", ""
+            metadata = {
+                **base_metadata,
+                **(extra_metadata or {}),
+                "source_note_id": note.id,
+                "source_notebook_id": nb_id,
+                "source_notebook_title": nb_title,
+            }
+            vector_db.upsert_chunk(
+                chunk_id=chunk_id,
+                text=chunk_content,
+                embedding=embedding,
+                tags=[tag.strip() for tag in metadata.get("tags", "").split(",")],
+                metadata=metadata,
+            )
+            return True, metadata
+
         # 4b. 处理需要全量更新的块（重新生成嵌入并入库）
         successful_upserts = 0
+        failed_chunks = []  # P0-1: 追踪失败的块，用于后续重试
         for chunk_data in chunks_to_upsert:
-            chunk_id = chunk_data["chunk_id"]
             chunk_content = chunk_data["content"]
             base_metadata = chunk_data["base_metadata"]
             metadata_chunk_idx_from_one = base_metadata["chunk_index"]
@@ -419,48 +448,30 @@ def process_note_chunks(
                 )
             if not embedding:
                 log.warning(
-                    f"笔记《{note.title}》块 {metadata_chunk_idx_from_one} （长度：{len(chunk_content)}）嵌入生成失败，跳过此块。"
+                    f"笔记《{note.title}》块 {metadata_chunk_idx_from_one}"
+                    f"（长度：{len(chunk_content)}）嵌入生成失败，跳过此块。"
                 )
+                failed_chunks.append(chunk_data)
                 continue
 
             enhanced_metadata = {}
             if len(chunk_content) > embedding_generator.chunk_size * 0.8:
                 enhanced_metadata["potential_long_chunk"] = True
 
-            notebook_dicts = get_notebook_ids_for_note(note.id)
-            notebook_dict = notebook_dicts[-1]
             try:
-                notebook_id, notebook_title = next(iter(notebook_dict.items()))
-            except StopIteration:
-                notebook_id, notebook_title = "", ""
-            # 构建完整元数据
-            metadata = {
-                # 包含 content_hash, estimated_date, chunk_summary, tags, meta_hash 等
-                **base_metadata,
-                **enhanced_metadata,
-                "source_note_id": note.id,
-                "source_notebook_id": notebook_id,
-                "source_notebook_title": notebook_title,
-            }
-
-            # 存入向量数据库
-            try:
-                vector_db.upsert_chunk(
-                    chunk_id=chunk_id,
-                    text=chunk_content,
-                    embedding=embedding,
-                    tags=[tag.strip() for tag in metadata.get("tags", "").split(",")],
-                    metadata=metadata,
-                )
+                _, metadata = _upsert_with_embedding(chunk_data, embedding, enhanced_metadata)
                 successful_upserts += 1
                 log.info(
-                    f"笔记《{note.title}》的块 【{metadata_chunk_idx_from_one}/{len(chunk_dicts)}】 （长度：{len(chunk_content)}）向量化入库更新成功，文本块元数据为：{metadata}"
+                    f"笔记《{note.title}》的块 【{metadata_chunk_idx_from_one}/{len(chunk_dicts)}】"
+                    f"（长度：{len(chunk_content)}）向量化入库更新成功，文本块元数据为：{metadata}"
                 )
             except Exception as e:
                 log.error(
-                    f"笔记《{note.title}》存储块 {metadata_chunk_idx_from_one} （长度：{len(chunk_content)}）失败: {e}",
+                    f"笔记《{note.title}》存储块 {metadata_chunk_idx_from_one}"
+                    f"（长度：{len(chunk_content)}）失败: {e}",
                     exc_info=True,
                 )
+                failed_chunks.append(chunk_data)
 
         # 5. 智能清理"孤儿块"
         # 找出那些存在于 existing_chunks_map，但不在本次新块列表 new_chunk_hashes 中的块ID
@@ -477,13 +488,48 @@ def process_note_chunks(
         else:
             log.info(f"未发现笔记《{note.title}》相关需要清理的孤儿块。")
 
-        # 6. 最终判断
+        # 6. P0-1: 失败块自动重试（最多2轮，间隔3s）
+        if failed_chunks:
+            log.warning(
+                f"笔记《{note.title}》有 {len(failed_chunks)} 个块首次处理失败，开始重试..."
+            )
+            for retry_round in range(1, 3):
+                if not failed_chunks:
+                    break
+                time.sleep(3)
+                retry_success = 0
+                still_failed = []
+                for chunk_data in failed_chunks:
+                    chunk_idx = chunk_data["base_metadata"]["chunk_index"]
+                    embedding = embedding_generator.get_merged_embedding(chunk_data)
+                    if not embedding:
+                        still_failed.append(chunk_data)
+                        continue
+                    try:
+                        _upsert_with_embedding(chunk_data, embedding)
+                        successful_upserts += 1
+                        retry_success += 1
+                        log.info(
+                            f"笔记《{note.title}》块 {chunk_idx} 第{retry_round}轮重试成功"
+                        )
+                    except Exception as e:
+                        log.error(
+                            f"笔记《{note.title}》块 {chunk_idx} 第{retry_round}轮重试仍失败: {e}"
+                        )
+                        still_failed.append(chunk_data)
+                log.info(
+                    f"笔记《{note.title}》第{retry_round}轮重试: "
+                    f"{retry_success} 成功, {len(still_failed)} 仍失败"
+                )
+                failed_chunks = still_failed
+
+        # 7. 最终判断
+        failed_after_retry = len(failed_chunks)
         total_processed = successful_upserts + skipped_chunks
         if total_processed == len(chunk_dicts):
             log.info(
                 f"笔记《{note.title}》块级增量处理完成。成功更新 {successful_upserts} 个块，跳过 {skipped_chunks} 个块。"
             )
-            # 返回详细的统计字典，而不仅仅是 True
             return {
                 "success": True,
                 "enhance_missing": enhance_missing,
@@ -491,12 +537,14 @@ def process_note_chunks(
                     "total_chunks": len(chunk_dicts),
                     "upserted": successful_upserts,
                     "skipped": skipped_chunks,
-                    "orphans_cleaned": len(orphan_chunk_ids),  # 本次清理的孤儿块数
+                    "orphans_cleaned": len(orphan_chunk_ids),
+                    "failed_after_retry": failed_after_retry,
                 },
             }
         else:
             log.error(
-                f"笔记《{note.title}》处理不完整。预期{len(chunk_dicts)}块，实际处理{total_processed}块。"
+                f"笔记《{note.title}》处理不完整。预期{len(chunk_dicts)}块，实际处理{total_processed}块"
+                f"（{failed_after_retry}块重试后仍失败）。"
             )
             return {
                 "success": False,
@@ -505,6 +553,7 @@ def process_note_chunks(
                     "upserted": successful_upserts,
                     "skipped": skipped_chunks,
                     "orphans_cleaned": len(orphan_chunk_ids),
+                    "failed_after_retry": failed_after_retry,
                 },
             }
 
@@ -639,6 +688,7 @@ def process_notes_incremental(notebook_title: str, config: Dict, note_ids: List[
     total_upserted_for_notebook = 0
     total_skipped_for_notebook = 0
     total_orphans_cleaned_for_notebook = 0
+    total_failed_after_retry = 0
     updated_count = 0
     skipped_note_count = 0
     new_time_notes = []
@@ -755,6 +805,7 @@ def process_notes_incremental(notebook_title: str, config: Dict, note_ids: List[
                 total_upserted_for_notebook += note_chunk_stats.get("upserted", 0)
                 total_skipped_for_notebook += note_chunk_stats.get("skipped", 0)
                 total_orphans_cleaned_for_notebook += note_chunk_stats.get("orphans_cleaned", 0)
+                total_failed_after_retry += note_chunk_stats.get("failed_after_retry", 0)
 
                 if success:
                     # 更新处理状态
@@ -915,6 +966,7 @@ def process_notes_incremental(notebook_title: str, config: Dict, note_ids: List[
             "upserted": total_upserted_for_notebook,
             "skipped": total_skipped_for_notebook,
             "orphans_cleaned": total_orphans_cleaned_for_notebook,
+            "failed_after_retry": total_failed_after_retry,
         },
         "process_time": datetime.now().isoformat(),
     }
