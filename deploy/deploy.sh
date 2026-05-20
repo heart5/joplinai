@@ -104,11 +104,33 @@ deploy_tc() {
         yellow "[dry-run] 跳过 TC git pull"
     fi
 
-    # 4. 重启 center_api
+    # 4. 检查 sync 是否正在运行
+    if [ "$dry" = "false" ]; then
+        if ssh "$TC_HOST" "systemctl is-active --quiet joplinai-sync.service" 2>/dev/null; then
+            yellow "注意: joplinai-sync 正在运行中，center_api 重启期间其状态保存可能暂时失败（有错误处理兜底）"
+        fi
+    else
+        yellow "[dry-run] 跳过 sync 运行状态检查"
+    fi
+
+    # 5. 重启 center_api
     echo "重启远程服务: $TC_SERVICE"
     if [ "$dry" = "false" ]; then
         systemctl_cmd "$TC_HOST" "$TC_SERVICE" restart
-        green "$TC_SERVICE 重启完成"
+        echo -n "等待 $TC_SERVICE 就绪"
+        for i in $(seq 1 30); do
+            if ssh "$TC_HOST" "curl -sf http://localhost:5003/health" 2>/dev/null; then
+                echo ""
+                green "$TC_SERVICE 健康检查通过 (${i}x3s)"
+                break
+            fi
+            if [ $i -eq 30 ]; then
+                echo ""
+                red "$TC_SERVICE 健康检查失败: 90s 内未就绪"
+            fi
+            echo -n "."
+            sleep 3
+        done
     else
         yellow "[dry-run] 跳过 systemctl restart $TC_SERVICE"
     fi
