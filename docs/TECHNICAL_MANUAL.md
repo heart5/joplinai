@@ -453,7 +453,9 @@ erDiagram
 |---------|------|-----------|
 | `joplin_{model_name}`（如 `joplin_dengcao_bge_large_zh_v1.5`） | 笔记文本块的向量索引 | `source_note_id`, `source_note_title`, `source_notebook_id`, `source_notebook_title`, `chunk_index`, `chunk_id`, `content_hash`, `meta_hash`, `note_author`, `note_type`, `tags`, `summary`, `enhanced`, `word_count`, `estimated_date` |
 
-> **元数据增量更新**：当仅 tags/summary 变更时（content_hash 匹配，meta_hash 不同），调用 `update_chunk_metadata()` 仅更新 ChromaDB metadata，不重新生成 embeddings。
+> **元数据增量更新**：当仅 tags/summary 变更时（content_hash 匹配，meta_hash 不同），走两级优化：
+> - 内容未变+增强已完成 → `_process_metadata_only_fast_path` 快速路径，跳过全部分块/嵌入/增强，直接 `batch_update_chunks_metadata()` 批量更新
+> - 增强缺失/配置变更 → 正常分块+增强，但内容匹配的块归类为 metadata_only，`batch_update_chunks_metadata()` 一次性批量提交
 
 ---
 

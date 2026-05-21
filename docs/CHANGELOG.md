@@ -27,6 +27,43 @@ jupyter:
 本文档记录 Claude Code 协助下的所有项目变更。
 
 
+### 2026年5月21日
+
+**P0-1 失败块自动重试机制（commits `5b729d0` → `3ff2cb7`）**：
+
+- **问题**：Ollama 嵌入偶发瞬时故障（网络波动/模型加载超时），一个块失败→整条笔记标记失败。优化前一次全量运行 18/31 笔记本出现失败，422 条 ERROR，实际成功更新 0 条。
+- **机制**：`process_note_chunks` 第一轮处理时记录每个失败块的 `{chunk_data, reason, embedding, enhanced_metadata}`，区分 `"embedding"` 失败和 `"upsert"` 失败。`process_notes_incremental` 笔记本级完成后以 `max_workers=2` 执行 2 轮重试（间隔 3s），embedding 失败重新生成嵌入，upsert 失败复用已有嵌入。
+- **enhanced_metadata 保留**：重试路径调用 `_upsert_with_embedding(chunk_data, embedding, enhanced_metadata)`，`potential_long_chunk` 标记不再丢失。
+- **total_processed 修复**：原计算仅含 `successful_upserts + skipped_chunks`，漏计元数据更新块→纯元数据更新笔记全部误报"处理不完整"（57 条）。修复后公式 = `successful_upserts + successful_metadata_updates + skipped_chunks`，误报归零。
+- **效果**：422 错误 → 0，所有笔记处理成功率 0% → 100%。
+- 改动文件：`joplinai.py`（+90/-30 行）。
+
+**ChromaDB 批量元数据更新（commit `033314f`）**：
+
+- **问题**：元数据变更的块逐个调用 `update_chunk_metadata`，每次一个 HTTP 往返。一条笔记 10 个块仅元数据变更=10 次 HTTP。
+- **方案**：新增 `VectorDBManager.batch_update_chunks_metadata(ids, tags_list, metadatas)`，一次 `collection.update(ids=[...], metadatas=[...])` 完成。`process_note_chunks` 中 `chunks_metadata_only` 收集后集中批量提交。
+- **附带优化**：`get_notebook_ids_for_note` 提升到循环外，消除逐块重复 Joplin API 调用。
+- 改动文件：`aimod/vector_db_manager.py`（+15 行）、`joplinai.py`（+25/-20 行）。
+
+**内容未变笔记快速路径（commit `34cb030`）**：
+
+- **问题**：笔记仅标签/笔记本变更（内容未改）时，`process_note_chunks` 仍然执行完整流程——`split_into_semantic_chunks`（含嵌入生成+AI增强），生成所有嵌入和摘要后逐块比较哈希→全部匹配→仅更新元数据→丢弃所有嵌入和增强结果。一条 9 块笔记浪费 ~63s。
+- **方案**：`process_notes_incremental` 提交前计算 `content_unchanged`（内容哈希未变且非强制更新）和 `needs_re_enhance`（增强缺失或模型配置变更），传入 `process_note_chunks`。内容未变+增强已完成时走 `_process_metadata_only_fast_path`——直接从 ChromaDB 获取既有块全量元数据，用新标签/笔记本重算 meta_hash，一次 `batch_update_chunks_metadata` 完成。跳过全部分块/嵌入/增强。
+- **回退安全网**：快速路径无法获取既有元数据时通过 `_fallback` 标记回退到全量处理。
+- **触发场景**：用户在 Joplin 中修改标签、移动笔记本，但不编辑正文。日常高频操作。
+- 改动文件：`aimod/vector_db_manager.py`（+13 行，新增 `get_chunks_full_metadata`）、`joplinai.py`（+126/-3 行，新增 `_process_metadata_only_fast_path` + 决策逻辑）。
+
+**可靠性验证**（TC 4 次完整运行对比）：
+
+| 运行 | 耗时 | 笔记本 | 更新/失败 | 错误 | 代码版本 |
+|------|------|--------|----------|------|---------|
+| 09:58 | 2h24min | 31 | 0/大量 | 422 | P0-1 之前 |
+| 15:07 | 2h12min | 17 | 209/0 | 2 (截断) | P0-1 重试 |
+| 20:49 | 5min43s | 31 | 4/0 | 0 | 批量更新 |
+| 21:45 | 12min48s | 31 | 2/0 | 0 | 快速路径 |
+
+> 耗时差异主要取决于欠账量（需全量处理的笔记数），非代码性能退步。
+
 ### 2026年5月20日
 
 **分块嵌入三合一重构（chunk-and-embed）**：

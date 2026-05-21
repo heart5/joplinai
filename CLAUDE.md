@@ -48,7 +48,7 @@ Web App 入口：`joplin_web_app:app`（模块级 `app = create_app()`，勿放 
 
 Data flow: `joplinai.py` → TC 本地 (Joplin Server / ChromaDB / center_api) + 远程 HCX (Ollama embedding / 11434) + 外部 Cloud API (AI增强, 默认 DeepSeek)。各 `aimod/*_client.py` 通过 HTTP + API Key → `aimod/center_api/` → `data/joplinai_center.db`
 
-向量化优化：chunk 内容未变仅元数据（tags/summary）变更时，跳过嵌入生成，仅通过 `VectorDBManager.update_chunk_metadata()` 更新 ChromaDB metadata（不含 embeddings），避免不必要的远程序列调用。
+向量化优化：chunk 内容未变仅元数据（tags/summary）变更时，跳过嵌入生成，仅通过 `VectorDBManager.batch_update_chunks_metadata()` 一次性批量更新 ChromaDB metadata（不含 embeddings），避免不必要的远程序列调用。内容未变+增强完成时走 `_process_metadata_only_fast_path` 快速路径，完全跳过重复分块/嵌入/增强。
 
 `joplinai_center.db` 包含 10 张表：
 - 缓存与历史：`enhance_cache`、`probe_cache`（待清理，chunk-and-embed 重构后已无写入）、`notebook_history`、`global_run_history`
@@ -176,6 +176,8 @@ Production: systemd services managed via `deploy/deploy.sh`:
 - **`__all__`**: 所有 `aimod/`、`src/`、`aimod/center_api/` 的公开模块都有 `__all__` 明确导出列表。
 - **`__repr__`**: 5 个关键数据类有 `__repr__`：`CacheResult`, `VectorDBManager`, `EmbeddingGenerator`, `RunTracker`, `QASystem`。
 - **Type annotations**: 所有公开函数有返回类型标注 (`-> None`, `-> str`, `-> Optional[str]` 等)。
+- **增量处理三级决策**：`process_notes_incremental` 提交前计算 `content_unchanged`（内容哈希匹配且非强制更新）和 `needs_re_enhance`（增强缺失或模型配置变更），传入 `process_note_chunks`。内容未变+增强完成→`_process_metadata_only_fast_path` 跳过全部分块/嵌入/增强，直接 `batch_update_chunks_metadata`。内容变更→完整路径（分块+嵌入+增强+入库）。增强缺失但内容未变→正常路径重增强但可跳过嵌入生成（TODO）。
+- **块级失败重试**：`process_note_chunks` 第一轮失败块记录 `{chunk_data, reason, embedding, enhanced_metadata}`，区分 `"embedding"`（需重新生成嵌入）和 `"upsert"`（复用已有嵌入）。`process_notes_incremental` 完成后以 `max_workers=2` 执行 2 轮×3s 间隔重试。
 - **`aimod.get_logger(name)`**: 统一日志工厂，自动继承 `func/logme` 的 handler 和 level。用法：`from aimod import get_logger; logger = get_logger(__name__)`。
 - **Cloud config**: Configuration is fetched dynamically via `getinivaluefromcloud()` from an INI stored in a Joplin note. The `ConfigManager` singleton in `src/config_manager.py` handles hot-reloading (5-minute check interval). Key cloud items: `imp_nbs` (notebook titles), `imp_note_ids` (specific note IDs as virtual notebook), both comma-separated. `ConfigManager.get_all()` is the alias for `get_config_snapshot()`.
 - **Inter-service auth**: `joplin_web_app.py` calls `joplin_qa_api.py` using an API key from the shared cloud config (`X-API-Key` header).
