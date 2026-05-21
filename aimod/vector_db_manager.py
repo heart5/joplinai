@@ -455,6 +455,34 @@ class VectorDBManager:
             metadatas=[db_metadata],
         )
 
+    def batch_update_chunks_metadata(
+        self, chunk_ids: List[str], tags_list: List[List[str]], metadatas: List[Dict]
+    ):
+        """批量更新块元数据，一次 HTTP 请求完成多个块的元数据刷新。"""
+        if not self.collection:
+            log.error("集合未加载")
+            return
+
+        db_metadatas = []
+        for chunk_id, tags, md in zip(chunk_ids, tags_list, metadatas):
+            db_metadatas.append({
+                "chunk_id": chunk_id,
+                "tags": ",".join(tags),
+                "summary": md.get("chunk_summary", ""),
+                "source_note_title": md.get("source_note_title", ""),
+                "source_note_id": md.get("source_note_id", ""),
+                "chunk_index": md.get("chunk_index", 1),
+                "content_hash": md.get("content_hash", ""),
+                "meta_hash": md.get("meta_hash", ""),
+                "source_notebook_title": md.get("source_notebook_title", ""),
+                "source_notebook_id": md.get("source_notebook_id", ""),
+                "note_author": md.get("note_author", "白晔峰"),
+                "note_type": md.get("note_type", "个人笔记"),
+            })
+
+        self.collection.update(ids=chunk_ids, metadatas=db_metadatas)
+        log.info(f"批量更新 {len(chunk_ids)} 个块的元数据完成")
+
 # %% [markdown]
 # ### delete_note(self, note_id: str)
 
