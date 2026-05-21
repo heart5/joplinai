@@ -367,6 +367,7 @@ def process_note_chunks(
         )
 
         # 4a. 处理仅元数据更新的块（无需重新生成嵌入）
+        successful_metadata_updates = 0
         for chunk_data in chunks_metadata_only:
             chunk_id = chunk_data["chunk_id"]
             base_metadata = chunk_data["base_metadata"]
@@ -390,6 +391,7 @@ def process_note_chunks(
                     tags=[tag.strip() for tag in metadata.get("tags", "").split(",")],
                     metadata=metadata,
                 )
+                successful_metadata_updates += 1
                 log.info(
                     f"笔记《{note.title}》的块 【{metadata_chunk_idx_from_one}/{len(chunk_dicts)}】"
                     f"（仅元数据更新）成功，元数据：{metadata}"
@@ -543,10 +545,11 @@ def process_note_chunks(
 
         # 7. 最终判断
         failed_after_retry = len(failed_chunks)
-        total_processed = successful_upserts + skipped_chunks
+        total_processed = successful_upserts + successful_metadata_updates + skipped_chunks
         if total_processed == len(chunk_dicts):
             log.info(
-                f"笔记《{note.title}》块级增量处理完成。成功更新 {successful_upserts} 个块，跳过 {skipped_chunks} 个块。"
+                f"笔记《{note.title}》块级增量处理完成。成功更新 {successful_upserts} 个块，"
+                f"元数据更新 {successful_metadata_updates} 个块，跳过 {skipped_chunks} 个块。"
             )
             return {
                 "success": True,
@@ -554,6 +557,7 @@ def process_note_chunks(
                 "chunk_stats": {
                     "total_chunks": len(chunk_dicts),
                     "upserted": successful_upserts,
+                    "metadata_updated": successful_metadata_updates,
                     "skipped": skipped_chunks,
                     "orphans_cleaned": len(orphan_chunk_ids),
                     "failed_after_retry": failed_after_retry,
@@ -569,6 +573,7 @@ def process_note_chunks(
                 "chunk_stats": {
                     "total_chunks": len(chunk_dicts),
                     "upserted": successful_upserts,
+                    "metadata_updated": successful_metadata_updates,
                     "skipped": skipped_chunks,
                     "orphans_cleaned": len(orphan_chunk_ids),
                     "failed_after_retry": failed_after_retry,
@@ -704,6 +709,7 @@ def process_notes_incremental(notebook_title: str, config: Dict, note_ids: List[
     log.info(f"开始增量处理笔记本 【{notebook_title}】，共 {len(notes)} 条笔记")
     total_chunks_for_notebook = 0
     total_upserted_for_notebook = 0
+    total_metadata_updated_for_notebook = 0
     total_skipped_for_notebook = 0
     total_orphans_cleaned_for_notebook = 0
     total_failed_after_retry = 0
@@ -821,6 +827,7 @@ def process_notes_incremental(notebook_title: str, config: Dict, note_ids: List[
                 # 累加块统计
                 total_chunks_for_notebook += note_chunk_stats.get("total_chunks", 0)
                 total_upserted_for_notebook += note_chunk_stats.get("upserted", 0)
+                total_metadata_updated_for_notebook += note_chunk_stats.get("metadata_updated", 0)
                 total_skipped_for_notebook += note_chunk_stats.get("skipped", 0)
                 total_orphans_cleaned_for_notebook += note_chunk_stats.get("orphans_cleaned", 0)
                 total_failed_after_retry += note_chunk_stats.get("failed_after_retry", 0)
@@ -836,10 +843,11 @@ def process_notes_incremental(notebook_title: str, config: Dict, note_ids: List[
                         "enhance_missing": result_dict.get("enhance_missing", False),
                         "enhance_config": enhance_config,
                     }
-                    # 仅当有实际块变更（新增/更新/清理孤儿）时才计入 updated_count
+                    # 仅当有实际块变更（新增/更新/元数据更新/清理孤儿）时才计入 updated_count
                     note_upserted = note_chunk_stats.get("upserted", 0)
+                    note_metadata = note_chunk_stats.get("metadata_updated", 0)
                     note_orphans = note_chunk_stats.get("orphans_cleaned", 0)
-                    if note_upserted > 0 or note_orphans > 0:
+                    if note_upserted > 0 or note_metadata > 0 or note_orphans > 0:
                         updated_count += 1
                     else:
                         skipped_note_count += 1
