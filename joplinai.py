@@ -431,7 +431,7 @@ def process_note_chunks(
 
         # 4b. 处理需要全量更新的块（重新生成嵌入并入库）
         successful_upserts = 0
-        failed_chunks = []  # P0-1: 追踪失败的块，用于后续重试
+        failed_chunks = []  # P0-1: 追踪失败块 [{chunk_data, reason, embedding, enhanced_metadata}]
         for chunk_data in chunks_to_upsert:
             chunk_content = chunk_data["content"]
             base_metadata = chunk_data["base_metadata"]
@@ -451,7 +451,10 @@ def process_note_chunks(
                     f"笔记《{note.title}》块 {metadata_chunk_idx_from_one}"
                     f"（长度：{len(chunk_content)}）嵌入生成失败，跳过此块。"
                 )
-                failed_chunks.append(chunk_data)
+                failed_chunks.append(
+                    {"chunk_data": chunk_data, "reason": "embedding",
+                     "embedding": None, "enhanced_metadata": {}}
+                )
                 continue
 
             enhanced_metadata = {}
@@ -471,7 +474,10 @@ def process_note_chunks(
                     f"（长度：{len(chunk_content)}）失败: {e}",
                     exc_info=True,
                 )
-                failed_chunks.append(chunk_data)
+                failed_chunks.append(
+                    {"chunk_data": chunk_data, "reason": "upsert",
+                     "embedding": embedding, "enhanced_metadata": enhanced_metadata}
+                )
 
         # 5. 智能清理"孤儿块"
         # 找出那些存在于 existing_chunks_map，但不在本次新块列表 new_chunk_hashes 中的块ID
@@ -499,14 +505,23 @@ def process_note_chunks(
                 time.sleep(3)
                 retry_success = 0
                 still_failed = []
-                for chunk_data in failed_chunks:
+                for fail_record in failed_chunks:
+                    chunk_data = fail_record["chunk_data"]
                     chunk_idx = chunk_data["base_metadata"]["chunk_index"]
-                    embedding = embedding_generator.get_merged_embedding(chunk_data)
+                    # 仅嵌入生成失败的块需重新生成嵌入；upsert失败的复用原嵌入
+                    if fail_record["reason"] == "upsert":
+                        embedding = fail_record["embedding"]
+                        enhanced_metadata = fail_record.get("enhanced_metadata", {})
+                    else:
+                        embedding = embedding_generator.get_merged_embedding(chunk_data)
+                        enhanced_metadata = {}
+                        if len(chunk_data["content"]) > embedding_generator.chunk_size * 0.8:
+                            enhanced_metadata["potential_long_chunk"] = True
                     if not embedding:
-                        still_failed.append(chunk_data)
+                        still_failed.append(fail_record)
                         continue
                     try:
-                        _upsert_with_embedding(chunk_data, embedding)
+                        _upsert_with_embedding(chunk_data, embedding, enhanced_metadata)
                         successful_upserts += 1
                         retry_success += 1
                         log.info(
@@ -516,7 +531,10 @@ def process_note_chunks(
                         log.error(
                             f"笔记《{note.title}》块 {chunk_idx} 第{retry_round}轮重试仍失败: {e}"
                         )
-                        still_failed.append(chunk_data)
+                        still_failed.append(
+                            {"chunk_data": chunk_data, "reason": "upsert",
+                             "embedding": embedding, "enhanced_metadata": enhanced_metadata}
+                        )
                 log.info(
                     f"笔记《{note.title}》第{retry_round}轮重试: "
                     f"{retry_success} 成功, {len(still_failed)} 仍失败"
