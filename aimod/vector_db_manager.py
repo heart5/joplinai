@@ -2,6 +2,7 @@
 # jupyter:
 #   jupytext:
 #     formats: ipynb,py:percent
+#     split_at_heading: true
 #     text_representation:
 #       extension: .py
 #       format_name: percent
@@ -482,6 +483,18 @@ class VectorDBManager:
 
         self.collection.update(ids=chunk_ids, metadatas=db_metadatas)
         log.info(f"批量更新 {len(chunk_ids)} 个块的元数据完成")
+
+    def get_chunks_full_metadata(self, note_id: str) -> dict:
+        """获取指定笔记所有块的完整元数据（用于快速路径跳过重复分块）。"""
+        if not self.collection:
+            return {}
+        results = self.collection.get(where={"source_note_id": note_id})
+        if not results or not results['ids']:
+            return {}
+        meta_map = {}
+        for chunk_id, metadata in zip(results['ids'], results['metadatas']):
+            meta_map[chunk_id] = metadata
+        return meta_map
 
 # %% [markdown]
 # ### delete_note(self, note_id: str)

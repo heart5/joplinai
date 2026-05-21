@@ -169,6 +169,95 @@ def _resolve_enhance_config(config: dict, notebook_title: str) -> dict:
     return resolved
 
 # %% [markdown]
+# ### _process_metadata_only_fast_path(note, vector_db, existing_chunks_map) → dict
+# %%
+def _process_metadata_only_fast_path(
+    note,
+    vector_db: VectorDBManager,
+    existing_chunks_map: Dict[str, Dict[str, str]],
+) -> dict:
+    """快速路径：内容未变仅元数据变更时，跳过重复分块/嵌入/增强，
+    直接获取既有块全量元数据，重新计算 meta_hash 后批量更新。"""
+    total = len(existing_chunks_map)
+    log.info(
+        f"笔记《{note.title}》内容未变→快速路径：跳过{total}个块的重复分块/嵌入/增强。"
+    )
+
+    # 获取最新标签和笔记本信息
+    local_tags = get_tag_titles(note.id)
+    new_tags_str = ",".join(sorted(local_tags)) if local_tags else ""
+    notebook_dicts = get_notebook_ids_for_note(note.id)
+    nb_info = notebook_dicts[-1] if notebook_dicts else {}
+    try:
+        nb_id, nb_title = next(iter(nb_info.items()))
+    except StopIteration:
+        nb_id, nb_title = "", ""
+
+    # 获取既有块的全量元数据
+    existing_metas = vector_db.get_chunks_full_metadata(note.id)
+    if not existing_metas:
+        log.warning(f"笔记《{note.title}》快速路径：无法获取既有块元数据，回退全量处理。")
+        return {"success": False, "chunk_stats": {},
+                "_fallback": True}  # 特殊标记，调用方需回退
+
+    # 为每个块重建元数据（保留不变的字段，更新标签/笔记本/meta_hash）
+    batch_ids = []
+    batch_tags = []
+    batch_metadatas = []
+    for chunk_id, old_meta in existing_metas.items():
+        old_summary = old_meta.get("summary", "") or old_meta.get("chunk_summary", "")
+        new_meta_hash = compute_content_hash(
+            f"{new_tags_str}{nb_title}{old_summary}"
+        )
+        new_metadata = {
+            "chunk_index": old_meta.get("chunk_index", 1),
+            "content_hash": old_meta.get("content_hash", ""),
+            "meta_hash": new_meta_hash,
+            "source_note_title": old_meta.get("source_note_title", note.title),
+            "source_note_id": note.id,
+            "source_notebook_title": nb_title,
+            "source_notebook_id": nb_id,
+            "source_note_tags": new_tags_str,
+            "chunk_summary": old_summary,
+            "estimated_date": old_meta.get("estimated_date", ""),
+            "word_count": old_meta.get("word_count", 0),
+            "note_author": old_meta.get("note_author", "白晔峰"),
+            "note_type": old_meta.get("note_type", "个人笔记"),
+            "enhanced": old_meta.get("enhanced", True),
+        }
+        batch_ids.append(chunk_id)
+        batch_tags.append([t.strip() for t in new_tags_str.split(",") if t.strip()])
+        batch_metadatas.append(new_metadata)
+
+    # 批量更新
+    try:
+        vector_db.batch_update_chunks_metadata(batch_ids, batch_tags, batch_metadatas)
+        log.info(
+            f"笔记《{note.title}》快速路径完成：批量更新 {total} 个块元数据，"
+            f"新标签=[{new_tags_str}]，笔记本=[{nb_title}]"
+        )
+        return {
+            "success": True,
+            "chunk_stats": {
+                "total": total, "full_upserted": 0,
+                "metadata_updated": total, "skipped": 0,
+                "failed_full": 0, "failed_metadata": 0,
+                "retried_success": 0, "retried_failed": 0,
+            },
+        }
+    except Exception as e:
+        log.error(f"笔记《{note.title}》快速路径批量更新 {total} 块失败: {e}", exc_info=True)
+        return {
+            "success": False,
+            "chunk_stats": {
+                "total": total, "full_upserted": 0,
+                "metadata_updated": 0, "skipped": 0,
+                "failed_full": 0, "failed_metadata": total,
+                "retried_success": 0, "retried_failed": 0,
+            },
+        }
+
+# %% [markdown]
 # ### process_note_chunks(note, vector_db: VectorDBManager, embedding_generator: EmbeddingGenerator, config: Dict,) -> bool
 # %%
 def process_note_chunks(
@@ -176,8 +265,15 @@ def process_note_chunks(
     vector_db: VectorDBManager,
     embedding_generator: EmbeddingGenerator,
     config: Dict,
-) -> bool:
-    """处理单条笔记（块级增量更新），返回是否成功"""
+    content_unchanged: bool = False,
+    needs_re_enhance: bool = False,
+) -> dict:
+    """处理单条笔记（块级增量更新），返回是否成功。
+
+    Args:
+        content_unchanged: 内容哈希未变 → 可跳过重复分块+嵌入+增强
+        needs_re_enhance: 增强缺失或配置变更 → 即使内容未变也需重新增强
+    """
     try:
         note_detail = getnote(note.id)
         if not note_detail:
@@ -188,10 +284,20 @@ def process_note_chunks(
 
         # 1. 获取此笔记在向量库中所有现有块的 块ID->哈希 映射
         existing_chunks_map = vector_db.get_existing_chunk_hashes_for_note(note.id)
-        # print(existing_chunks_map)
         log.info(
             f"笔记《{note.title}》在向量库中存在 {len(existing_chunks_map)} 个旧块。"
         )
+
+        # === 快速路径：内容未变且增强已完成 → 跳过重分块，仅更新元数据 ===
+        if content_unchanged and not needs_re_enhance and existing_chunks_map:
+            fast_result = _process_metadata_only_fast_path(
+                note, vector_db, existing_chunks_map
+            )
+            if not fast_result.get("_fallback"):
+                return fast_result
+            log.warning(
+                f"笔记《{note.title}》快速路径回退→走全量处理"
+            )
 
         # 2. 准备笔记文本并分块
         if len(note.body) < 10:
@@ -794,6 +900,18 @@ def process_notes_incremental(notebook_title: str, config: Dict, note_ids: List[
                     f"内容变化={last_content_hash != current_content_hash}, "
                     f"元数据变化={last_meta_hash != current_meta_hash}"
                 )
+                # 计算快速路径标记
+                _content_unchanged = (
+                    not force_update
+                    and last_content_hash == current_content_hash
+                    and last_content_hash  # 有历史记录才能确认未变
+                )
+                _needs_re_enhance = (
+                    enhance_enabled and (
+                        last_enhance_missing
+                        or last_enhance_config != current_enhance_config
+                    )
+                )
                 # 提交任务到线程池/进程池
                 future = executor.submit(
                     process_note_chunks,
@@ -801,6 +919,8 @@ def process_notes_incremental(notebook_title: str, config: Dict, note_ids: List[
                     vector_db,
                     embedding_gen,
                     effective_config,
+                    _content_unchanged,
+                    _needs_re_enhance,
                 )
                 future_to_note[future] = (
                     note_id,
