@@ -368,38 +368,44 @@ def process_note_chunks(
 
         # 4a. 处理仅元数据更新的块（无需重新生成嵌入）
         successful_metadata_updates = 0
-        for chunk_data in chunks_metadata_only:
-            chunk_id = chunk_data["chunk_id"]
-            base_metadata = chunk_data["base_metadata"]
-            metadata_chunk_idx_from_one = base_metadata["chunk_index"]
-
+        if chunks_metadata_only:
             notebook_dicts = get_notebook_ids_for_note(note.id)
-            notebook_dict = notebook_dicts[-1]
+            nb_info = notebook_dicts[-1] if notebook_dicts else {}
             try:
-                notebook_id, notebook_title = next(iter(notebook_dict.items()))
+                nb_id, nb_title = next(iter(nb_info.items()))
             except StopIteration:
-                notebook_id, notebook_title = "", ""
-            metadata = {
-                **base_metadata,
-                "source_note_id": note.id,
-                "source_notebook_id": notebook_id,
-                "source_notebook_title": notebook_title,
-            }
+                nb_id, nb_title = "", ""
+
+            batch_ids = []
+            batch_tags = []
+            batch_metadatas = []
+            for chunk_data in chunks_metadata_only:
+                metadata = {
+                    **chunk_data["base_metadata"],
+                    "source_note_id": note.id,
+                    "source_notebook_id": nb_id,
+                    "source_notebook_title": nb_title,
+                }
+                batch_ids.append(chunk_data["chunk_id"])
+                batch_tags.append(
+                    [t.strip() for t in metadata.get("tags", "").split(",")]
+                )
+                batch_metadatas.append(metadata)
+
             try:
-                vector_db.update_chunk_metadata(
-                    chunk_id=chunk_id,
-                    tags=[tag.strip() for tag in metadata.get("tags", "").split(",")],
-                    metadata=metadata,
+                vector_db.batch_update_chunks_metadata(
+                    batch_ids, batch_tags, batch_metadatas
                 )
-                successful_metadata_updates += 1
-                log.info(
-                    f"笔记《{note.title}》的块 【{metadata_chunk_idx_from_one}/{len(chunk_dicts)}】"
-                    f"（仅元数据更新）成功，元数据：{metadata}"
-                )
+                successful_metadata_updates = len(batch_ids)
+                for i, chunk_data in enumerate(chunks_metadata_only):
+                    log.info(
+                        f"笔记《{note.title}》的块 "
+                        f"【{chunk_data['base_metadata']['chunk_index']}/{len(chunk_dicts)}】"
+                        f"（仅元数据更新）成功，元数据：{batch_metadatas[i]}"
+                    )
             except Exception as e:
                 log.error(
-                    f"笔记《{note.title}》元数据更新块 {metadata_chunk_idx_from_one}"
-                    f"（长度：{len(chunk_data['content'])}）失败: {e}",
+                    f"笔记《{note.title}》批量元数据更新 {len(batch_ids)} 个块失败: {e}",
                     exc_info=True,
                 )
 
