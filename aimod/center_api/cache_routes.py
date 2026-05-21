@@ -31,8 +31,6 @@ from aimod.center_api import (
     DB_PATH,
     VALIDATION_THRESHOLD,
     _init_db,
-    _probe_set_counter,
-    _probe_cache_limit,
     log,
     require_auth,
 )
@@ -248,119 +246,6 @@ def enhance_cache_report() -> dict:
 
 
 # %% [markdown]
-# # 探测缓存操作
-
-# %%
-def _get_probe_cache_limit() -> int:
-    try:
-        import pathmagic
-        with pathmagic.Context():
-            from func.jpfuncs import getinivaluefromcloud
-        val = getinivaluefromcloud("joplinai", "probe_cache_limit")
-        return int(val) if val else 10000
-    except Exception:
-        return 10000
-
-
-def probe_cache_get(text_md5: str) -> Optional[dict]:
-    conn = _init_db()
-    row = conn.execute(
-        "SELECT safe_len, snippet, model_name, chunk_size, created_at, last_accessed "
-        "FROM probe_cache WHERE text_md5=?",
-        (text_md5,),
-    ).fetchone()
-    if not row:
-        conn.close()
-        return None
-    now = datetime.now().isoformat()
-    conn.execute("UPDATE probe_cache SET last_accessed=? WHERE text_md5=?", (now, text_md5))
-    conn.commit()
-    conn.close()
-    return {
-        "safe_len": row[0], "snippet": row[1], "model_name": row[2],
-        "chunk_size": row[3], "timestamp": row[4],
-    }
-
-
-def probe_cache_set(text_md5: str, safe_len: int, snippet: str,
-                    model_name: str, chunk_size: int):
-    global _probe_set_counter, _probe_cache_limit
-    now = datetime.now().isoformat()
-    conn = _init_db()
-    conn.execute(
-        "INSERT OR REPLACE INTO probe_cache "
-        "(text_md5, safe_len, snippet, model_name, chunk_size, created_at, last_accessed) "
-        "VALUES (?,?,?,?,?, COALESCE((SELECT created_at FROM probe_cache WHERE text_md5=?), ?), ?)",
-        (text_md5, safe_len, snippet, model_name, chunk_size, text_md5, now, now),
-    )
-    conn.commit()
-
-    _probe_set_counter += 1
-    if _probe_set_counter % 1000 == 0:
-        _probe_cache_limit = _get_probe_cache_limit()
-        count = conn.execute("SELECT COUNT(*) FROM probe_cache").fetchone()[0]
-        if count > _probe_cache_limit:
-            delete_n = max(1, count // 10)
-            conn.execute(
-                "DELETE FROM probe_cache WHERE text_md5 IN ("
-                "SELECT text_md5 FROM probe_cache ORDER BY last_accessed ASC LIMIT ?"
-                ")", (delete_n,)
-            )
-            conn.commit()
-            log.info(f"[探测缓存] 淘汰 {delete_n} 条（总量 {count} > 上限 {_probe_cache_limit}）")
-    conn.close()
-
-
-def probe_cache_stats() -> dict:
-    conn = _init_db()
-    row = conn.execute("SELECT COUNT(*) FROM probe_cache").fetchone()
-    conn.close()
-    return {"count": row[0], "limit": _get_probe_cache_limit()}
-
-
-def probe_cache_report() -> dict:
-    conn = _init_db()
-    conn.row_factory = sqlite3.Row
-
-    row = conn.execute("SELECT COUNT(*) as count FROM probe_cache").fetchone()
-    total = row["count"] if row else 0
-
-    by_model = [dict(r) for r in conn.execute("""
-        SELECT model_name, COUNT(*) as count, AVG(safe_len) as avg_safe_len,
-               AVG(chunk_size) as avg_chunk_size, MAX(last_accessed) as last_used
-        FROM probe_cache GROUP BY model_name ORDER BY count DESC
-    """).fetchall()]
-
-    by_chunk = [dict(r) for r in conn.execute("""
-        SELECT chunk_size, COUNT(*) as count, AVG(safe_len) as avg_safe_len
-        FROM probe_cache GROUP BY chunk_size ORDER BY chunk_size
-    """).fetchall()]
-
-    row = conn.execute(
-        "SELECT MIN(safe_len) as min_len, MAX(safe_len) as max_len, AVG(safe_len) as avg_len FROM probe_cache"
-    ).fetchone()
-    len_stats = dict(row) if row else {}
-
-    row = conn.execute(
-        "SELECT COUNT(*) as cnt FROM probe_cache WHERE last_accessed >= datetime('now', '-7 days')"
-    ).fetchone()
-    recent = row["cnt"] if row else 0
-
-    daily_new = [dict(r) for r in conn.execute("""
-        SELECT DATE(created_at) as date, COUNT(*) as new_entries
-        FROM probe_cache WHERE DATE(created_at) >= DATE('now', '-30 days')
-        GROUP BY DATE(created_at) ORDER BY date
-    """).fetchall()]
-
-    conn.close()
-    return {
-        "total": total, "limit": _get_probe_cache_limit(),
-        "by_model": by_model, "by_chunk_size": by_chunk,
-        "safe_len_stats": len_stats, "recent_active": recent,
-        "daily_new": daily_new,
-    }
-
-# %% [markdown]
 # # Flask 端点
 
 # %%
@@ -400,34 +285,3 @@ def api_enh_cache_stats():
 def api_enh_cache_report():
     return jsonify(enhance_cache_report())
 
-
-@cache_bp.route("/cache/probe/get/<text_md5>", methods=["GET"])
-@require_auth
-def api_probe_cache_get(text_md5: str):
-    result = probe_cache_get(text_md5)
-    if result:
-        return jsonify(result)
-    return jsonify({"found": False}), 404
-
-
-@cache_bp.route("/cache/probe/set", methods=["POST"])
-@require_auth
-def api_probe_cache_set():
-    data = request.get_json(force=True)
-    probe_cache_set(
-        data["text_md5"], data["safe_len"], data["snippet"],
-        data["model_name"], data["chunk_size"],
-    )
-    return jsonify({"ok": True})
-
-
-@cache_bp.route("/cache/probe/stats")
-@require_auth
-def api_probe_cache_stats():
-    return jsonify(probe_cache_stats())
-
-
-@cache_bp.route("/cache/probe/report")
-@require_auth
-def api_probe_cache_report():
-    return jsonify(probe_cache_report())

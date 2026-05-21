@@ -30,6 +30,7 @@ import re
 from datetime import datetime
 from typing import Dict, List, Optional
 
+import jieba
 import ollama
 
 # %% [markdown]
@@ -109,26 +110,23 @@ class QASystem:
         # 1. 预处理问题
         processed_question = self._preprocess_question(question)
 
-        # 2. 获取问题嵌入
-        chunk_dict_for_question = {
-            "content": processed_question,
-            "base_metadata": {
-                "content_hash": compute_content_hash(processed_question),
-                "source_note_title": f"{processed_question[:20]}",
-                "chunk_index": 0,
-            }
-        }
-        query_embedding = self.embedding_generator.get_merged_embedding(chunk_dict_for_question)
-        if not query_embedding:
-            return {"answer": "无法生成问题嵌入，请检查配置。", "relevant_chunks": []}
-
-        # 2.5 HyDE 增强嵌入
+        # 2. 获取问题嵌入（HyDE 优先，跳过独立嵌入）
         if self.config.get("hyde_enabled", True):
             hyde = self._generate_hyde(question)
             if hyde:
-                fused = self._fuse_hyde_embedding(processed_question, hyde)
-                if fused:
-                    query_embedding = fused
+                query_embedding = self._fuse_hyde_embedding(processed_question, hyde)
+            else:
+                query_embedding = None
+
+            if not query_embedding:
+                # HyDE 失败→回退到独立问题嵌入
+                log.info("[HyDE] 失败，回退到独立问题嵌入")
+                query_embedding = self._embed_single(processed_question)
+        else:
+            query_embedding = self._embed_single(processed_question)
+
+        if not query_embedding:
+            return {"answer": "无法生成问题嵌入，请检查配置。", "relevant_chunks": []}
 
         # 3. 搜索相似块
         similar_chunks = self.vector_db.search_similar_chunks(
@@ -210,11 +208,9 @@ class QASystem:
     # %%
     def _extract_keywords(self, text: str) -> List[str]:
         """提取关键词"""
-        import re
         try:
-            import jieba
             words = jieba.lcut(text)
-        except ImportError:
+        except Exception:
             words = text.split()
         words = [w.strip() for w in words if re.search(r"\w", w) and len(w.strip()) > 1]
         from collections import Counter
@@ -280,36 +276,53 @@ class QASystem:
             return None
 
     # %%
-    def _fuse_hyde_embedding(self, question: str, hyde: dict) -> Optional[List[float]]:
-        """融合原始问题 + search_query + 假设答案的嵌入向量"""
-        from func.datatools import compute_content_hash as _hash
-
-        texts = {
-            "original": (question, 0.3),
-            "search": (hyde["search_query"], 0.4),
-            "hypo": (hyde["hypothetical_answer"], 0.3),
+    def _embed_single(self, text: str) -> Optional[List[float]]:
+        """嵌入单个文本（HyDE 回退 / HyDE 关闭时使用）。"""
+        chunk_dict = {
+            "content": text,
+            "base_metadata": {
+                "content_hash": compute_content_hash(text),
+                "source_note_title": text[:20],
+                "chunk_index": 0,
+            },
         }
-        vectors = {}
-        for label, (text, _weight) in texts.items():
-            chunk_dict = {
-                "content": text,
-                "base_metadata": {
-                    "content_hash": _hash(text),
-                    "source_note_title": f"hyde_{label}",
-                    "chunk_index": 0,
-                },
-            }
-            vec = self.embedding_generator.get_merged_embedding(chunk_dict)
-            if not vec:
-                log.warning(f"[HyDE] {label} 嵌入失败，降级为原始问题")
-                return None
-            vectors[label] = vec
+        return self.embedding_generator.get_merged_embedding(chunk_dict)
 
-        dim = len(vectors["original"])
+    # %%
+    def _fuse_hyde_embedding(self, question: str, hyde: dict) -> Optional[List[float]]:
+        """融合原始问题 + search_query + 假设答案的嵌入向量（批量嵌入优化）。
+
+        将3个文本批量发送给Ollama，一次请求替代3次串行调用，省约6-9秒。
+        """
+        texts = [
+            (question, 0.3),
+            (hyde["search_query"], 0.4),
+            (hyde["hypothetical_answer"], 0.3),
+        ]
+
+        # 预处理所有文本后批量嵌入
+        prepped = [
+            self.embedding_generator.text_prep.preprocess_for_embedding(t)
+            for t, _ in texts
+        ]
+
+        try:
+            vectors = self.embedding_generator.get_ollama_embeddings_batch(prepped)
+        except Exception as e:
+            log.warning(f"[HyDE] 批量嵌入失败: {e}，降级为原始问题嵌入")
+            return None
+
+        if not vectors or len(vectors) != len(texts):
+            log.warning(
+                f"[HyDE] 批量嵌入返回数量异常: {len(vectors) if vectors else 0}"
+            )
+            return None
+
+        dim = len(vectors[0])
         fused = [0.0] * dim
-        for label, (_, weight) in texts.items():
-            for i in range(dim):
-                fused[i] += vectors[label][i] * weight
+        for i, (_, weight) in enumerate(texts):
+            for j in range(dim):
+                fused[j] += vectors[i][j] * weight
         log.info(f"[HyDE] 三向量融合完成 dim={dim}")
         return fused
 
@@ -368,7 +381,7 @@ class QASystem:
             import requests
 
             candidates = []
-            for i, c in enumerate(chunks[:20]):
+            for i, c in enumerate(chunks[:10]):
                 meta = c.get("metadata", {})
                 title = meta.get("source_note_title", "?")
                 tags = meta.get("tags", "N/A")

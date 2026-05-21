@@ -43,9 +43,6 @@ DB_PATH = Path(__file__).parent.parent.parent / "data" / "joplinai_center.db"
 VALIDATION_THRESHOLD = 5000
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-_probe_set_counter = 0
-_probe_cache_limit = 10000
-
 
 def _get_api_key() -> Optional[str]:
     """1. 环境变量 → 2. 云端配置 → 3. 本地 INI 回退"""
@@ -101,18 +98,6 @@ def _init_db():
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_enh_hash_task ON enhance_cache(content_hash, task)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_enh_last_accessed ON enhance_cache(last_accessed)")
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS probe_cache (
-            text_md5      TEXT PRIMARY KEY,
-            safe_len      INTEGER NOT NULL,
-            snippet       TEXT    NOT NULL,
-            model_name    TEXT    NOT NULL,
-            chunk_size    INTEGER NOT NULL,
-            created_at    TEXT    NOT NULL,
-            last_accessed TEXT    NOT NULL
-        )
-    """)
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_probe_last_accessed ON probe_cache(last_accessed)")
     conn.execute("""
         CREATE TABLE IF NOT EXISTS notebook_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

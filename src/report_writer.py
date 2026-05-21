@@ -25,11 +25,10 @@ __all__ = ["ReportWriter", "main"]
 class ReportWriter:
     """统一报告生成器 — 从 stats 端点取数据，格式化后写入 Joplin"""
 
-    def __init__(self, config: Dict, history_client=None, cache_client=None, probe_client=None):
+    def __init__(self, config: Dict, history_client=None, cache_client=None):
         self.config = config
         self.history = history_client
         self.cache = cache_client      # CacheClient
-        self.probe = probe_client      # ProbeCacheClient
 
 # %% [markdown]
 #     # ## generate_vectorization_report
@@ -316,70 +315,6 @@ class ReportWriter:
         return "\n".join(md_lines)
 
 # %% [markdown]
-#     # ## generate_probe_report
-
-    # %%
-    def generate_probe_report(self) -> str:
-        """生成文本块长度探测缓存报告"""
-        if not self.probe:
-            return "*探测缓存报告：probe_client 未配置*\n"
-
-        report = self.probe.get_report()
-        if not report:
-            return "*探测缓存报告数据暂不可用*\n"
-
-        md_lines = ["# 📊 文本块长度探测缓存报告"]
-        md_lines.append(f"**生成时间**: {datetime.now().isoformat()}")
-        md_lines.append("")
-
-        md_lines.append("## 📈 基础统计")
-        md_lines.append(f"- **总条目数**: {report.get('total', 0)}")
-        md_lines.append(f"- **上限**: {report.get('limit', 0)}")
-        md_lines.append(f"- **近期活跃（7天）**: {report.get('recent_active', 0)}")
-
-        len_stats = report.get("safe_len_stats", {})
-        if len_stats:
-            md_lines.append(f"- **安全长度范围**: {len_stats.get('min_len', '?')} ~ {len_stats.get('max_len', '?')} 字符")
-            md_lines.append(f"- **平均安全长度**: {len_stats.get('avg_len', 0):.0f} 字符")
-        md_lines.append("")
-
-        # 按模型分布
-        by_model = report.get("by_model", [])
-        if by_model:
-            md_lines.append("## 🤖 按模型分布")
-            md_lines.append("| 模型 | 条目数 | 平均安全长度 | 平均块大小 | 最后使用 |")
-            md_lines.append("|------|--------|-------------|-----------|---------|")
-            for m in by_model:
-                last = (m.get("last_used") or "")[:10]
-                md_lines.append(
-                    f"| {m['model_name']} | {m['count']} | "
-                    f"{m.get('avg_safe_len', 0):.0f} | {m.get('avg_chunk_size', 0):.0f} | {last} |"
-                )
-            md_lines.append("")
-
-        # 按块大小分布
-        by_chunk = report.get("by_chunk_size", [])
-        if by_chunk:
-            md_lines.append("## 📐 按块大小分布")
-            md_lines.append("| 块大小 | 条目数 | 平均安全长度 |")
-            md_lines.append("|--------|--------|-------------|")
-            for c in by_chunk:
-                md_lines.append(f"| {c['chunk_size']} | {c['count']} | {c.get('avg_safe_len', 0):.0f} |")
-            md_lines.append("")
-
-        # 增长趋势
-        daily = report.get("daily_new", [])
-        if daily:
-            md_lines.append("## 📊 每日新增（最近30天）")
-            md_lines.append("| 日期 | 新增条目 |")
-            md_lines.append("|------|----------|")
-            for d in reversed(daily[-10:]):
-                md_lines.append(f"| {d['date']} | {d['new_entries']} |")
-            md_lines.append("")
-
-        return "\n".join(md_lines)
-
-# %% [markdown]
 #     # ## write_to_joplin
 
     # %%
@@ -450,7 +385,6 @@ def _init_clients():
     with pathmagic.Context():
         from func.jpfuncs import getinivaluefromcloud
         from aimod.cache_client import CacheClient
-        from aimod.probe_client import ProbeCacheClient
 
     remote_url = getinivaluefromcloud("joplinai", "joplinai_center_url")
     if not remote_url:
@@ -460,8 +394,7 @@ def _init_clients():
         raise RuntimeError("未配置 joplinai_center_api_key")
 
     cache_client = CacheClient(remote_url, api_key)
-    probe_client = ProbeCacheClient(remote_url, api_key)
-    return cache_client, probe_client
+    return cache_client
 
 
 def main():
@@ -469,9 +402,9 @@ def main():
 
     parser = argparse.ArgumentParser(description="Joplinai 缓存报告生成器")
     parser.add_argument(
-        "--type", type=str, default="all",
-        choices=["enhance_cache", "probe_cache", "all"],
-        help="报告类型 (default: all)",
+        "--type", type=str, default="enhance_cache",
+        choices=["enhance_cache"],
+        help="报告类型 (default: enhance_cache)",
     )
     parser.add_argument(
         "--output", type=str, default="joplin",
@@ -485,59 +418,37 @@ def main():
         from func.jpfuncs import getinivaluefromcloud
         from func.logme import log
 
-    cache_client, probe_client = _init_clients()
+    cache_client = _init_clients()
     config = {}
-    writer = ReportWriter(config, cache_client=cache_client, probe_client=probe_client)
+    writer = ReportWriter(config, cache_client=cache_client)
 
-    report_types = (
-        ["enhance_cache", "probe_cache"] if args.type == "all" else [args.type]
-    )
+    log.info("生成 AI增强缓存报告...")
+    content = writer.generate_cache_report()
+    title = "AI增强缓存分析报告"
+    config_key = "enhance_cache_report"
+    if writer.cache:
+        try:
+            stats = writer.cache.get_report()
+            if stats:
+                total = stats.get("total", 0)
+                recent = stats.get("recent_active", 0)
+                growth = stats.get("growth_trends", {}) or {}
+                log.info(
+                    f"AI增强缓存统计: 总条目={total}, "
+                    f"近期活跃(7天)={recent}, "
+                    f"预测周增长={growth.get('predicted_weekly_growth', 0)}"
+                )
+        except Exception as e:
+            log.warning(f"获取 AI增强缓存统计失败: {e}")
 
-    for rtype in report_types:
-        if rtype == "enhance_cache":
-            log.info("生成 AI增强缓存报告...")
-            content = writer.generate_cache_report()
-            title = "AI增强缓存分析报告"
-            config_key = "enhance_cache_report"
-            if writer.cache:
-                try:
-                    stats = writer.cache.get_report()
-                    if stats:
-                        total = stats.get("total", 0)
-                        recent = stats.get("recent_active", 0)
-                        growth = stats.get("growth_trends", {}) or {}
-                        log.info(
-                            f"AI增强缓存统计: 总条目={total}, "
-                            f"近期活跃(7天)={recent}, "
-                            f"预测周增长={growth.get('predicted_weekly_growth', 0)}"
-                        )
-                except Exception as e:
-                    log.warning(f"获取 AI增强缓存统计失败: {e}")
-        else:
-            log.info("生成探测缓存报告...")
-            content = writer.generate_probe_report()
-            title = "文本块长度探测缓存报告"
-            config_key = "probe_cache_report"
-            if writer.probe:
-                try:
-                    stats = writer.probe.get_report()
-                    if stats:
-                        log.info(
-                            f"探测缓存统计: 总条目={stats.get('total', 0)}, "
-                            f"近期活跃(7天)={stats.get('recent_active', 0)}, "
-                            f"上限={stats.get('limit', 'N/A')}"
-                        )
-                except Exception as e:
-                    log.warning(f"获取探测缓存统计失败: {e}")
-
-        if args.output == "stdout":
-            print(content)
-        else:
-            ok = writer.write_to_joplin(content, title, config_key=config_key)
-            if ok:
-                log.info(f"《{title}》已写入 Joplin")
-            else:
-                log.error(f"《{title}》写入 Joplin 失败")
+    if args.output == "stdout":
+        print(content)
+    else:
+        ok = writer.write_to_joplin(content, title, config_key=config_key)
+    if ok:
+        log.info(f"《{title}》已写入 Joplin")
+    else:
+        log.error(f"《{title}》写入 Joplin 失败")
 
     log.info("缓存报告生成完成")
 
