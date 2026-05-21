@@ -714,7 +714,7 @@ class EmbeddingGenerator:
         return metadata
 
 # %% [markdown]
-# ## split_into_semantic_chunks(self, text: str, note_title: str = "", note_tags: str = "", source_notebook_title: str = "", twice_probe: bool = True) -> List[Dict]
+# ## split_into_semantic_chunks(self, text: str, note_title: str = "", note_tags: str = "", source_notebook_title: str = "") -> List[Dict]
 
     # %%
     def split_into_semantic_chunks(
@@ -723,7 +723,6 @@ class EmbeddingGenerator:
         note_title: str = "",
         note_tags: str = "",
         source_notebook_title: str = "",
-        twice_probe: bool = True,
         image_descriptions: Optional[str] = None,
     ) -> List[Dict]:
         """将文本分割成语义块，并返回块字典列表。
@@ -1052,6 +1051,39 @@ class EmbeddingGenerator:
                 except Exception:
                     pass
             log.debug(f"[远程Ollama] 嵌入调用失败: {error_msg}")
+            raise Exception(error_msg) from e
+
+# %% [markdown]
+# ## get_ollama_embeddings_batch(self, texts: List[str], host: str = "10.9.0.2", port: int = 11034) -> List[List[float]]
+
+    # %%
+    def get_ollama_embeddings_batch(
+        self, texts: List[str], host: str = "10.9.0.2", port: int = 11034
+    ) -> List[List[float]]:
+        """批量调用远程Ollama生成嵌入，一次请求嵌入多个文本。
+
+        Ollama /api/embed 支持 input 为字符串列表，返回 {"embeddings": [[...], [...], ...]}
+        """
+        host = self.config.get("ollama_host", host)
+        port = self.config.get("ollama_port", port)
+        url = f"http://{host}:{port}/api/embed"
+        model = self.model_name
+        payload = {"model": model, "input": texts}
+        try:
+            with _ollama_embed_semaphore:
+                resp = requests.post(url, json=payload, timeout=60)
+            resp.raise_for_status()
+            return resp.json()["embeddings"]
+        except Exception as e:
+            error_msg = str(e)
+            if hasattr(e, "response") and e.response is not None:
+                try:
+                    body = e.response.text
+                    if body:
+                        error_msg = f"{error_msg} | {body}"
+                except Exception:
+                    pass
+            log.debug(f"[远程Ollama] 批量嵌入调用失败: {error_msg}")
             raise Exception(error_msg) from e
 
 # %% [markdown]

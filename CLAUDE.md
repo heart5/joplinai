@@ -51,7 +51,7 @@ Data flow: `joplinai.py` → TC 本地 (Joplin Server / ChromaDB / center_api) +
 向量化优化：chunk 内容未变仅元数据（tags/summary）变更时，跳过嵌入生成，仅通过 `VectorDBManager.batch_update_chunks_metadata()` 一次性批量更新 ChromaDB metadata（不含 embeddings），避免不必要的远程序列调用。内容未变+增强完成时走 `_process_metadata_only_fast_path` 快速路径，完全跳过重复分块/嵌入/增强。
 
 `joplinai_center.db` 包含 10 张表：
-- 缓存与历史：`enhance_cache`、`probe_cache`（待清理，chunk-and-embed 重构后已无写入）、`notebook_history`、`global_run_history`
+- 缓存与历史：`enhance_cache`、`notebook_history`、`global_run_history`
 - 笔记状态：`note_process_state`（含 `enhance_config` 字段追踪摘要/标签模型，模型变更时自动触发重处理；`meta_hash` 仅含标签+笔记本元数据，不含增强配置）
 - 笔记本级增强策略覆盖：`enhance_override` 云端 JSON 配置，格式 `{"笔记本标题": {"summary_model": "cloud|ollama|none", "tags_model": "cloud|ollama|none"}}`，`_resolve_enhance_config()` 合并全局配置与笔记本级覆盖
 - 用户管理：`users`、`sessions`、`audit_log`、`qa_history`、`chat_sessions`
@@ -87,7 +87,6 @@ deploy/                 # systemd service/timer 文件 + deploy.sh
 aimod/                  # AI 核心包
 ├── __init__.py             # get_logger(name) 统一日志工厂
 ├── embedding_generator.py  # 文本分块 + 嵌入生成
-├── chunk_optimizer.py      # 自适应分块策略（待清理，chunk-and-embed 重构后已无引用）
 ├── text_splitter.py        # 文本切分器（拆分自 embedding_generator）
 ├── vector_db_manager.py    # ChromaDB CRUD
 ├── cache_manager.py        # SQLite LRU 缓存（本地回退用）
@@ -112,7 +111,6 @@ log/                    # 日志 (gitignored)
 ### Core Modules (`aimod/`)
 
 - `embedding_generator.py` — EmbeddingGenerator 类，向量嵌入入口
-- `chunk_optimizer.py` — 自适应分块策略（待清理，chunk-and-embed 重构后已无引用）
 - `text_splitter.py` — 文本切分器，按句子边界切分
 - `vector_db_manager.py` — VectorDBManager 类，ChromaDB CRUD
 - `cache_manager.py` — SQLite LRU 缓存（本地回退用）
@@ -120,7 +118,6 @@ log/                    # 日志 (gitignored)
 - `run_tracker.py` — RunTracker 类，运行数据采集和历史记录 (remote-first)
 - `cache_client.py` — CacheClient，增强缓存纯远程（无本地回退）
 - `history_client.py` — HistoryClient，运行历史远程存储
-- `probe_client.py` — ProbeCacheClient，探测缓存远程存储（待清理，chunk-and-embed 重构后仅 report_writer 有引用）
 - `state_client.py` — ProcessStateClient，笔记处理状态远程存储（纯远程，无本地 fallback）
 - `user_client.py` — UserManagerClient，用户管理远程存储
 - `report_writer.py` — 统一报告生成（在 `src/`）
@@ -256,7 +253,7 @@ Pre-commit (`.pre-commit-config.yaml`): jupytext 误注释检测 + flake8。
 
 Main config stored in cloud-synced Joplin note (INI format). Local override: `data/joplinai.ini`. Key settings: Joplin API token, Ollama model name, embedding model, ChromaDB path, Q&A prompts, user session settings.
 
-**数据中心配置**：`joplinai_center_url`（非生产主机配，指向 TC 公网IP；生产主机不配则自动走 localhost）、`joplinai_center_api_key`（认证密钥）、`probe_cache_limit`（探测缓存上限默认 10000，待清理）。
+**数据中心配置**：`joplinai_center_url`（非生产主机配，指向 TC 公网IP；生产主机不配则自动走 localhost）、`joplinai_center_api_key`（认证密钥）。
 
 **模型配置**：`qa_ollama_chat_model`（本地 QA 对话模型，当前 `none` 无本地回退）、`enhance_ollama_chat_model`（Ollama 标签/分类小模型）、`ollama_embedding_model`（嵌入模型）、`vision_model`（视觉模型）、`cloud_model` / `summary_model` / `tags_model`（cloud/ollama/none 三态切换）、`cloud_api_url` / `cloud_api_key`（云端 API 端点/密钥，支持切换提供者）。详见上方 Model Strategy 章节。QA 检索链路详见 `docs/QA_PIPELINE.md`。
 
