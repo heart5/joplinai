@@ -216,6 +216,7 @@ Production: systemd services managed via `deploy/deploy.sh`:
 | `summary_model` | `cloud` | 摘要模型: cloud/ollama/none |
 | `tags_model` | `cloud` | 标签模型: cloud/ollama/none |
 | `enhance_ollama_chat_model` | `qwen2.5:1.5b` | Ollama 标签/分类模型 |
+| `validation_threshold` | `300` | 增强缓存验证阈值，命中>N次触发重验 |
 | `vision_enabled` | `false` | CPU 跑视觉太慢，默认关闭 |
 | `hyde_enabled` | `true` | HyDE 假设文档嵌入增强检索 |
 | `rerank_enabled` | `true` | LLM 精排候选块重排序 |
@@ -245,7 +246,7 @@ Pre-commit (`.pre-commit-config.yaml`): jupytext 误注释检测 + flake8。
 
 - Branch: `main`
 - Remote: `origin` (GitHub: `heart5/joplinai`)
-- `.gitignore` covers: `log/`, `data/`, `*.ipynb`（全部屏蔽，永不入库——ipynb 由 jupytext 从 .py 自动生成），`__pycache__/`, backup files (`*.bak`), oversized favicon copies, `.env`
+- `.gitignore` covers: `.claude/`, `log/`, `data/`, `*.ipynb`（全部屏蔽，永不入库——ipynb 由 jupytext 从 .py 自动生成），`__pycache__/`, backup files (`*.bak`), oversized favicon copies, `.env`
 - `jupytext.toml`: py↔ipynb 配对配置，`.git/hooks/pre-commit`: 提交 .py 时自动同步 ipynb
 - `.pre-commit-config.yaml`: flake8 pre-commit hook
 
