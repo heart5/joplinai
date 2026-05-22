@@ -2,6 +2,7 @@
 # jupyter:
 #   jupytext:
 #     formats: ipynb,py:percent
+#     split_at_heading: true
 #     text_representation:
 #       extension: .py
 #       format_name: percent
@@ -40,8 +41,25 @@ log.setLevel(logging.INFO)
 
 # %%
 DB_PATH = Path(__file__).parent.parent.parent / "data" / "joplinai_center.db"
-VALIDATION_THRESHOLD = 5000
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+
+def _get_validation_threshold() -> int:
+    try:
+        import pathmagic
+        with pathmagic.Context():
+            from func.jpfuncs import getinivaluefromcloud  # noqa: E402
+        val = getinivaluefromcloud("joplinai", "validation_threshold")
+        if val is not None:
+            return int(val)
+    except Exception:
+        pass
+    log.info("验证阈值未配置，使用默认值 5000")
+    return 5000
+
+
+VALIDATION_THRESHOLD = _get_validation_threshold()
+log.info(f"增强缓存验证阈值: {VALIDATION_THRESHOLD}")
 
 
 def _get_api_key() -> Optional[str]:
