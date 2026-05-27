@@ -26,8 +26,10 @@ Joplinai is an AI-powered knowledge retrieval and Q&A system for [Joplin](https:
 
 | Server | Hostname | Role |
 |--------|----------|------|
-| 腾讯云 (TC) | `tc` (122.51.102.233:2202) | Joplin Server, 向量数据库 (ChromaDB), 数据中心 (center_api), 定时向量化 (joplinai-sync), 用户管理 |
-| 恒创云 (HCX) | long9.org (149.30.242.156) | Ollama LLM 推理 (端口 11434), Q&A API, Web 门户 |
+| 腾讯云 (TC) | `tc` (122.51.102.233:2202) | Joplin Server (CLI, `joplin.xiloong.fans`), 向量数据库 (ChromaDB), 数据中心 (center_api), 定时向量化 (joplinai-sync), 用户管理 |
+| 恒创云 (HCX) | long9.org (149.30.242.156) | Joplin Server (Docker, `joplin.strcoder.com`), Ollama LLM 推理 (端口 11434), Q&A API, Web 门户 |
+
+两台 Joplin Server 互为备份：HCX 运行 Docker 版（主），TC 运行 CLI 版（备）。各自通过 Apache 反代对外暴露 HTTPS 端点,本机 client 直连 localhost:41184。
 
 TC 是数据核心+向量化，HCX 是推理+门户。TC 向量化时通过公网 IP 调用 HCX 的 Ollama 生成嵌入向量。HCX 的 Web 门户通过 HTTP API Key 认证远程调用 TC 的 center_api。
 
@@ -83,7 +85,7 @@ joplinai.py             # 向量化 CLI 入口 + joplinai.ipynb
 joplin_qa_api.py        # Q&A API 服务入口 + joplin_qa_api.ipynb
 joplin_web_app.py       # Web 门户入口  + joplin_web_app.ipynb
 pathmagic.py            # 根路径上下文  + pathmagic.ipynb
-deploy/                 # systemd service/timer 文件 + deploy.sh
+# 注意：deploy/ 目录已移除，TC 同步改为手动操作，不在 git push 后自动触发
 aimod/                  # AI 核心包
 ├── __init__.py             # get_logger(name) 统一日志工厂
 ├── embedding_generator.py  # 文本分块 + 嵌入生成
@@ -156,11 +158,13 @@ python joplin_qa_api.py
 python joplin_web_app.py
 ```
 
-Production: systemd services managed via `deploy/deploy.sh`:
+Production: systemd services 需手动重启，git push 后不会自动同步至 TC（安全考量）：
 ```bash
-./deploy/deploy.sh hcx           # 恒创云：重启 QA_API + Web_App
-./deploy/deploy.sh tc            # 腾讯云：git push → git pull(直连→代理→rsync兜底) → 重启 center_api
-./deploy/deploy.sh hcx --dry-run # 仅预览
+# HCX（本机）— 重启 QA_API + Web_App
+sudo systemctl restart joplin-qa-api joplin-web-app
+
+# TC（远程）— 先 SSH 手动 git pull，再重启
+ssh tc "cd /home/baiyefeng/work/joplinai && git pull && sudo systemctl restart --no-block joplinai-center-api"
 ```
 
 ## Key Code Patterns
@@ -234,9 +238,10 @@ Pre-commit (`.pre-commit-config.yaml`): jupytext 误注释检测 + flake8。
 ## Known Issues & Technical Debt
 
 - **`static/favicon.ico*`**: 3 domain-specific favicon copies at 3.5MB each. Only the default `favicon.ico` should be tracked; the `_for_*` variants are in `.gitignore`.
-- **TC git pull 可能需要代理**: 直连偶尔失败（GnuTLS recv error），回退方案是 `HTTPS_PROXY=http://127.0.0.1:7890 git pull`。`deploy/deploy.sh` 已包含三级回退策略。
+- **TC git pull 可能需要代理**: 直连偶尔失败（GnuTLS recv error），回退方案是 `HTTPS_PROXY=http://127.0.0.1:7890 git pull`。
 - **HCX `joplin-qa-api`/`joplin-web-app` 代码更新后需手动重启**: gunicorn 进程不自动 reload，git pull 后必须 `sudo systemctl restart`。
-- **SSH 远程 systemctl restart 会 hang**: `systemctl restart` 默认等待服务停止→启动，SSH 会话会阻塞超时。远程重启必须加 `--no-block`：`ssh tc "sudo systemctl restart --no-block <svc>"`。本地 `deploy.sh` 已内置此参数。
+- **SSH 远程 systemctl restart 会 hang**: `systemctl restart` 默认等待服务停止→启动，SSH 会话会阻塞超时。远程重启必须加 `--no-block`：`ssh tc "sudo systemctl restart --no-block <svc>"`。
+- **git push 后不自动同步 TC**: 出于安全考量，推送代码后 TC 需要手动 SSH 登录执行 `git pull` + `systemctl restart --no-block`。不做自动部署。
 - **TC 配置更新流程**：修改云端 INI → `ssh tc "source /usr/miniconda3/etc/profile.d/conda.sh && conda activate newlsp && joplin sync"` → `ssh tc "sudo systemctl restart --no-block joplinai-sync"`。joplinai-sync 是 timer 触发的 oneshot 服务，需手动 start/restart。
 - **center_api 日志查看**：TC 上 `sudo journalctl -u joplinai-center-api -f`。logger 配置在 `aimod/center_api/__init__.py`：`propagate=False` 避免 `func/logme` root handler 双重输出。
 - **ChromaDB 在 TC 以 Docker 运行**：`docker run chromadb/chroma`，端口映射 8009→8000。配置中 `chroma_port=8009`，但 `vector_db_manager.py` 硬编码默认 8000——依赖云端配置覆盖。直接 `chromadb.HttpClient(host='127.0.0.1', port=8009)` 才能连上。
@@ -254,21 +259,30 @@ Pre-commit (`.pre-commit-config.yaml`): jupytext 误注释检测 + flake8。
 
 Main config stored in cloud-synced Joplin note (INI format). Local override: `data/joplinai.ini`. Key settings: Joplin API token, Ollama model name, embedding model, ChromaDB path, Q&A prompts, user session settings.
 
-**数据中心配置**：`center_host_deviceid`（数据中心主机的设备 ID，客户端通过对比本机 deviceid 自动判断是否直连 localhost）、`joplinai_center_url`（非数据中心主机配，指向 TC 公网IP；未配则回退 localhost）、`joplinai_center_api_key`（认证密钥）。
+**数据中心配置**：`center_host_deviceid`（数据中心主机的设备 ID，客户端通过对比本机 deviceid 自动判断是否直连 localhost）、`joplinai_center_url`（非数据中心主机配，指向 TC 公网IP；未配则回退 localhost）、`joplinai_center_api_key`（认证密钥，所有客户端通用）。
+
+**Joplin 连接配置** (`data/joplinai.ini` `[joplin]` section)：`local_server`（本机运行 Joplin Server 时设为 `true`，直连 localhost:41184 免绕公网）、`fallback_url`（回退 Joplin Server 的 HTTPS 反代端点）、`fallback_token`（对应 API token）。
 
 **模型配置**：`qa_ollama_chat_model`（本地 QA 对话模型，当前 `none` 无本地回退）、`enhance_ollama_chat_model`（Ollama 标签/分类小模型）、`ollama_embedding_model`（嵌入模型）、`vision_model`（视觉模型）、`cloud_model` / `summary_model` / `tags_model`（cloud/ollama/none 三态切换）、`cloud_api_url` / `cloud_api_key`（云端 API 端点/密钥，支持切换提供者）。详见上方 Model Strategy 章节。QA 检索链路详见 `docs/QA_PIPELINE.md`。
 
 ### Remote Joplin fallback
 
-When local Joplin server is unavailable, `jpfuncs.getapi()` can fall back to a remote Joplin server. Configure in `data/joplinai.ini`:
+`func/jpfuncs.getapi()` 连接策略（`local_server` 优先 → fallback_url → 本地 CLI）：
 
 ```ini
 [joplin]
+# 本机运行 Joplin Server 时设为 true，直连 localhost:41184 免绕公网
+local_server = true
+# 回退/远程 Joplin Server URL
 fallback_url = https://joplin.xiloong.fans
 fallback_token = <api-token>
 ```
 
-This is useful in multi-server deployments for resilience — if one machine's Joplin process is down, joplinai can still function by hitting the other server's Joplin API. The server is accessed via Apache reverse proxy (HTTPS → 127.0.0.1:41184), so external clients should use `https://joplin.xiloong.fans` rather than `http://<ip>:41184`.
+两台 Joplin Server 的反代端点:
+- **HCX (Docker)**: `https://joplin.strcoder.com` → `127.0.0.1:41184`
+- **TC (CLI)**: `https://joplin.xiloong.fans` → `127.0.0.1:41184`
+
+本机 `local_server=true` 时直连 localhost，不通才走 fallback_url 连对端。全部失败抛出 `JoplinUnreachableError`（而非 `exit(1)`）。
 
 ## Dependencies (no requirements.txt — install manually)
 
