@@ -964,10 +964,20 @@ class UserManager:
 
 # %%
 def _create_remote_first_manager():
-    """创建远程优先的用户管理器，失败时回退到本地 SQLite。"""
+    """创建远程优先的用户管理器（本机自动走 localhost，失败时回退到本地 SQLite）。"""
     local_db = str(getdirmain() / "data" / "joplinai_users.db")
     try:
-        remote_url = getinivaluefromcloud("joplinai", "joplinai_center_url")
+        from func.getid import getdeviceid
+        # 本机为数据中心时走 127.0.0.1，避免绕公网再回来
+        center_deviceid = getinivaluefromcloud("joplinai", "center_host_deviceid")
+        if center_deviceid:
+            local_id = getdeviceid()
+            if local_id and str(local_id) == str(center_deviceid):
+                remote_url = "http://127.0.0.1:5003"
+            else:
+                remote_url = getinivaluefromcloud("joplinai", "joplinai_center_url")
+        else:
+            remote_url = getinivaluefromcloud("joplinai", "joplinai_center_url")
         if not remote_url:
             remote_url = "http://127.0.0.1:5003"
         api_key = getinivaluefromcloud("joplinai", "joplinai_center_api_key")

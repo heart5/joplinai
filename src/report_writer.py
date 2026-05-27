@@ -380,15 +380,27 @@ class ReportWriter:
 
 # %%
 def _init_clients():
-    """初始化 data center 客户端（从云端配置读取 URL/Key）"""
+    """初始化 data center 客户端（本机自动走 localhost，否则走云端配置 URL）"""
     import pathmagic
     with pathmagic.Context():
         from func.jpfuncs import getinivaluefromcloud
+        from func.getid import getdeviceid
         from aimod.cache_client import CacheClient
 
-    remote_url = getinivaluefromcloud("joplinai", "joplinai_center_url")
+    # 本机为数据中心时走 127.0.0.1，避免绕公网再回来
+    center_deviceid = getinivaluefromcloud("joplinai", "center_host_deviceid")
+    if center_deviceid:
+        local_id = getdeviceid()
+        if local_id and str(local_id) == str(center_deviceid):
+            remote_url = "http://127.0.0.1:5003"
+            log.info(f"本机 deviceid 匹配，center_url 走 localhost")
+        else:
+            remote_url = getinivaluefromcloud("joplinai", "joplinai_center_url")
+    else:
+        remote_url = getinivaluefromcloud("joplinai", "joplinai_center_url")
     if not remote_url:
         remote_url = "http://127.0.0.1:5003"
+
     api_key = getinivaluefromcloud("joplinai", "joplinai_center_api_key")
     if not api_key:
         raise RuntimeError("未配置 joplinai_center_api_key")
