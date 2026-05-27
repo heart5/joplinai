@@ -56,7 +56,7 @@ Data flow: `joplinai.py` → TC 本地 (Joplin Server / ChromaDB / center_api) +
 - 笔记本级增强策略覆盖：`enhance_override` 云端 JSON 配置，格式 `{"笔记本标题": {"summary_model": "cloud|ollama|none", "tags_model": "cloud|ollama|none"}}`，`_resolve_enhance_config()` 合并全局配置与笔记本级覆盖
 - 用户管理：`users`、`sessions`、`audit_log`、`qa_history`、`chat_sessions`
 
-Center client 拆分为 5 个独立文件 (`aimod/`): `CacheClient`（纯远程，无本地回退），`ProbeCacheClient`（远程优先+本地回退，待清理），`HistoryClient`（远程优先+本地回退），`ProcessStateClient`（纯远程），`UserManagerClient`（远程优先+本地回退）。URL 发现逻辑：云端 `joplinai_center_url` 未配置则本机为生产主机走 `127.0.0.1:5003`。
+Center client 拆分为 4 个独立文件 (`aimod/`): `CacheClient`（纯远程，无本地回退），`HistoryClient`（远程优先+本地回退），`ProcessStateClient`（纯远程），`UserManagerClient`（远程优先+本地回退）。非 center_api 模块（`report_writer`、`user_manager`）通过设备 ID 判断本机是否数据中心：比对 `center_host_deviceid` → 匹配则直连 `127.0.0.1:5003`，否则走云端配置 `joplinai_center_url`；URL 为空时回退 localhost。
 
 ### Source Layout
 
@@ -254,7 +254,7 @@ Pre-commit (`.pre-commit-config.yaml`): jupytext 误注释检测 + flake8。
 
 Main config stored in cloud-synced Joplin note (INI format). Local override: `data/joplinai.ini`. Key settings: Joplin API token, Ollama model name, embedding model, ChromaDB path, Q&A prompts, user session settings.
 
-**数据中心配置**：`joplinai_center_url`（非生产主机配，指向 TC 公网IP；生产主机不配则自动走 localhost）、`joplinai_center_api_key`（认证密钥）。
+**数据中心配置**：`center_host_deviceid`（数据中心主机的设备 ID，客户端通过对比本机 deviceid 自动判断是否直连 localhost）、`joplinai_center_url`（非数据中心主机配，指向 TC 公网IP；未配则回退 localhost）、`joplinai_center_api_key`（认证密钥）。
 
 **模型配置**：`qa_ollama_chat_model`（本地 QA 对话模型，当前 `none` 无本地回退）、`enhance_ollama_chat_model`（Ollama 标签/分类小模型）、`ollama_embedding_model`（嵌入模型）、`vision_model`（视觉模型）、`cloud_model` / `summary_model` / `tags_model`（cloud/ollama/none 三态切换）、`cloud_api_url` / `cloud_api_key`（云端 API 端点/密钥，支持切换提供者）。详见上方 Model Strategy 章节。QA 检索链路详见 `docs/QA_PIPELINE.md`。
 
