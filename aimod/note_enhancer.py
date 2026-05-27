@@ -88,12 +88,24 @@ __all__ = [
 ]
 
 def get_cache_manager():
-    """获取缓存管理器 — 云端未配 URL 则本机为生产主机走 localhost"""
+    """获取缓存管理器 — 本机为数据中心时走 localhost，否则走云端 URL"""
     global _CACHE_MANAGER
     if _CACHE_MANAGER is not None:
         return _CACHE_MANAGER
 
-    remote_url = getinivaluefromcloud("joplinai", "joplinai_center_url")
+    center_deviceid = getinivaluefromcloud("joplinai", "center_host_deviceid")
+    if center_deviceid:
+        try:
+            from func.getid import getdeviceid
+            local_id = getdeviceid()
+            if local_id and str(local_id) == str(center_deviceid):
+                remote_url = "http://127.0.0.1:5003"
+            else:
+                remote_url = getinivaluefromcloud("joplinai", "joplinai_center_url")
+        except ImportError:
+            remote_url = getinivaluefromcloud("joplinai", "joplinai_center_url")
+    else:
+        remote_url = getinivaluefromcloud("joplinai", "joplinai_center_url")
     if not remote_url:
         remote_url = "http://127.0.0.1:5003"
     api_key = getinivaluefromcloud("joplinai", "joplinai_center_api_key")
