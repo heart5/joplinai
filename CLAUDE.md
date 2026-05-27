@@ -264,11 +264,11 @@ When local Joplin server is unavailable, `jpfuncs.getapi()` can fall back to a r
 
 ```ini
 [joplin]
-fallback_url = http://<remote-host>:41184
-fallback_token = <remote-api-token>
+fallback_url = https://joplin.xiloong.fans
+fallback_token = <api-token>
 ```
 
-This is useful in multi-server deployments for resilience — if one machine's Joplin process is down, joplinai can still function by hitting the other server's Joplin API.
+This is useful in multi-server deployments for resilience — if one machine's Joplin process is down, joplinai can still function by hitting the other server's Joplin API. The server is accessed via Apache reverse proxy (HTTPS → 127.0.0.1:41184), so external clients should use `https://joplin.xiloong.fans` rather than `http://<ip>:41184`.
 
 ## Dependencies (no requirements.txt — install manually)
 
