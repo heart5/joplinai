@@ -4,8 +4,7 @@ Requires=wc-health-check.service
 
 [Timer]
 OnCalendar=*-*-* 03:57
-OnCalendar=*-*-* 12:57
-OnCalendar=*-*-* 21:57
+OnCalendar=*-*-* 15:57
 RandomizedDelaySec=180
 Persistent=true
 
