@@ -39,9 +39,9 @@ All services are Flask apps。No Docker/containerization in production (docker-c
 
 | Service | File | Port | Host | Purpose |
 |---------|------|------|------|---------|
-| Web Portal | `joplin_web_app.py` | 127.0.0.1:5001 | HCX | User login, Q&A chat UI, admin panel |
+| Web Portal | `joplin_web_app.py` | 127.0.0.1:5001 | HCX | User login, Q&A chat UI, admin panel, 综合运行面板 |
 | Q&A API | `joplin_qa_api.py` | 127.0.0.1:5000 | HCX | Internal HTTP API for vector search + LLM Q&A |
-| Center API | `aimod/center_api/` | 0.0.0.0:5003 | TC | Centralized data service for multi-host sharing |
+| Center API | `aimod/center_api/` | 0.0.0.0:5003 | TC | Centralized data service for multi-host sharing, 含 monitor/system 端点供面板查询 |
 | Vectorization Engine | `joplinai.py` | — | TC | 分块编排 / AI增强 / 写 ChromaDB / 报告。joplinai-sync.timer 每8小时触发 |
 | Embedding Inference | Ollama | 11434 | HCX | 嵌入向量生成 (`dengcao/bge-large-zh-v1.5`)，TC 经公网 IP 远程调用 |
 
@@ -78,7 +78,8 @@ src/                    # 核心模块 (jupytext paired with .ipynb)
 │   ├── routes.py           # 页面路由
 │   ├── auth.py             # 用户认证
 │   ├── admin.py            # 管理面板
-│   └── api.py              # 内部 API
+│   ├── api.py              # 内部 API
+│   └── dashboard_routes.py # 综合运行面板（聚合 TC monitor/system API）
 ├── __init__.py
 tests/                  # 测试目录
 joplinai.py             # 向量化 CLI 入口 + joplinai.ipynb
@@ -100,7 +101,9 @@ aimod/                  # AI 核心包
 │   ├── cache_routes.py     # /cache/* 端点
 │   ├── history_routes.py   # /history/* 端点
 │   ├── state_routes.py     # /state/* 端点
-│   └── user_routes.py      # /users/* /auth/* 端点
+│   ├── user_routes.py      # /users/* /auth/* 端点
+│   ├── monitor_routes.py   # /monitor/* 端点（笔记监测数据）
+│   └── system_routes.py    # /system/* 端点（系统资源/微信健康）
 func/                   # 工具子模块 (git submodule heart5/func)
 static/                 # 前端静态资源
 templates/              # Jinja2 模板
@@ -123,7 +126,8 @@ log/                    # 日志 (gitignored)
 - `state_client.py` — ProcessStateClient，笔记处理状态远程存储（纯远程，无本地 fallback）
 - `user_client.py` — UserManagerClient，用户管理远程存储
 - `report_writer.py` — 统一报告生成（在 `src/`）
-- `center_api/` — 数据中心 Flask 包（5 个端点蓝图）
+- `center_api/` — 数据中心 Flask 包（6 个端点蓝图：cache, history, state, user, monitor, system）
+- `dashboard_routes.py` — 综合运行面板，聚合 TC monitor/system API + HCX 本地资源状态（在 `src/web_app/`）
 - `__init__.py` — `get_logger(name)` 统一日志工厂，自动继承 func/logme 的 handler/level
 
 ### Utility Submodule (`func/`)
