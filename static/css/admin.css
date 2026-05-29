@@ -11,3 +11,25 @@ body {
 }
 #sessionDetailBody p { margin-bottom: 0.5rem; }
 #sessionDetailBody a { color: #0d6efd; }
+
+/* 运行面板 */
+.status-card { min-height: 120px; }
+.status-card .card-body { padding: 0.75rem 1rem; }
+.status-ok { color: #198754; }
+.status-warn { color: #fd7e14; }
+.status-bad { color: #dc3545; }
+.status-unknown { color: #6c757d; }
+.resource-bar { height: 8px; border-radius: 4px; }
+.section-title { font-size: 0.9rem; font-weight: 600; color: #6c757d; text-transform: uppercase; letter-spacing: 0.5px; }
+.heat-cell { width: 14px; height: 14px; border-radius: 2px; display: inline-block; margin: 1px; }
+.heat-0 { background-color: #ebedf0; }
+.heat-1 { background-color: #9be9a8; }
+.heat-2 { background-color: #40c463; }
+.heat-3 { background-color: #30a14e; }
+.heat-4 { background-color: #216e39; }
+.heat-person { font-size: 0.8rem; white-space: nowrap; min-width: 50px; }
+.heat-row { display: flex; align-items: center; margin-bottom: 2px; }
+.mp-csv { font-family: monospace; font-size: 0.8rem; background: #f8f9fa; padding: 6px 10px; border-radius: 4px; word-break: break-all; user-select: all; cursor: pointer; }
+.err-line { font-size: 0.75rem; font-family: monospace; white-space: pre-wrap; color: #dc3545; }
+.resource-card { min-height: 100px; }
+.gauge-circle { width: 80px; height: 80px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1.1rem; font-weight: 700; }

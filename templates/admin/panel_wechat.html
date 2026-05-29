@@ -1,0 +1,125 @@
+{% extends "admin/layout.html" %}
+{% block title %}运行面板 · 微信系统{% endblock %}
+{% block content %}
+<style>
+.mp-csv { font-family: monospace; font-size: 0.8rem; background: #f8f9fa; padding: 6px 10px; border-radius: 4px; word-break: break-all; user-select: all; cursor: pointer; }
+.err-line { font-size: 0.75rem; font-family: monospace; white-space: pre-wrap; color: #dc3545; }
+</style>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h4 class="mb-0"><i class="bi bi-wechat"></i> 微信系统</h4>
+    <span class="text-muted small" id="refresh-label"></span>
+</div>
+
+<ul class="nav nav-tabs mb-3">
+    <li class="nav-item"><a class="nav-link" href="{{ url_for('dashboard.panel_overview') }}">总览</a></li>
+    <li class="nav-item"><a class="nav-link" href="{{ url_for('dashboard.panel_monitor') }}">笔记监测</a></li>
+    <li class="nav-item"><a class="nav-link active" href="{{ url_for('dashboard.panel_wechat') }}">微信系统</a></li>
+    <li class="nav-item"><a class="nav-link" href="{{ url_for('dashboard.panel_system') }}">系统资源</a></li>
+</ul>
+
+<div class="row">
+    <div class="col-md-6">
+        <!-- 进程状态 -->
+        <div class="card mb-3">
+            <div class="card-header fw-bold small">进程状态</div>
+            <div class="card-body py-2" id="proc-status">加载中...</div>
+        </div>
+        <!-- 活跃度 -->
+        <div class="card mb-3">
+            <div class="card-header fw-bold small">消息流活跃度</div>
+            <div class="card-body py-2" id="activity">加载中...</div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <!-- 错误扫描 -->
+        <div class="card mb-3">
+            <div class="card-header fw-bold small">错误扫描</div>
+            <div class="card-body py-2" id="errors">加载中...</div>
+        </div>
+        <!-- 未配置公众号 -->
+        <div class="card mb-3">
+            <div class="card-header fw-bold small">未配置公众号</div>
+            <div class="card-body py-2" id="unconfig-mp">加载中...</div>
+        </div>
+        <!-- 综合评估 -->
+        <div class="card mb-3">
+            <div class="card-header fw-bold small">综合评估</div>
+            <div class="card-body py-2" id="assessment">加载中...</div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function renderWechat(data) {
+    var d = data || {};
+    var proc = d.process || {};
+    var logs = d.logs || {};
+    var mp = d.unconfigured_mps || {};
+
+    // process
+    var pOk = proc.ok;
+    var phtml = '<table class="table table-sm small mb-0"><tbody>';
+    phtml += '<tr><td class="text-muted">状态</td><td>' + (pOk ? '<span class="badge bg-success">运行中</span>' : '<span class="badge bg-danger">未运行</span>') + '</td></tr>';
+    if (pOk) {
+        phtml += '<tr><td class="text-muted">PID</td><td>' + proc.pid + '</td></tr>';
+        phtml += '<tr><td class="text-muted">内存(RSS)</td><td>' + proc.rss_mb + ' MB</td></tr>';
+        phtml += '<tr><td class="text-muted">虚拟内存</td><td>' + proc.vsz_mb + ' MB</td></tr>';
+        phtml += '<tr><td class="text-muted">CPU</td><td>' + proc.cpu_pct + '%</td></tr>';
+        phtml += '<tr><td class="text-muted">运行时长</td><td>' + proc.duration + '</td></tr>';
+        phtml += '<tr><td class="text-muted">会话起点</td><td>' + proc.session_start + '</td></tr>';
+    }
+    phtml += '</tbody></table>';
+    document.getElementById('proc-status').innerHTML = phtml;
+
+    // activity
+    var ahtml = '<table class="table table-sm small mb-0"><tbody>';
+    ahtml += '<tr><td class="text-muted">dispatch 分发</td><td><b>' + (logs.dispatch_count || 0) + '</b></td></tr>';
+    ahtml += '<tr><td class="text-muted">fileetc_reply</td><td><b>' + (logs.filereply_count || 0) + '</b></td></tr>';
+    ahtml += '<tr><td class="text-muted">sharing_reply</td><td><b>' + (logs.sharing_count || 0) + '</b></td></tr>';
+    ahtml += '<tr><td class="text-muted">收消息/文件/图片</td><td><b>' + (logs.message_count || 0) + '</b></td></tr>';
+    ahtml += '<tr><td class="text-muted">扫描行数</td><td>' + (logs.scanned_lines || 0) + '</td></tr>';
+    ahtml += '</tbody></table>';
+    document.getElementById('activity').innerHTML = ahtml;
+
+    // errors
+    var ehtml = '<p class="small mb-1">错误/异常: <b class="' + ((logs.error_count||0) > 10 ? 'text-danger' : '') + '">' + (logs.error_count || 0) + '</b> 条</p>';
+    if ((logs.recent_errors || []).length > 0) {
+        ehtml += '<div class="mb-0">';
+        (logs.recent_errors || []).forEach(function(e){
+            ehtml += '<div class="err-line mb-1">' + (e || '').substring(0, 200) + '</div>';
+        });
+        ehtml += '</div>';
+    }
+    document.getElementById('errors').innerHTML = ehtml;
+
+    // unconfigured MPs
+    var mhtml = '<p class="small mb-1">共 <b>' + (mp.total || 0) + '</b> 个</p>';
+    if ((mp.names || []).length > 0) {
+        mhtml += '<div class="mp-csv small mb-2" title="点击复制" onclick="navigator.clipboard.writeText(this.textContent)">' + (mp.csv || '无') + '</div>';
+        var ign = mp.ignored || [];
+        var sha = mp.sharing || [];
+        if (ign.length > 0) mhtml += '<p class="small mb-1 text-muted">ignoredmplist拦截: ' + ign.join(', ') + '</p>';
+        if (sha.length > 0) mhtml += '<p class="small mb-1 text-muted">分享未匹配: ' + sha.join(', ') + '</p>';
+    }
+    document.getElementById('unconfig-mp').innerHTML = mhtml;
+
+    // assessment
+    var assess = d.assessment || '无数据';
+    var aCls = assess.indexOf('健康') >= 0 ? 'text-success' : assess.indexOf('少量') >= 0 ? 'text-warning' : 'text-danger';
+    document.getElementById('assessment').innerHTML = '<p class="mb-0 ' + aCls + '"><b>' + assess + '</b></p>';
+
+    document.getElementById('refresh-label').textContent = '刷新于 ' + new Date().toLocaleTimeString();
+}
+
+function loadWechat() {
+    fetch('{{ url_for("dashboard.api_wechat_health") }}')
+        .then(r => r.json())
+        .then(renderWechat)
+        .catch(function(e){ console.error(e); });
+}
+loadWechat();
+</script>
+{% endblock %}

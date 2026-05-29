@@ -48,10 +48,15 @@ def create_app():
 
     # Register Blueprints
     from src.web_app.admin_routes import admin_bp
+    from src.web_app.dashboard_routes import dashboard_bp
     from src.web_app.qa_routes import qa_bp
 
     app.register_blueprint(qa_bp)
     app.register_blueprint(admin_bp)
+    app.register_blueprint(dashboard_bp)
+
+    app.config["TC_API_URL"] = "https://api.xiloong.fans"
+    app.config["TC_API_KEY"] = getkeysfromcloud().get("tc", "")
 
     return app
 

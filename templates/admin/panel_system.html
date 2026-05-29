@@ -1,0 +1,113 @@
+{% extends "admin/layout.html" %}
+{% block title %}运行面板 · 系统资源{% endblock %}
+{% block content %}
+<style>
+.resource-card { min-height: 100px; }
+.gauge-circle {
+    width: 80px; height: 80px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.1rem; font-weight: 700;
+}
+</style>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h4 class="mb-0"><i class="bi bi-cpu"></i> 系统资源</h4>
+    <span class="text-muted small" id="refresh-label"></span>
+</div>
+
+<ul class="nav nav-tabs mb-3">
+    <li class="nav-item"><a class="nav-link" href="{{ url_for('dashboard.panel_overview') }}">总览</a></li>
+    <li class="nav-item"><a class="nav-link" href="{{ url_for('dashboard.panel_monitor') }}">笔记监测</a></li>
+    <li class="nav-item"><a class="nav-link" href="{{ url_for('dashboard.panel_wechat') }}">微信系统</a></li>
+    <li class="nav-item"><a class="nav-link active" href="{{ url_for('dashboard.panel_system') }}">系统资源</a></li>
+</ul>
+
+<!-- 腾讯云 -->
+<div class="mb-3 small fw-bold text-muted">腾讯云 tc</div>
+<div class="row mb-3" id="tc-system">
+    <div class="col-md-3 col-6 mb-2"><div class="card resource-card border-secondary"><div class="card-body text-center text-muted py-3">加载中...</div></div></div>
+    <div class="col-md-3 col-6 mb-2"><div class="card resource-card border-secondary"><div class="card-body text-center text-muted py-3">加载中...</div></div></div>
+    <div class="col-md-3 col-6 mb-2"><div class="card resource-card border-secondary"><div class="card-body text-center text-muted py-3">加载中...</div></div></div>
+    <div class="col-md-3 col-6 mb-2"><div class="card resource-card border-secondary"><div class="card-body text-center text-muted py-3">加载中...</div></div></div>
+</div>
+
+<!-- tc 服务详情 -->
+<div class="card mb-3">
+    <div class="card-header fw-bold small">tc systemd 服务</div>
+    <div class="card-body py-2" id="tc-services">加载中...</div>
+</div>
+
+<!-- 恒创云 -->
+<div class="mb-3 small fw-bold text-muted">恒创云 hcx</div>
+<div class="row mb-3" id="hcx-system">
+    <div class="col-md-3 col-6 mb-2"><div class="card resource-card border-secondary"><div class="card-body text-center text-muted py-3">加载中...</div></div></div>
+    <div class="col-md-3 col-6 mb-2"><div class="card resource-card border-secondary"><div class="card-body text-center text-muted py-3">加载中...</div></div></div>
+    <div class="col-md-3 col-6 mb-2"><div class="card resource-card border-secondary"><div class="card-body text-center text-muted py-3">加载中...</div></div></div>
+    <div class="col-md-3 col-6 mb-2"><div class="card resource-card border-secondary"><div class="card-body text-center text-muted py-3">加载中...</div></div></div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function gaugeColor(pct) {
+    if (pct > 90) return '#dc3545';
+    if (pct > 70) return '#fd7e14';
+    return '#198754';
+}
+function gaugeHtml(label, pct, detail) {
+    var c = gaugeColor(pct);
+    return '<div class="gauge-circle mx-auto mb-1" style="border: 5px solid ' + c + '; color: ' + c + '">' + pct + '%</div>' +
+        '<div class="small fw-bold">' + label + '</div>' +
+        '<div class="small text-muted">' + (detail || '') + '</div>';
+}
+function svcBadge(s) {
+    var cls = s === 'active' ? 'bg-success' : s === 'inactive' ? 'bg-secondary' : 'bg-warning';
+    return '<span class="badge ' + cls + ' me-1 mb-1">' + s + '</span>';
+}
+
+function renderSystem(data) {
+    // from /api/panel/status aggregated endpoint
+    var tc = data.tc || {};
+    var hcx = data.hcx || {};
+    var hea = tc.health || {};
+    var tsvc = tc.services || {};
+    var hres = hcx.resources || {};
+    var hsvc = hcx.services || {};
+
+    // tc resources
+    var tcHtml = '';
+    if (hea.cpu) tcHtml += '<div class="col-md-3 col-6 mb-2"><div class="card resource-card"><div class="card-body text-center py-3">' + gaugeHtml('CPU', hea.cpu.pct, hea.cpu.load_1 + ' / ' + hea.cpu.cores + '核') + '</div></div></div>';
+    if (hea.memory) tcHtml += '<div class="col-md-3 col-6 mb-2"><div class="card resource-card"><div class="card-body text-center py-3">' + gaugeHtml('内存', hea.memory.used_pct, hea.memory.used_mb + '/' + hea.memory.total_mb + 'MB') + '</div></div></div>';
+    if (hea.disk) tcHtml += '<div class="col-md-3 col-6 mb-2"><div class="card resource-card"><div class="card-body text-center py-3">' + gaugeHtml('磁盘', hea.disk.used_pct, hea.disk.used + '/' + hea.disk.total) + '</div></div></div>';
+    if (hea.uptime) tcHtml += '<div class="col-md-3 col-6 mb-2"><div class="card resource-card"><div class="card-body text-center py-3"><div class="small text-muted">运行时间</div><div class="fw-bold">' + hea.uptime + '</div></div></div></div>';
+    document.getElementById('tc-system').innerHTML = tcHtml || '<div class="col-12 text-muted small">不可达</div>';
+
+    // tc services
+    var svcHtml = '';
+    var svcNames = ['joplinai-center-api','joplinai-web-app','joplinai-sync','monitor-collect','monitor-report','monitor-report-full','wc-health-check','apache2','fail2ban','sshd','docker'];
+    svcNames.forEach(function(s){
+        var st = tsvc[s] || 'unknown';
+        svcHtml += '<span class="me-2">' + s + ' ' + svcBadge(st) + '</span>';
+    });
+    document.getElementById('tc-services').innerHTML = svcHtml || '<span class="text-muted small">无数据</span>';
+
+    // hcx resources
+    var hcxHtml = '';
+    if (hres.cpu) hcxHtml += '<div class="col-md-3 col-6 mb-2"><div class="card resource-card"><div class="card-body text-center py-3">' + gaugeHtml('CPU', hres.cpu.pct, hres.cpu.load_1 + ' / ' + hres.cpu.cores + '核') + '</div></div></div>';
+    if (hres.memory) hcxHtml += '<div class="col-md-3 col-6 mb-2"><div class="card resource-card"><div class="card-body text-center py-3">' + gaugeHtml('内存', hres.memory.used_pct, hres.memory.used_mb + '/' + hres.memory.total_mb + 'MB') + '</div></div></div>';
+    if (hres.disk) hcxHtml += '<div class="col-md-3 col-6 mb-2"><div class="card resource-card"><div class="card-body text-center py-3">' + gaugeHtml('磁盘', hres.disk.used_pct, hres.disk.used + '/' + hres.disk.total) + '</div></div></div>';
+    if (hres.uptime) hcxHtml += '<div class="col-md-3 col-6 mb-2"><div class="card resource-card"><div class="card-body text-center py-3"><div class="small text-muted">运行时间</div><div class="fw-bold">' + hres.uptime + '</div></div></div></div>';
+    document.getElementById('hcx-system').innerHTML = hcxHtml || '<div class="col-12 text-muted small">N/A</div>';
+
+    document.getElementById('refresh-label').textContent = '刷新于 ' + new Date().toLocaleTimeString();
+}
+
+function loadSystem() {
+    fetch('{{ url_for("dashboard.api_status") }}')
+        .then(r => r.json())
+        .then(renderSystem)
+        .catch(function(e){ console.error(e); });
+}
+loadSystem();
+</script>
+{% endblock %}

@@ -262,12 +262,16 @@ def create_app():
 
     from aimod.center_api.cache_routes import cache_bp
     from aimod.center_api.history_routes import history_bp
+    from aimod.center_api.monitor_routes import monitor_bp
     from aimod.center_api.state_routes import state_bp
+    from aimod.center_api.system_routes import system_bp
     from aimod.center_api.user_routes import user_bp
 
     app.register_blueprint(cache_bp)
     app.register_blueprint(history_bp)
+    app.register_blueprint(monitor_bp)
     app.register_blueprint(state_bp)
+    app.register_blueprint(system_bp)
     app.register_blueprint(user_bp)
 
     @app.route("/health")
