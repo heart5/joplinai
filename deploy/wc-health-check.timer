@@ -1,0 +1,11 @@
+[Unit]
+Description=WeChat Health Check Timer — 每9小时健康巡检
+Requires=wc-health-check.service
+
+[Timer]
+OnCalendar=*-*-* 03:57/9:00
+RandomizedDelaySec=180
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,13 @@
+[Unit]
+Description=WeChat Health Check — 微信系统健康巡检
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=baiyefeng
+Group=club
+WorkingDirectory=/home/baiyefeng/codebase/happyjoplin
+ExecStart=/bin/bash work/wc_health_check.sh
+StandardOutput=journal
+StandardError=journal
