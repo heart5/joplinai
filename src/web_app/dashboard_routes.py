@@ -48,7 +48,7 @@ def _hcx_service_status():
     result = {}
     for svc in r.stdout.splitlines():
         svc = svc.strip()
-        if not svc or "@" in svc or svc.endswith((".timer", ".socket", ".scope")):
+        if not svc or "@" in svc or svc == "sshd" or svc.endswith((".timer", ".socket", ".scope")):
             continue
         try:
             r_type = subprocess.run(

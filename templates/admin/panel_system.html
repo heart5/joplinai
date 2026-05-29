@@ -8,6 +8,13 @@
     display: flex; align-items: center; justify-content: center;
     font-size: 0.9rem; font-weight: 700;
 }
+.svc-entry {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 5px 10px; border-radius: 4px; margin-bottom: 2px;
+    font-size: 0.85rem;
+}
+.svc-entry:nth-child(odd) { background: #f8f9fa; }
+.svc-name { font-weight: 500; }
 </style>
 
 <div class="d-flex justify-content-between align-items-center mb-3">
@@ -102,7 +109,7 @@ function renderSystem(data) {
     svcKeys.forEach(function(s){
         var info = tsvc[s] || 'unknown';
         var st = svcStatus(info);
-        svcHtml += '<span class="me-2">' + s + ' ' + svcBadge(st) + svcDuration(info) + '</span>';
+        svcHtml += '<div class="svc-entry"><span class="svc-name">' + s + '</span><span>' + svcBadge(st) + svcDuration(info) + '</span></div>';
     });
     document.getElementById('tc-services').innerHTML = svcHtml || '<span class="text-muted small">无数据</span>';
 
@@ -120,7 +127,7 @@ function renderSystem(data) {
     hsvcKeys.forEach(function(s){
         var info = hsvc[s] || 'unknown';
         var st = svcStatus(info);
-        hsvcHtml += '<span class="me-2">' + s + ' ' + svcBadge(st) + svcDuration(info) + '</span>';
+        hsvcHtml += '<div class="svc-entry"><span class="svc-name">' + s + '</span><span>' + svcBadge(st) + svcDuration(info) + '</span></div>';
     });
     document.getElementById('hcx-services').innerHTML = hsvcHtml || '<span class="text-muted small">无数据</span>';
 
