@@ -10,8 +10,15 @@
 .heat-4 { background-color: #216e39; }
 .heat-person { font-size: 0.8rem; white-space: nowrap; min-width: 50px; }
 .heat-row { display: flex; align-items: center; margin-bottom: 2px; }
-.quote-card { border-left: 3px solid #198754; }
-.alert-item { font-size: 0.85rem; }
+.heat-wrap { overflow-x: auto; scroll-behavior: smooth; }
+.person-card { border-left: 4px solid #6c757d; min-height: 90px; }
+.person-card.active-today { border-left-color: #198754; }
+.person-card.active-recent { border-left-color: #fd7e14; }
+.person-card.active-stale { border-left-color: #dc3545; }
+.person-stat { font-size: 1.1rem; font-weight: 700; }
+.person-label { font-size: 0.7rem; color: #6c757d; text-transform: uppercase; }
+.spark-sample { font-size: 0.85rem; border-bottom: 1px solid #eee; padding: 6px 0; }
+.spark-sample:last-child { border-bottom: none; }
 </style>
 
 <div class="d-flex justify-content-between align-items-center mb-3">
@@ -26,6 +33,11 @@
     <li class="nav-item"><a class="nav-link" href="{{ url_for('dashboard.panel_system') }}">系统资源</a></li>
 </ul>
 
+<!-- 人员更新状态卡片 -->
+<div class="row mb-3" id="person-cards">
+    <div class="col-12 text-muted small py-3 text-center">加载中...</div>
+</div>
+
 <div class="row">
     <div class="col-md-8">
         <div class="card mb-3">
@@ -33,21 +45,21 @@
                 <span class="fw-bold small">写作热力图（12周）</span>
                 <span class="text-muted small" id="heatmap-range"></span>
             </div>
-            <div class="card-body py-2" id="heatmap-container" style="overflow-x:auto">
+            <div class="card-body py-2 heat-wrap" id="heatmap-container">
                 <div class="text-muted small text-center py-3">加载中...</div>
             </div>
         </div>
     </div>
     <div class="col-md-4">
-        <!-- 火花摘语 -->
+        <!-- 摘语卡片 -->
         <div class="card mb-3">
-            <div class="card-header fw-bold small">今日火花摘语</div>
-            <div class="card-body py-2" id="spark-today">加载中...</div>
+            <div class="card-header fw-bold small">火花摘语</div>
+            <div class="card-body py-2" id="spark-card">加载中...</div>
         </div>
-        <!-- 摘语池 -->
-        <div class="card mb-3">
-            <div class="card-header fw-bold small">摘语池概览</div>
-            <div class="card-body py-2" id="spark-pool">加载中...</div>
+        <!-- 非团队人员 -->
+        <div class="card mb-3" id="others-card" style="display:none">
+            <div class="card-header fw-bold small text-muted">其他活跃作者</div>
+            <div class="card-body py-2" id="others-body"></div>
         </div>
     </div>
 </div>
@@ -55,6 +67,9 @@
 
 {% block extra_scripts %}
 <script>
+// team_persons 由服务端传入
+var TEAM_PERSONS = {{ team_persons | tojson }};
+
 function heatClass(wc) {
     if (!wc || wc <= 0) return 'heat-0';
     if (wc < 100) return 'heat-1';
@@ -63,52 +78,158 @@ function heatClass(wc) {
     return 'heat-4';
 }
 
+function daysAgo(d) {
+    if (!d) return 999;
+    var today = new Date(); today.setHours(0,0,0,0);
+    return Math.floor((today - new Date(d)) / 86400000);
+}
+
+function renderPersonCards(pdata, dates) {
+    // pdata: {person: {date: word_count}}
+    var recentDays = dates.slice(-14); // last 14 days
+    var cards = '';
+    for (var p = 0; p < TEAM_PERSONS.length; p++) {
+        var person = TEAM_PERSONS[p];
+        var daily = pdata[person] || {};
+        var totalWc = 0, activeDays = 0, lastDate = '';
+        for (var d = 0; d < recentDays.length; d++) {
+            var wc = daily[recentDays[d]] || 0;
+            if (wc > 0) { totalWc += wc; activeDays++; lastDate = recentDays[d]; }
+        }
+        var ago = daysAgo(lastDate);
+        var cls = ago <= 0 ? 'active-today' : ago <= 2 ? 'active-recent' : 'active-stale';
+        var statusText = ago <= 0 ? '今天更新' : ago <= 2 ? ago + '天前' : (lastDate ? lastDate.substring(5) : '无记录');
+        cards += '<div class="col-md-2 col-6 mb-2">' +
+            '<div class="card person-card ' + cls + '"><div class="card-body py-2">' +
+            '<div class="fw-bold small mb-1">' + person + '</div>' +
+            '<div class="person-stat">' + (totalWc >= 1000 ? (totalWc/1000).toFixed(1) + 'k' : totalWc) + '</div>' +
+            '<div class="person-label">近14天字数 · ' + activeDays + '天活跃</div>' +
+            '<div class="small text-muted mt-1">' + statusText + '</div>' +
+            '</div></div></div>';
+    }
+    document.getElementById('person-cards').innerHTML = cards || '<div class="col-12 text-muted small text-center">无团队人员数据</div>';
+}
+
 function renderHeatmap(data) {
-    if (!data.data) { document.getElementById('heatmap-container').innerHTML = '<div class="text-danger small text-center py-3">' + (data.error || '无数据') + '</div>'; return; }
+    if (!data.data) {
+        document.getElementById('heatmap-container').innerHTML =
+            '<div class="text-danger small text-center py-3">' + (data.error || '无数据') + '</div>';
+        return;
+    }
     document.getElementById('heatmap-range').textContent = data.start_date + ' ~ ' + data.end_date;
-    var dates = data.dates, persons = data.persons, pdata = data.data;
+
+    var dates = data.dates.slice().reverse(); // 最新日期在最左
+    var pdata = data.data;
+
     var html = '<div style="display:inline-block">';
-    // header: month labels
+    // month headers
     html += '<div class="heat-row"><span class="heat-person"></span>';
     var lastMonth = '';
-    var monthHeaders = '';
     for (var i = 0; i < dates.length; i++) {
         var m = dates[i].substring(5, 7);
         if (m !== lastMonth) {
-            monthHeaders += '<span style="display:inline-block;width:' + (14 + 2) + 'px;font-size:0.6rem;text-align:left">' + m + '月</span>';
+            html += '<span style="display:inline-block;width:' + (14+2) + 'px;font-size:0.6rem;text-align:left">' + m + '月</span>';
             lastMonth = m;
         } else {
-            monthHeaders += '<span style="display:inline-block;width:' + (14 + 2) + 'px"></span>';
+            html += '<span style="display:inline-block;width:' + (14+2) + 'px"></span>';
         }
     }
-    html += monthHeaders + '</div>';
-    for (var p = 0; p < persons.length; p++) {
-        html += '<div class="heat-row"><span class="heat-person text-muted">' + persons[p] + '</span>';
+    html += '</div>';
+
+    // team member rows only
+    for (var p = 0; p < TEAM_PERSONS.length; p++) {
+        html += '<div class="heat-row"><span class="heat-person text-muted">' + TEAM_PERSONS[p] + '</span>';
         for (var d = 0; d < dates.length; d++) {
-            var wc = (pdata[persons[p]] || {})[dates[d]] || 0;
-            html += '<span class="heat-cell ' + heatClass(wc) + '" title="' + persons[p] + ' ' + dates[d] + ': ' + wc + '字"></span>';
+            var wc = (pdata[TEAM_PERSONS[p]] || {})[dates[d]] || 0;
+            html += '<span class="heat-cell ' + heatClass(wc) + '" title="' + TEAM_PERSONS[p] + ' ' + dates[d] + ': ' + wc + '字"></span>';
         }
         html += '</div>';
     }
     html += '</div>';
-    document.getElementById('heatmap-container').innerHTML = html;
+    var container = document.getElementById('heatmap-container');
+    container.innerHTML = html;
+    // auto-scroll to today (leftmost = latest in reversed order)
+    container.scrollLeft = 0;
+}
+
+function renderSpark(data) {
+    var html = '';
+    if (data.total != null) {
+        html += '<p class="small mb-2">摘语总数: <b>' + data.total + '</b>';
+        if (data.by_person) {
+            var badges = '';
+            for (var p in data.by_person) {
+                badges += '<span class="badge bg-light text-dark ms-1">' + p + ' ' + data.by_person[p] + '</span>';
+            }
+            html += badges;
+        }
+        html += '</p>';
+    }
+    if (data.samples && data.samples.length) {
+        html += '<div class="small text-muted mb-1">示例摘语:</div>';
+        for (var i = 0; i < data.samples.length; i++) {
+            var s = data.samples[i];
+            html += '<div class="spark-sample">' +
+                '<span class="badge bg-success me-1 small">' + s.person + '</span>' +
+                '<span class="text-muted small">' + (s.source_date || '') + '</span>' +
+                '<div class="mt-1">' + s.text + '</div></div>';
+        }
+    }
+    document.getElementById('spark-card').innerHTML = html || '<span class="text-muted small">暂无摘语数据</span>';
+}
+
+function renderOthers(data, pdata, dates) {
+    // Find non-team persons
+    var persons = data.persons || [];
+    var others = [];
+    for (var i = 0; i < persons.length; i++) {
+        if (TEAM_PERSONS.indexOf(persons[i]) < 0) {
+            others.push(persons[i]);
+        }
+    }
+    if (!others.length) {
+        document.getElementById('others-card').style.display = 'none';
+        return;
+    }
+    document.getElementById('others-card').style.display = '';
+    var recentDays = dates.slice(-14);
+    var html = '';
+    for (var o = 0; o < others.length; o++) {
+        var person = others[o];
+        var daily = pdata[person] || {};
+        var totalWc = 0, lastDate = '';
+        for (var d = 0; d < recentDays.length; d++) {
+            var wc = daily[recentDays[d]] || 0;
+            if (wc > 0) { totalWc += wc; lastDate = recentDays[d]; }
+        }
+        html += '<div class="mb-2 pb-2 border-bottom">' +
+            '<span class="fw-bold small">' + person + '</span>' +
+            '<span class="text-muted small ms-2">' + (totalWc >= 1000 ? (totalWc/1000).toFixed(1) + 'k字' : totalWc + '字') + '</span>' +
+            '<span class="text-muted small ms-2">最后: ' + (lastDate ? lastDate.substring(5) : '无') + '</span>' +
+            '</div>';
+    }
+    document.getElementById('others-body').innerHTML = html;
 }
 
 function loadMonitor() {
-    fetch('{{ url_for("dashboard.api_monitor_heatmap") }}').then(r => r.json()).then(renderHeatmap).catch(console.error);
-    fetch('{{ url_for("dashboard.api_status") }}').then(r => r.json()).then(function(data){
-        var mon = ((data.tc || {}).monitor || {});
-        var q = '';
-        if (mon.active_notes != null) q += '<p class="small mb-1">活跃笔记: <b>' + mon.active_notes + '</b> 篇 · ' + (mon.person_count || 0) + ' 人</p>';
-        if (mon.last_collect) q += '<p class="small mb-1">最后采集: ' + mon.last_collect.substring(0, 19) + '</p>';
-        if (mon.pending_changes != null) q += '<p class="small mb-1">待处理变更: ' + mon.pending_changes + '</p>';
-        if (mon.unresolved_alerts != null) q += '<p class="small mb-1">未解决告警: <b class="' + (mon.unresolved_alerts > 0 ? 'text-danger' : '') + '">' + mon.unresolved_alerts + '</b></p>';
-        document.getElementById('spark-today').innerHTML = q || '无数据';
-        var t = mon.spark_total;
-        document.getElementById('spark-pool').innerHTML = t != null ? ('<p class="small mb-1">摘语总数: <b>' + t + '</b></p>') : '无数据';
-    }).catch(console.error);
+    fetch('{{ url_for("dashboard.api_monitor_heatmap") }}')
+        .then(r => r.json())
+        .then(function(data) {
+            if (data.data && data.dates) {
+                renderPersonCards(data.data, data.dates);
+                renderHeatmap(data);
+                renderOthers(data, data.data, data.dates);
+            } else {
+                document.getElementById('person-cards').innerHTML = '<div class="col-12 text-danger small py-3 text-center">' + (data.error || '无数据') + '</div>';
+            }
+            document.getElementById('refresh-label').textContent = '上次刷新: ' + new Date().toTimeString().substring(0, 8);
+        }).catch(console.error);
+
+    fetch('{{ url_for("dashboard.api_spark_pool") }}')
+        .then(r => r.json()).then(renderSpark).catch(console.error);
 }
 
 loadMonitor();
+setInterval(loadMonitor, 120000);
 </script>
 {% endblock %}

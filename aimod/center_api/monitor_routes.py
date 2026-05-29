@@ -173,10 +173,18 @@ def monitor_spark_pool():
             "SELECT person, COUNT(*) as cnt FROM spark_log GROUP BY person ORDER BY cnt DESC"
         ).fetchall()
         by_person = {r["person"]: r["cnt"] for r in person_rows}
+        samples = conn.execute(
+            "SELECT person, quote_text, source_date FROM spark_log ORDER BY source_date DESC LIMIT 3"
+        ).fetchall()
+        sample_list = [
+            {"person": r["person"], "text": r["quote_text"], "source_date": r["source_date"]}
+            for r in samples
+        ]
         return jsonify({
             "total": total,
             "by_year": by_year,
             "by_person": by_person,
+            "samples": sample_list,
         })
     finally:
         conn.close()

@@ -18,11 +18,14 @@
 # # Dashboard Blueprint — 综合运行面板
 
 # %%
+import re
 import subprocess
 from datetime import datetime
 
 import requests
 from flask import Blueprint, current_app, jsonify, render_template, session
+
+from func.jpfuncs import getinivaluefromcloud
 
 # %%
 from src.web_app.auth import admin_required, login_required
@@ -149,7 +152,15 @@ def panel_overview():
 @login_required
 @admin_required
 def panel_monitor():
-    return render_template("admin/panel_monitor.html", user=session["user"])
+    author = getinivaluefromcloud("joplinai", "default_personal_author") or ""
+    colleague_raw = getinivaluefromcloud("joplinai", "colleague") or ""
+    colleagues = [n.strip() for n in re.split(r"[,，]", colleague_raw) if n.strip()]
+    team_persons = [author] + colleagues if author else colleagues
+    return render_template(
+        "admin/panel_monitor.html",
+        user=session["user"],
+        team_persons=team_persons,
+    )
 
 
 @dashboard_bp.route("/wechat")
@@ -225,3 +236,10 @@ def api_wechat_health():
 @admin_required
 def api_system_info():
     return jsonify(_tc_get("/system/health"))
+
+
+@dashboard_bp.route("/api/spark/pool")
+@login_required
+@admin_required
+def api_spark_pool():
+    return jsonify(_tc_get("/monitor/spark/pool"))
