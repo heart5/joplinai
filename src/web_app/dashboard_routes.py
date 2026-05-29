@@ -34,7 +34,32 @@ __all__ = ["dashboard_bp"]
 
 dashboard_bp = Blueprint("dashboard", __name__, url_prefix="/admin/panel")
 
-HCX_SERVICES = ["apache2", "joplinai-web-app", "jupyterhub", "fail2ban", "sshd", "docker"]
+def _hcx_service_status():
+    """动态发现恒创云本地 systemd 服务。"""
+    patterns = "joplinai-* monitor-* wc-* jupyterhub* apache2* fail2ban* ssh* docker*"
+    try:
+        r = subprocess.run(
+            f"systemctl list-unit-files --no-legend {patterns} 2>/dev/null "
+            "| awk '{print $1}' | sed 's/\.service$//'",
+            shell=True, capture_output=True, text=True, timeout=10,
+        )
+    except Exception:
+        return {}
+    result = {}
+    for svc in r.stdout.splitlines():
+        svc = svc.strip()
+        if not svc or "@" in svc or svc.endswith((".timer", ".socket", ".scope")):
+            continue
+        try:
+            r2 = subprocess.run(
+                ["systemctl", "is-active", svc],
+                capture_output=True, text=True, timeout=5,
+            )
+            result[svc] = r2.stdout.strip() if r2.returncode == 0 else "inactive"
+        except Exception:
+            result[svc] = "unknown"
+    return result
+
 
 
 def _tc_get(path, timeout=15, params=None):
@@ -55,18 +80,6 @@ def _tc_get(path, timeout=15, params=None):
         return {"status": "error", "error": str(e)}
 
 
-def _hcx_service_status():
-    """检查恒创云本地 systemd 服务。"""
-    result = {}
-    for svc in HCX_SERVICES:
-        try:
-            r = subprocess.run(
-                ["systemctl", "is-active", svc],
-                capture_output=True, text=True, timeout=5,
-            )
-            result[svc] = r.stdout.strip() if r.returncode == 0 else "inactive"
-        except Exception:
-            result[svc] = "unknown"
     return result
 
 
