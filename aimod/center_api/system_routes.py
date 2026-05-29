@@ -262,7 +262,7 @@ def _assess(proc_ok, err_count):
 @require_auth
 def system_services():
     """动态发现 joplinai/monitor/wc 相关及关键系统服务，实际存在才返回。"""
-    patterns = "joplinai-* monitor-* wc-* jupyterhub apache2 fail2ban ssh docker"
+    patterns = "joplinai-* monitor-* wc-* jupyterhub* apache2* fail2ban* ssh* docker*"
     out, _ = _run(
         f"systemctl list-unit-files --no-legend {patterns} 2>/dev/null "
         "| awk '{print $1}' | sed 's/\\.service$//'",
@@ -271,7 +271,7 @@ def system_services():
     result = {}
     for svc in out.splitlines():
         svc = svc.strip()
-        if not svc or svc.endswith(".timer") or svc.endswith(".socket"):
+        if not svc or "@" in svc or svc.endswith((".timer", ".socket", ".scope")):
             continue
         status_out, rc = _run(f"systemctl is-active {svc} 2>/dev/null")
         result[svc] = status_out if rc == 0 else "inactive"
