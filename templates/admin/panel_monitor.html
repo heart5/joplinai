@@ -42,7 +42,7 @@
     <div class="col-md-8">
         <div class="card mb-3">
             <div class="card-header d-flex justify-content-between align-items-center">
-                <span class="fw-bold small">写作热力图（12周）</span>
+                <span class="fw-bold small">写作热力图（6周）</span>
                 <span class="text-muted small" id="heatmap-range"></span>
             </div>
             <div class="card-body py-2 heat-wrap" id="heatmap-container">
@@ -212,7 +212,7 @@ function renderOthers(data, pdata, dates) {
 }
 
 function loadMonitor() {
-    fetch('{{ url_for("dashboard.api_monitor_heatmap") }}')
+    fetch('{{ url_for("dashboard.api_monitor_heatmap") }}?weeks=6')
         .then(r => r.json())
         .then(function(data) {
             if (data.data && data.dates) {

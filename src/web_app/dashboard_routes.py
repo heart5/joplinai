@@ -23,7 +23,7 @@ import subprocess
 from datetime import datetime
 
 import requests
-from flask import Blueprint, current_app, jsonify, render_template, session
+from flask import Blueprint, current_app, jsonify, render_template, request, session
 
 from func.jpfuncs import getinivaluefromcloud
 
@@ -37,12 +37,12 @@ dashboard_bp = Blueprint("dashboard", __name__, url_prefix="/admin/panel")
 HCX_SERVICES = ["apache2", "joplinai-web-app", "jupyterhub", "fail2ban", "sshd", "docker"]
 
 
-def _tc_get(path, timeout=15):
+def _tc_get(path, timeout=15, params=None):
     """调用 tc center_api，返回 JSON 或错误信息。"""
     url = f"{current_app.config['TC_API_URL']}{path}"
     key = current_app.config.get("TC_API_KEY", "")
     try:
-        r = requests.get(url, headers={"X-API-Key": key}, timeout=timeout)
+        r = requests.get(url, headers={"X-API-Key": key}, timeout=timeout, params=params)
         r.raise_for_status()
         return r.json()
     except requests.exceptions.Timeout:
@@ -219,7 +219,7 @@ def api_hcx_status():
 @login_required
 @admin_required
 def api_monitor_heatmap():
-    return jsonify(_tc_get("/monitor/heatmap"))
+    return jsonify(_tc_get("/monitor/heatmap", params=request.args))
 
 
 @dashboard_bp.route("/api/wechat/health")

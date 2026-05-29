@@ -258,18 +258,21 @@ def _assess(proc_ok, err_count):
 # # /system/services — tc systemd 服务状态
 
 # %%
-SERVICES = [
-    "joplinai-center-api", "joplinai-web-app", "joplinai-sync",
-    "monitor-collect", "monitor-report", "monitor-report-full",
-    "wc-health-check", "apache2", "fail2ban", "ssh", "docker",
-]
-
-
 @system_bp.route("/system/services")
 @require_auth
 def system_services():
+    """动态发现 joplinai/monitor/wc 相关及关键系统服务，实际存在才返回。"""
+    patterns = "joplinai-* monitor-* wc-* apache2 fail2ban sshd docker"
+    out, _ = _run(
+        f"systemctl list-unit-files --no-legend {patterns} 2>/dev/null "
+        "| awk '{print $1}' | sed 's/\\.service$//'",
+        timeout=10,
+    )
     result = {}
-    for svc in SERVICES:
-        out, rc = _run(f"systemctl is-active {svc} 2>/dev/null")
-        result[svc] = out if rc == 0 else "inactive"
+    for svc in out.splitlines():
+        svc = svc.strip()
+        if not svc or svc.endswith(".timer") or svc.endswith(".socket"):
+            continue
+        status_out, rc = _run(f"systemctl is-active {svc} 2>/dev/null")
+        result[svc] = status_out if rc == 0 else "inactive"
     return jsonify(result)

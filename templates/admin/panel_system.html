@@ -45,6 +45,12 @@
     <div class="col-md-3 col-6 mb-2"><div class="card resource-card border-secondary"><div class="card-body text-center text-muted py-3">加载中...</div></div></div>
     <div class="col-md-3 col-6 mb-2"><div class="card resource-card border-secondary"><div class="card-body text-center text-muted py-3">加载中...</div></div></div>
 </div>
+
+<!-- hcx 服务详情 -->
+<div class="card mb-3">
+    <div class="card-header fw-bold small">hcx systemd 服务</div>
+    <div class="card-body py-2" id="hcx-services">加载中...</div>
+</div>
 {% endblock %}
 
 {% block extra_scripts %}
@@ -66,7 +72,6 @@ function svcBadge(s) {
 }
 
 function renderSystem(data) {
-    // from /api/panel/status aggregated endpoint
     var tc = data.tc || {};
     var hcx = data.hcx || {};
     var hea = tc.health || {};
@@ -82,10 +87,10 @@ function renderSystem(data) {
     if (hea.uptime) tcHtml += '<div class="col-md-3 col-6 mb-2"><div class="card resource-card"><div class="card-body text-center py-3"><div class="small text-muted">运行时间</div><div class="fw-bold">' + hea.uptime + '</div></div></div></div>';
     document.getElementById('tc-system').innerHTML = tcHtml || '<div class="col-12 text-muted small">不可达</div>';
 
-    // tc services
+    // tc services — 动态显示 API 返回的所有服务
     var svcHtml = '';
-    var svcNames = ['joplinai-center-api','joplinai-web-app','joplinai-sync','monitor-collect','monitor-report','monitor-report-full','wc-health-check','apache2','fail2ban','sshd','docker'];
-    svcNames.forEach(function(s){
+    var svcKeys = Object.keys(tsvc).sort();
+    svcKeys.forEach(function(s){
         var st = tsvc[s] || 'unknown';
         svcHtml += '<span class="me-2">' + s + ' ' + svcBadge(st) + '</span>';
     });
@@ -99,6 +104,15 @@ function renderSystem(data) {
     if (hres.uptime) hcxHtml += '<div class="col-md-3 col-6 mb-2"><div class="card resource-card"><div class="card-body text-center py-3"><div class="small text-muted">运行时间</div><div class="fw-bold">' + hres.uptime + '</div></div></div></div>';
     document.getElementById('hcx-system').innerHTML = hcxHtml || '<div class="col-12 text-muted small">N/A</div>';
 
+    // hcx services — 动态显示
+    var hsvcHtml = '';
+    var hsvcKeys = Object.keys(hsvc).sort();
+    hsvcKeys.forEach(function(s){
+        var st = hsvc[s] || 'unknown';
+        hsvcHtml += '<span class="me-2">' + s + ' ' + svcBadge(st) + '</span>';
+    });
+    document.getElementById('hcx-services').innerHTML = hsvcHtml || '<span class="text-muted small">无数据</span>';
+
     document.getElementById('refresh-label').textContent = '刷新于 ' + new Date().toLocaleTimeString();
 }
 
@@ -109,5 +123,6 @@ function loadSystem() {
         .catch(function(e){ console.error(e); });
 }
 loadSystem();
+setInterval(loadSystem, 60000);
 </script>
 {% endblock %}
