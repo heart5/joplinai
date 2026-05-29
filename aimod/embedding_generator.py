@@ -197,7 +197,8 @@ class EmbeddingGenerator:
         return (None, pos, MIN_SAFE, False)
 
     def _try_embed_or_fail(self, chunk_text: str) -> bool:
-        """预生成嵌入并缓存。成功→True，长度超限→False并记warning。"""
+        """预生成嵌入并缓存。成功→True，长度超限→False并记warning。
+        网络/超时等其他错误→抛出，由上层重试而非缩小chunk。"""
         key = hashlib.md5(chunk_text.encode("utf-8")).hexdigest()
         if key in self._chunk_embedding_cache:
             return True
@@ -212,8 +213,8 @@ class EmbeddingGenerator:
                     f"[chunk嵌入] 长度超限({len(chunk_text)}字符): {str(e)[:100]}"
                 )
                 return False
-            log.debug(f"[chunk嵌入] 非长度错误: {str(e)[:100]}")
-            return False
+            # 网络超时/连接失败等非长度错误——抛出，让上层以相同尺寸重试
+            raise
 
 # %% [markdown]
 # ## _get_model_dimension(self)
