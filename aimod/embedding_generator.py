@@ -57,7 +57,7 @@ with pathmagic.Context():
 # %%
 __all__ = ["EmbeddingGenerator"]
 
-_ollama_embed_semaphore = Semaphore(1)  # HCX CPU-only，串行化嵌入请求避免超时
+_ollama_embed_semaphore = Semaphore(2)  # HCX 8核CPU，2并发平衡吞吐与超时风险
 
 class EmbeddingGenerator:
     """嵌入生成器，支持长文本分块处理"""

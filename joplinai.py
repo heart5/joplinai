@@ -97,9 +97,7 @@ CONFIG = {
     # "chunk_size": 512,  # 文本分块大小（字符数，根据模型上下文调整）
     # "max_context": 512,  # 模型最大上下文（字符数）
     "concurrency_type": "thread",  # 固定使用多线程，移除 process 选项
-    "max_workers": min(
-        8, (os.cpu_count() or 1) * 2
-    ),  # 动态设置最大工作者数：CPU核心数 * 2，上限为16
+    "max_workers": 4,  # 与 Ollama semaphore(2) 匹配：2嵌入+1增强+1分块/写库
     "db_path": str(getdirmain() / "data" / "joplin_vector_db"),  # ChromaDB存储路径
 
     # provider-agnostic 增强模型配置: "cloud" / "ollama" / "none"
