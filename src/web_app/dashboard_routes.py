@@ -152,10 +152,8 @@ def panel_overview():
 @login_required
 @admin_required
 def panel_monitor():
-    author = getinivaluefromcloud("joplinai", "default_personal_author") or ""
-    colleague_raw = getinivaluefromcloud("joplinai", "colleague") or ""
-    colleagues = [n.strip() for n in re.split(r"[,，]", colleague_raw) if n.strip()]
-    team_persons = [author] + colleagues if author else colleagues
+    person_list = getinivaluefromcloud("monitor", "person_list") or ""
+    team_persons = [n.strip() for n in re.split(r"[,，]", person_list) if n.strip()]
     return render_template(
         "admin/panel_monitor.html",
         user=session["user"],
