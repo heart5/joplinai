@@ -1,8 +1,8 @@
 [Unit]
 Description=Joplin Notes Vectorization Sync Service (Conda)
 After=network-online.target docker.service joplinai-center-api.service
-Wants=network-online.target joplinai-center-api.service
-Requires=docker.service
+Wants=network-online.target
+Requires=docker.service joplinai-center-api.service
 
 [Service]
 Type=oneshot

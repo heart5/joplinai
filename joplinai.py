@@ -49,6 +49,7 @@ import pathmagic
 with pathmagic.Context():
     try:
         from aimod.embedding_generator import EmbeddingGenerator
+        from aimod.state_client import CenterAPIUnreachableError
         from aimod.vector_db_manager import VectorDBManager
         from func.configpr import (
             findvaluebykeyinsection,
@@ -772,20 +773,30 @@ def process_notes_incremental(notebook_title: str, config: Dict, note_ids: List[
                     else:
                         log.warning(f"Ollama 连接失败 (3次重试均失败): {e}，标签/摘要将不可用")
 
+    # 获取强制更新配置（需在加载状态前读取，用于决定 center_api 不可达时的策略）
+    force_update = config.get("force_update", False)
+
     # 加载处理状态（纯远程，无本地 fallback）
     state_client = config.get("state_client")
     if state_client:
         model_name_str = config["ollama_embedding_model"].replace(":", "_").replace("/", "_").replace("-", "_")
-        process_state = state_client.batch_load(model_name_str)
+        try:
+            process_state = state_client.batch_load(model_name_str)
+        except CenterAPIUnreachableError:
+            if force_update:
+                log.warning(
+                    "center_api 不可达，但因 --enable_force_update，以空状态继续运行。"
+                    "本次将全量重处理所有笔记。"
+                )
+                process_state = {}
+            else:
+                raise
     else:
         log.error("state_client 未配置，无法加载处理状态，本次运行视为全新处理")
         process_state = {}
     # 重置增强调用统计
     from aimod.note_enhancer import reset_call_stats
     reset_call_stats()
-
-    # 获取强制更新配置
-    force_update = config.get("force_update", False)
 
     # 解析笔记本级增强策略覆盖（enhance_override JSON 键）
     effective_config = _resolve_enhance_config(config, notebook_title)

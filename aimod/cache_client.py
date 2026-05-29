@@ -19,6 +19,7 @@
 
 # %%
 import logging
+import time
 from typing import Any, Dict, Optional
 
 import requests
@@ -42,24 +43,33 @@ __all__ = ["CacheClient"]
 class CacheClient:
     """AI增强缓存客户端 — 纯远程，无本地回退"""
 
+    _RETRIES = 3
+    _RETRY_DELAY = 2
+
     def __init__(self, remote_url: str, api_key: str):
         self.remote_url = remote_url.rstrip("/")
         self.auth_headers = {"X-API-Key": api_key}
 
     def _request(self, method: str, path: str, **kwargs) -> Optional[requests.Response]:
-        try:
-            resp = requests.request(
-                method,
-                f"{self.remote_url}{path}",
-                headers=self.auth_headers,
-                timeout=5,
-                **kwargs,
-            )
-            if resp.ok:
-                return resp
-            log.warning(f"远程数据中心 {method} {path} 返回 {resp.status_code}")
-        except Exception as e:
-            log.warning(f"远程数据中心 {method} {path} 失败: {e}")
+        last_err = ""
+        for attempt in range(1, self._RETRIES + 1):
+            try:
+                resp = requests.request(
+                    method,
+                    f"{self.remote_url}{path}",
+                    headers=self.auth_headers,
+                    timeout=5,
+                    **kwargs,
+                )
+                if resp.ok:
+                    return resp
+                log.warning(f"远程数据中心 {method} {path} 返回 {resp.status_code} (第{attempt}次)")
+            except Exception as e:
+                last_err = str(e)
+                log.warning(f"远程数据中心 {method} {path} 失败: {e} (第{attempt}次)")
+            if attempt < self._RETRIES:
+                time.sleep(self._RETRY_DELAY * attempt)
+        log.error(f"远程数据中心 {method} {path} 重试{self._RETRIES}次均失败: {last_err}")
         return None
 
     def get(self, content_hash: str, task: str, model: str = "") -> CacheResult:
