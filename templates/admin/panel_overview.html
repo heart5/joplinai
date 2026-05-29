@@ -77,14 +77,16 @@ function resourceRow(label, total, used, pct, unit) {
         '" style="width:' + pct + '%"></div></div></div>';
 }
 
-function renderServiceCard(name, label, active) {
+function renderServiceCard(name, label, active, extra) {
     var icon = statusIcon(active);
     var border = active === true || active === 'active' ? 'border-success' :
                  active === false || active === 'inactive' ? 'border-danger' : 'border-secondary';
+    var text = extra || (active === true || active === 'active' ? '运行中' :
+               active === false || active === 'inactive' ? '已停止' : active);
     return '<div class="card status-card ' + border + '"><div class="card-body text-center py-2">' +
         '<div class="fs-5">' + icon + '</div>' +
         '<div class="small fw-bold">' + label + '</div>' +
-        '<div class="small text-muted">' + (active === 'active' ? '运行中' : active === 'inactive' ? '已停止' : active) + '</div>' +
+        '<div class="small text-muted">' + text + '</div>' +
         '</div></div>';
 }
 
@@ -96,10 +98,14 @@ function renderAll(data) {
     var hea = tc.health || {};
     var heaOk = !hea.error;
     var svc = tc.services || {};
+    var wec = tc.wechat || {};
+    var wecOk = wec.process ? wec.process.ok : false;
+    var wecPid = wec.process ? wec.process.pid : null;
+    var wecExtra = wecOk ? 'PID ' + wecPid : '已停止';
     var tcHtml = '';
     tcHtml += '<div class="col-md-3 mb-2">' + renderServiceCard('monitor', 'Monitor 监测', monOk) + '</div>';
     tcHtml += '<div class="col-md-3 mb-2">' + renderServiceCard('center-api', 'Center API', svc['joplinai-center-api'] === 'active') + '</div>';
-    tcHtml += '<div class="col-md-3 mb-2">' + renderServiceCard('webchat', 'WeChat 微信', svc['wc-health-check'] === 'active') + '</div>';
+    tcHtml += '<div class="col-md-3 mb-2">' + renderServiceCard('webchat', 'WeChat 微信', wecOk, wecExtra) + '</div>';
     tcHtml += '<div class="col-md-3 mb-2">' + renderServiceCard('apache2', 'Apache2', svc['apache2'] === 'active') + '</div>';
     document.getElementById('tc-cards').innerHTML = tcHtml;
 

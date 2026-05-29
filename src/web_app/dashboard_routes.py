@@ -51,6 +51,15 @@ def _hcx_service_status():
         if not svc or "@" in svc or svc.endswith((".timer", ".socket", ".scope")):
             continue
         try:
+            r_type = subprocess.run(
+                ["systemctl", "show", "-p", "Type", svc],
+                capture_output=True, text=True, timeout=5,
+            )
+            if r_type.stdout.strip() == "Type=oneshot":
+                continue
+        except Exception:
+            pass
+        try:
             r2 = subprocess.run(
                 ["systemctl", "is-active", svc],
                 capture_output=True, text=True, timeout=5,
@@ -200,6 +209,7 @@ def api_status():
     tc_monitor = _tc_get("/monitor/status")
     tc_health = _tc_get("/system/health")
     tc_services = _tc_get("/system/services")
+    tc_wechat = _tc_get("/system/wechat")
     hcx_services = _hcx_service_status()
     hcx_resources = _hcx_resources()
 
@@ -209,6 +219,7 @@ def api_status():
             "monitor": tc_monitor,
             "health": tc_health,
             "services": tc_services,
+            "wechat": tc_wechat,
         },
         "hcx": {
             "services": hcx_services,

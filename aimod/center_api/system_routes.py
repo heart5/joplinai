@@ -273,6 +273,9 @@ def system_services():
         svc = svc.strip()
         if not svc or "@" in svc or svc.endswith((".timer", ".socket", ".scope")):
             continue
+        type_out, _ = _run(f"systemctl show -p Type {svc} 2>/dev/null")
+        if type_out.strip() == "Type=oneshot":
+            continue
         status_out, rc = _run(f"systemctl is-active {svc} 2>/dev/null")
         result[svc] = status_out if rc == 0 else "inactive"
     return jsonify(result)
