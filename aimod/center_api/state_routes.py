@@ -68,17 +68,20 @@ def api_state_batch_save():
     virtual_collections = data.get("virtual_collections", {})
     now = datetime.now().isoformat()
     conn = _init_db()
-    conn.execute("DELETE FROM note_process_state WHERE model_name=?", (model_name,))
     count = 0
     for note_id, note_state in states.items():
         conn.execute(
-            "INSERT INTO note_process_state (model_name, note_id, state_json, updated_at) VALUES (?,?,?,?)",
+            "INSERT INTO note_process_state (model_name, note_id, state_json, updated_at) "
+            "VALUES (?,?,?,?) ON CONFLICT(model_name, note_id) DO UPDATE SET "
+            "state_json=excluded.state_json, updated_at=excluded.updated_at",
             (model_name, note_id, json.dumps(note_state, ensure_ascii=False), now),
         )
         count += 1
     if virtual_collections:
         conn.execute(
-            "INSERT INTO note_process_state (model_name, note_id, state_json, updated_at) VALUES (?,?,?,?)",
+            "INSERT INTO note_process_state (model_name, note_id, state_json, updated_at) "
+            "VALUES (?,?,?,?) ON CONFLICT(model_name, note_id) DO UPDATE SET "
+            "state_json=excluded.state_json, updated_at=excluded.updated_at",
             (model_name, "__virtual_collections__", json.dumps(virtual_collections, ensure_ascii=False), now),
         )
         count += 1
