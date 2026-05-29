@@ -165,7 +165,7 @@ python joplin_web_app.py
 Production: systemd services 需手动重启，git push 后不会自动同步至 TC（安全考量）：
 ```bash
 # HCX（本机）— 重启 QA_API + Web_App
-sudo systemctl restart joplin-qa-api joplin-web-app
+sudo systemctl restart joplinai-qa-api joplinai-web-app
 
 # TC（远程）— 先 SSH 手动 git pull，再重启
 ssh tc "cd /home/baiyefeng/work/joplinai && git pull && sudo systemctl restart --no-block joplinai-center-api"
@@ -243,7 +243,7 @@ Pre-commit (`.pre-commit-config.yaml`): jupytext 误注释检测 + flake8。
 
 - **`static/favicon.ico*`**: 3 domain-specific favicon copies at 3.5MB each. Only the default `favicon.ico` should be tracked; the `_for_*` variants are in `.gitignore`.
 - **TC git pull 可能需要代理**: 直连偶尔失败（GnuTLS recv error），回退方案是 `HTTPS_PROXY=http://127.0.0.1:7890 git pull`。
-- **HCX `joplin-qa-api`/`joplin-web-app` 代码更新后需手动重启**: gunicorn 进程不自动 reload，git pull 后必须 `sudo systemctl restart`。
+- **HCX `joplinai-qa-api`/`joplinai-web-app` 代码更新后需手动重启**: gunicorn 进程不自动 reload，git pull 后必须 `sudo systemctl restart`。
 - **SSH 远程 systemctl restart 会 hang**: `systemctl restart` 默认等待服务停止→启动，SSH 会话会阻塞超时。远程重启必须加 `--no-block`：`ssh tc "sudo systemctl restart --no-block <svc>"`。
 - **git push 后不自动同步 TC**: 出于安全考量，推送代码后 TC 需要手动 SSH 登录执行 `git pull` + `systemctl restart --no-block`。不做自动部署。
 - **TC 配置更新流程**：修改云端 INI → `ssh tc "source /usr/miniconda3/etc/profile.d/conda.sh && conda activate newlsp && joplin sync"` → `ssh tc "sudo systemctl restart --no-block joplinai-sync"`。joplinai-sync 是 timer 触发的 oneshot 服务，需手动 start/restart。

@@ -15,7 +15,7 @@ TC_HOST="tc"
 TC_PATH="/home/baiyefeng/work/joplinai"
 TC_SERVICE="joplinai-center-api"
 
-HCX_SERVICES=("joplin-qa-api" "joplin-web-app")
+HCX_SERVICES=("joplinai-qa-api" "joplinai-web-app")
 
 RSYNC_EXCLUDE=(
     --exclude="func/"
