@@ -25,6 +25,11 @@
             <div class="card-header fw-bold small">进程状态</div>
             <div class="card-body py-2" id="proc-status">加载中...</div>
         </div>
+        <!-- 会话有效期 -->
+        <div class="card mb-3">
+            <div class="card-header fw-bold small">会话有效期</div>
+            <div class="card-body py-2" id="session-info">加载中...</div>
+        </div>
         <!-- 活跃度 -->
         <div class="card mb-3">
             <div class="card-header fw-bold small">消息流活跃度</div>
@@ -58,6 +63,7 @@ function renderWechat(data) {
     var proc = d.process || {};
     var logs = d.logs || {};
     var mp = d.unconfigured_mps || {};
+    var sess = d.session || {};
 
     // process
     var pOk = proc.ok;
@@ -73,6 +79,22 @@ function renderWechat(data) {
     }
     phtml += '</tbody></table>';
     document.getElementById('proc-status').innerHTML = phtml;
+
+    // session expiry
+    var daysLeft = sess.days_until_expiry;
+    var expCls = daysLeft == null ? 'text-muted' : daysLeft <= 3 ? 'text-danger fw-bold' : daysLeft <= 7 ? 'text-warning' : 'text-success';
+    var shtml = '<table class="table table-sm small mb-0"><tbody>';
+    if (sess.login_date) {
+        shtml += '<tr><td class="text-muted">登录日期</td><td>' + sess.login_date + ' (' + sess.days_since_login + '天前)</td></tr>';
+        shtml += '<tr><td class="text-muted">预计过期</td><td class="' + expCls + '">' + (daysLeft === 0 ? '已过期' : daysLeft + '天后') + ' (登录后30天)</td></tr>';
+        shtml += '<tr><td class="text-muted">PKL更新</td><td>' + (sess.pkl_mtime || '无') + ' (' + (sess.pkl_days_ago != null ? sess.pkl_days_ago + '天前' : '') + ')</td></tr>';
+        shtml += '<tr><td class="text-muted">D25短信</td><td>' + (sess.sms_day25 || '未发送') + '</td></tr>';
+        shtml += '<tr><td class="text-muted">D28短信</td><td>' + (sess.sms_day28 || '未发送') + '</td></tr>';
+    } else {
+        shtml += '<tr><td colspan="2" class="text-muted">无法读取会话配置</td></tr>';
+    }
+    shtml += '</tbody></table>';
+    document.getElementById('session-info').innerHTML = shtml;
 
     // activity
     var ahtml = '<table class="table table-sm small mb-0"><tbody>';

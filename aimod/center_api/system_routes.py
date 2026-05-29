@@ -236,6 +236,35 @@ def system_wechat():
 
     all_mp = [n for n in set(ignored_names + sharing_names) if n]
 
+    # 会话过期信息
+    session_info = {}
+    ini_path = os.path.join(HAPPYJOPLIN, "data", "happyjpwebchat.ini")
+    try:
+        import configparser
+        c = configparser.ConfigParser()
+        c.read(ini_path)
+        login_date = c.get("session", "login_date", fallback="")
+        if login_date:
+            ld = datetime.strptime(login_date, "%Y-%m-%d")
+            days_since = (datetime.now() - ld).days
+            days_left = max(0, 30 - days_since)
+            session_info["login_date"] = login_date
+            session_info["days_since_login"] = days_since
+            session_info["days_until_expiry"] = days_left
+            session_info["sms_day25"] = c.get("session", "last_sms_day25", fallback="")
+            session_info["sms_day28"] = c.get("session", "last_sms_day28", fallback="")
+    except Exception:
+        pass
+    pkl_path = os.path.join(HAPPYJOPLIN, "itchat.pkl")
+    if os.path.isfile(pkl_path):
+        try:
+            pkl_mtime = os.path.getmtime(pkl_path)
+            days_ago = int((datetime.now().timestamp() - pkl_mtime) / 86400)
+            session_info["pkl_mtime"] = datetime.fromtimestamp(pkl_mtime).strftime("%Y-%m-%d %H:%M")
+            session_info["pkl_days_ago"] = days_ago
+        except Exception:
+            pass
+
     return jsonify({
         "process": {
             "ok": proc_ok,
@@ -262,6 +291,7 @@ def system_wechat():
             "ignored": ignored_names,
             "sharing": sharing_names,
         },
+        "session": session_info,
         "assessment": _assess(proc_ok, err_count),
     })
 
