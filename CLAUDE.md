@@ -229,6 +229,21 @@ ssh tc "cd /home/baiyefeng/work/joplinai && git pull && sudo systemctl restart -
 | `hyde_enabled` | `true` | HyDE 假设文档嵌入增强检索 |
 | `rerank_enabled` | `true` | LLM 精排候选块重排序 |
 
+## Production Incidents
+
+### 规则：远程状态加载不得静默降级
+
+2026-05-30 center_api 不可达导致全量重处理事故（详见 `docs/INCIDENTS.md`）的核心教训：
+
+**center_api 的 client（`ProcessStateClient`、`CacheClient` 等）在连接失败时，禁止返回空/默认值让调用方以为"没有历史数据"。**
+
+- `ProcessStateClient.batch_load()` 失败→抛 `CenterAPIUnreachableError`，sync 中止。仅 `--enable_force_update` 模式放行。
+- `CacheClient.get()` 失败→重试 3 次后退化为 miss（可接受，AI 增强可重跑），但不可丢失已处理状态。
+- `_request()` 全部方法必须有重试（3 次指数退避）。
+- systemd 服务依赖：`Requires=joplinai-center-api.service`，禁止仅 `Wants`。
+
+**原则**：对状态加载而言，宁可不跑也不能错跑。"连接失败=返回空"等价于"忘掉所有历史，从零开始"。
+
 ## Testing & CI
 
 ```bash
