@@ -1,0 +1,11 @@
+[Unit]
+Description=Monitor Report Timer — 每6小时增量热图生成
+Requires=monitor-report.service
+
+[Timer]
+OnCalendar=00:23,06:23,12:23,18:23
+RandomizedDelaySec=180
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,11 @@
+[Unit]
+Description=Monitor Collect Timer — 每小时采集笔记快照
+Requires=monitor-collect.service
+
+[Timer]
+OnCalendar=*:07
+RandomizedDelaySec=120
+Persistent=true
+
+[Install]
+WantedBy=timers.target

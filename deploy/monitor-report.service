@@ -1,0 +1,13 @@
+[Unit]
+Description=Monitor Report — 增量热图报告生成
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=baiyefeng
+Group=club
+WorkingDirectory=/home/baiyefeng/codebase/happyjoplin
+ExecStart=/usr/miniconda3/envs/newlsp/bin/python work/monitor_report.py
+StandardOutput=journal
+StandardError=journal

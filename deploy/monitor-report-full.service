@@ -1,0 +1,13 @@
+[Unit]
+Description=Monitor Report Full — 全量强制刷新热图（streak归零体现）
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=baiyefeng
+Group=club
+WorkingDirectory=/home/baiyefeng/codebase/happyjoplin
+ExecStart=/usr/miniconda3/envs/newlsp/bin/python -c "import pathmagic; pathmagic.context().__enter__(); from work.monitor_report import generate_all_reports; generate_all_reports(dirty_only=False)"
+StandardOutput=journal
+StandardError=journal

@@ -1,0 +1,13 @@
+[Unit]
+Description=Monitor Collect — 笔记快照采集+变化检测
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=baiyefeng
+Group=club
+WorkingDirectory=/home/baiyefeng/codebase/happyjoplin
+ExecStart=/usr/miniconda3/envs/newlsp/bin/python work/monitor_collect.py
+StandardOutput=journal
+StandardError=journal
