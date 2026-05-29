@@ -262,7 +262,7 @@ def _assess(proc_ok, err_count):
 @require_auth
 def system_services():
     """动态发现 joplinai/monitor/wc 相关及关键系统服务，实际存在才返回。"""
-    patterns = "joplinai-* monitor-* wc-* apache2 fail2ban sshd docker"
+    patterns = "joplinai-* monitor-* wc-* jupyterhub apache2 fail2ban ssh docker"
     out, _ = _run(
         f"systemctl list-unit-files --no-legend {patterns} 2>/dev/null "
         "| awk '{print $1}' | sed 's/\\.service$//'",
