@@ -64,9 +64,32 @@ def _hcx_service_status():
                 ["systemctl", "is-active", svc],
                 capture_output=True, text=True, timeout=5,
             )
-            result[svc] = r2.stdout.strip() if r2.returncode == 0 else "inactive"
+            status = r2.stdout.strip() if r2.returncode == 0 else "inactive"
         except Exception:
             result[svc] = "unknown"
+            continue
+        result[svc] = {"status": status}
+        if status == "active":
+            try:
+                r3 = subprocess.run(
+                    ["systemctl", "show", "-p", "ActiveEnterTimestamp", svc],
+                    capture_output=True, text=True, timeout=5,
+                )
+                ts_str = r3.stdout.strip().replace("ActiveEnterTimestamp=", "")
+                ts = datetime.strptime(ts_str.rsplit(" ", 1)[0], "%a %Y-%m-%d %H:%M:%S")
+                diff = datetime.now() - ts
+                days, sec = diff.days, diff.seconds
+                hours, minutes = sec // 3600, (sec % 3600) // 60
+                if days > 0:
+                    dur = f"{days}天{hours}小时"
+                elif hours > 0:
+                    dur = f"{hours}小时{minutes}分钟"
+                else:
+                    dur = f"{minutes}分钟"
+                result[svc]["since"] = ts.strftime("%Y-%m-%d %H:%M")
+                result[svc]["duration"] = dur
+            except Exception:
+                pass
     return result
 
 

@@ -66,9 +66,18 @@ function gaugeHtml(label, pct, detail) {
         '<div class="small fw-bold">' + label + '</div>' +
         '<div class="small text-muted">' + (detail || '') + '</div>';
 }
+function svcStatus(info) {
+    if (typeof info === 'object') return info.status || 'unknown';
+    return info || 'unknown';
+}
 function svcBadge(s) {
     var cls = s === 'active' ? 'bg-success' : s === 'inactive' ? 'bg-secondary' : 'bg-warning';
     return '<span class="badge ' + cls + ' me-1 mb-1">' + s + '</span>';
+}
+function svcDuration(info) {
+    if (typeof info === 'object' && info.duration)
+        return ' <span class="text-muted small">' + info.duration + '</span>';
+    return '';
 }
 
 function renderSystem(data) {
@@ -91,8 +100,9 @@ function renderSystem(data) {
     var svcHtml = '';
     var svcKeys = Object.keys(tsvc).sort();
     svcKeys.forEach(function(s){
-        var st = tsvc[s] || 'unknown';
-        svcHtml += '<span class="me-2">' + s + ' ' + svcBadge(st) + '</span>';
+        var info = tsvc[s] || 'unknown';
+        var st = svcStatus(info);
+        svcHtml += '<span class="me-2">' + s + ' ' + svcBadge(st) + svcDuration(info) + '</span>';
     });
     document.getElementById('tc-services').innerHTML = svcHtml || '<span class="text-muted small">无数据</span>';
 
@@ -108,8 +118,9 @@ function renderSystem(data) {
     var hsvcHtml = '';
     var hsvcKeys = Object.keys(hsvc).sort();
     hsvcKeys.forEach(function(s){
-        var st = hsvc[s] || 'unknown';
-        hsvcHtml += '<span class="me-2">' + s + ' ' + svcBadge(st) + '</span>';
+        var info = hsvc[s] || 'unknown';
+        var st = svcStatus(info);
+        hsvcHtml += '<span class="me-2">' + s + ' ' + svcBadge(st) + svcDuration(info) + '</span>';
     });
     document.getElementById('hcx-services').innerHTML = hsvcHtml || '<span class="text-muted small">无数据</span>';
 

@@ -45,6 +45,30 @@ def _run(cmd, timeout=15):
         return "", -1
 
 
+def _svc_info(svc):
+    """返回服务状态对象 {status, since, duration}。"""
+    status_out, rc = _run(f"systemctl is-active {svc} 2>/dev/null")
+    status = status_out if rc == 0 else "inactive"
+    if status != "active":
+        return {"status": status}
+    ts_out, _ = _run(f"systemctl show -p ActiveEnterTimestamp {svc} 2>/dev/null")
+    ts_str = ts_out.replace("ActiveEnterTimestamp=", "") if ts_out else ""
+    try:
+        ts = datetime.strptime(ts_str.rsplit(" ", 1)[0], "%a %Y-%m-%d %H:%M:%S")
+        diff = datetime.now() - ts
+        days, sec = diff.days, diff.seconds
+        hours, minutes = sec // 3600, (sec % 3600) // 60
+        if days > 0:
+            dur = f"{days}天{hours}小时"
+        elif hours > 0:
+            dur = f"{hours}小时{minutes}分钟"
+        else:
+            dur = f"{minutes}分钟"
+        return {"status": status, "since": ts.strftime("%Y-%m-%d %H:%M"), "duration": dur}
+    except Exception:
+        return {"status": status}
+
+
 # %% [markdown]
 # # /system/health — CPU/内存/磁盘
 
@@ -276,6 +300,5 @@ def system_services():
         type_out, _ = _run(f"systemctl show -p Type {svc} 2>/dev/null")
         if type_out.strip() == "Type=oneshot":
             continue
-        status_out, rc = _run(f"systemctl is-active {svc} 2>/dev/null")
-        result[svc] = status_out if rc == 0 else "inactive"
+        result[svc] = _svc_info(svc)
     return jsonify(result)

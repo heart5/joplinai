@@ -98,27 +98,33 @@ function renderAll(data) {
     var hea = tc.health || {};
     var heaOk = !hea.error;
     var svc = tc.services || {};
+    function svcActive(key) {
+        var v = svc[key]; return typeof v === 'object' ? v.status === 'active' : v === 'active';
+    }
     var wec = tc.wechat || {};
     var wecOk = wec.process ? wec.process.ok : false;
     var wecPid = wec.process ? wec.process.pid : null;
     var wecExtra = wecOk ? 'PID ' + wecPid : '已停止';
     var tcHtml = '';
     tcHtml += '<div class="col-md-3 mb-2">' + renderServiceCard('monitor', 'Monitor 监测', monOk) + '</div>';
-    tcHtml += '<div class="col-md-3 mb-2">' + renderServiceCard('center-api', 'Center API', svc['joplinai-center-api'] === 'active') + '</div>';
+    tcHtml += '<div class="col-md-3 mb-2">' + renderServiceCard('center-api', 'Center API', svcActive('joplinai-center-api')) + '</div>';
     tcHtml += '<div class="col-md-3 mb-2">' + renderServiceCard('webchat', 'WeChat 微信', wecOk, wecExtra) + '</div>';
-    tcHtml += '<div class="col-md-3 mb-2">' + renderServiceCard('apache2', 'Apache2', svc['apache2'] === 'active') + '</div>';
+    tcHtml += '<div class="col-md-3 mb-2">' + renderServiceCard('apache2', 'Apache2', svcActive('apache2')) + '</div>';
     document.getElementById('tc-cards').innerHTML = tcHtml;
 
-    // hcx cards
+    // hcx cards — 动态显示，兼容新对象格式
     var hcx = data.hcx || {};
     var hsvc = hcx.services || {};
     var hres = hcx.resources || {};
-    var hLabels = {apache2:'Apache2','joplinai-web-app':'Web App',jupyterhub:'JupyterHub',fail2ban:'Fail2Ban',sshd:'SSH',docker:'Docker'};
+    var hLabels = {apache2:'Apache2','joplinai-web-app':'Web App','joplinai-qa-api':'QA API',jupyterhub:'JupyterHub',fail2ban:'Fail2Ban',ssh:'SSH',docker:'Docker'};
     var hcxHtml = '';
-    ['apache2','joplinai-web-app','jupyterhub','fail2ban','sshd','docker'].forEach(function(s){
-        hcxHtml += '<div class="col-md-2 col-6 mb-2">' + renderServiceCard(s, hLabels[s]||s, hsvc[s]||'unknown') + '</div>';
+    Object.keys(hsvc).sort().forEach(function(s){
+        var info = hsvc[s] || 'unknown';
+        var active = typeof info === 'object' ? info.status === 'active' : info === 'active';
+        var extra = (typeof info === 'object' && info.duration) ? info.duration : null;
+        hcxHtml += '<div class="col-md-2 col-6 mb-2">' + renderServiceCard(s, hLabels[s]||s, active, extra) + '</div>';
     });
-    document.getElementById('hcx-cards').innerHTML = hcxHtml;
+    document.getElementById('hcx-cards').innerHTML = hcxHtml || '<div class="col-12 text-muted small">N/A</div>';
 
     // tc resources
     var tcHtml2 = '';
