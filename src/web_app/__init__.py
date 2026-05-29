@@ -56,7 +56,7 @@ def create_app():
     app.register_blueprint(dashboard_bp)
 
     app.config["TC_API_URL"] = "https://api.xiloong.fans"
-    app.config["TC_API_KEY"] = getkeysfromcloud().get("tc", "")
+    app.config["TC_API_KEY"] = getinivaluefromcloud("joplinai", "joplinai_center_api_key") or ""
 
     return app
 
