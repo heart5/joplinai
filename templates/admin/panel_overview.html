@@ -97,11 +97,11 @@ function renderAll(data) {
     var heaOk = !hea.error;
     var svc = tc.services || {};
     var tcHtml = '';
-    tcHtml += renderServiceCard('monitor', 'Monitor 监测', monOk);
-    tcHtml += renderServiceCard('center-api', 'Center API', svc['joplinai-center-api'] === 'active');
-    tcHtml += renderServiceCard('webchat', 'WeChat 微信', svc['wc-health-check'] === 'active');
-    tcHtml += renderServiceCard('apache2', 'Apache2', svc['apache2'] === 'active');
-    document.getElementById('tc-cards').innerHTML = '<div class="col-md-3 mb-2">' + tcHtml.split('</div></div>').slice(0, -1).join('</div></div></div><div class="col-md-3 mb-2">') + '</div></div>';
+    tcHtml += '<div class="col-md-3 mb-2">' + renderServiceCard('monitor', 'Monitor 监测', monOk) + '</div>';
+    tcHtml += '<div class="col-md-3 mb-2">' + renderServiceCard('center-api', 'Center API', svc['joplinai-center-api'] === 'active') + '</div>';
+    tcHtml += '<div class="col-md-3 mb-2">' + renderServiceCard('webchat', 'WeChat 微信', svc['wc-health-check'] === 'active') + '</div>';
+    tcHtml += '<div class="col-md-3 mb-2">' + renderServiceCard('apache2', 'Apache2', svc['apache2'] === 'active') + '</div>';
+    document.getElementById('tc-cards').innerHTML = tcHtml;
 
     // hcx cards
     var hcx = data.hcx || {};
@@ -110,14 +110,8 @@ function renderAll(data) {
     var hLabels = {apache2:'Apache2','joplinai-web-app':'Web App',jupyterhub:'JupyterHub',fail2ban:'Fail2Ban',sshd:'SSH',docker:'Docker'};
     var hcxHtml = '';
     ['apache2','joplinai-web-app','jupyterhub','fail2ban','sshd','docker'].forEach(function(s){
-        hcxHtml += renderServiceCard(s, hLabels[s]||s, hsvc[s]||'unknown');
+        hcxHtml += '<div class="col-md-2 col-6 mb-2">' + renderServiceCard(s, hLabels[s]||s, hsvc[s]||'unknown') + '</div>';
     });
-    var hCols = hcxHtml.match(/<div class="card/g);
-    if (hCols) {
-        for (var i = 0; i < hCols.length; i++) {
-            hcxHtml = hcxHtml.replace('<div class="card', '<div class="col-md-2 col-6 mb-2"><div class="card');
-        }
-    }
     document.getElementById('hcx-cards').innerHTML = hcxHtml;
 
     // tc resources
