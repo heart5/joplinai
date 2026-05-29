@@ -244,6 +244,15 @@ ssh tc "cd /home/baiyefeng/work/joplinai && git pull && sudo systemctl restart -
 
 **原则**：对状态加载而言，宁可不跑也不能错跑。"连接失败=返回空"等价于"忘掉所有历史，从零开始"。
 
+### 规则：状态持久化不得使用全量替换
+
+2026-05-30 batch_save DELETE ALL + INSERT ALL 导致 940 条状态丢失事故（详见 `docs/INCIDENTS.md#inc-002`）：
+
+**`note_process_state` 的写入必须用 upsert/merge，禁止 `DELETE + 重新 INSERT`。**
+当前表有 `PRIMARY KEY (model_name, note_id)`，用 `INSERT ... ON CONFLICT DO UPDATE`。
+
+原因：sync 可能只处理笔记本子集。DELETE ALL 会把未处理笔记的状态也删掉。同样规则适用于所有多记录持久化场景——缓存表、配置表等。
+
 ## Testing & CI
 
 ```bash
