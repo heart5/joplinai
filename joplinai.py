@@ -86,7 +86,6 @@ with pathmagic.Context():
 CONFIG = {
     "environment": "production",
     "ollama_host": getinivaluefromcloud("joplinai", f"ollama_host_{getdeviceid()}"),
-    "ollama_port": getinivaluefromcloud("joplinai", "ollama_port"),
     "chroma_server_host": getinivaluefromcloud(
         "joplinai", f"chroma_server_{getdeviceid()}"
     ),
@@ -748,9 +747,8 @@ def process_notes_incremental(notebook_title: str, config: Dict, note_ids: List[
         if config.get("summary_model") == "ollama" or config.get("tags_model") == "ollama":
             import time
             import ollama
-            ollama_host = config.get("ollama_host", "149.30.242.156")
-            ollama_port = config.get("ollama_port", "11434")
-            ollama_client = ollama.Client(host=f"http://{ollama_host}:{ollama_port}")
+            ollama_host = config.get("ollama_host", "http://149.30.242.156:11434")
+            ollama_client = ollama.Client(host=ollama_host)
             for attempt in range(1, 4):
                 try:
                     result = ollama_client.list()

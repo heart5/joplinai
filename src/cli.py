@@ -151,8 +151,7 @@ def main() -> None:
 
     log.info(
         f"动态配置：模型={dynamic_config['ollama_embedding_model']}, "
-        f"ollama server={dynamic_config['ollama_host']}, "
-        f"ollama port={dynamic_config['ollama_port']}, "
+        f"ollama={dynamic_config['ollama_host']}, "
         f"chroma server={dynamic_config['chroma_server_host']}, "
         f"chroma port={dynamic_config['chroma_server_port']}, "
         f"笔记本={dynamic_config['notebook_titles']}, "

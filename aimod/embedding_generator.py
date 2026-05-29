@@ -340,9 +340,7 @@ class EmbeddingGenerator:
         summary_provider = config.get("summary_model", "cloud")
         tags_provider = config.get("tags_model", "cloud")
 
-        ollama_host = config.get("ollama_host") or ""
-        ollama_port = config.get("ollama_port") or "11434"
-        ollama_url = f"http://{ollama_host}:{ollama_port}" if ollama_host else ""
+        ollama_url = config.get("ollama_host") or ""
 
         # 首次调用时输出增强模型策略
         if not self._enhance_model_logged:
@@ -1027,12 +1025,11 @@ class EmbeddingGenerator:
 
     # %%
     def get_ollama_embedding(
-        self, text: str, host: str = "10.9.0.2", port: int = 11034
+        self, text: str, base_url: str = ""
     ):
-        """调用远程恒创云Ollama生成嵌入"""
-        host = self.config.get("ollama_host", host)
-        port = self.config.get("ollama_port", port)
-        url = f"http://{host}:{port}/api/embed"
+        """调用远程Ollama生成嵌入"""
+        base_url = base_url or self.config.get("ollama_host") or ""
+        url = f"{base_url}/api/embed"
         model = self.model_name
         # print(host, port, model)
         payload = {"model": model, "input": text}
@@ -1059,15 +1056,14 @@ class EmbeddingGenerator:
 
     # %%
     def get_ollama_embeddings_batch(
-        self, texts: List[str], host: str = "10.9.0.2", port: int = 11034
+        self, texts: List[str], base_url: str = ""
     ) -> List[List[float]]:
         """批量调用远程Ollama生成嵌入，一次请求嵌入多个文本。
 
         Ollama /api/embed 支持 input 为字符串列表，返回 {"embeddings": [[...], [...], ...]}
         """
-        host = self.config.get("ollama_host", host)
-        port = self.config.get("ollama_port", port)
-        url = f"http://{host}:{port}/api/embed"
+        base_url = base_url or self.config.get("ollama_host") or ""
+        url = f"{base_url}/api/embed"
         model = self.model_name
         payload = {"model": model, "input": texts}
         try:
