@@ -210,8 +210,10 @@ ssh tc "cd /home/baiyefeng/work/joplinai && git pull && sudo systemctl restart -
 |------|------|------|
 | `deepseek-v4-flash` | QA 对话主路 + AI增强（`cloud_model=deepseek-v4-flash`） | ~5秒/次 |
 | `deepseek-v4-pro` | 图片精细描述（`vision_model`） | ~数秒/图 |
+| `BAAI/bge-large-zh-v1.5` | 文本嵌入（硅基流动云端，与本地同模型同维度） | ~0.1秒/次 |
 
 可通过 `cloud_api_url` + `cloud_api_key` + `cloud_model` 切换至 Qwen/ChatGPT 等兼容提供者。
+嵌入可通过 `embedding_provider=siliconflow` 切至云端（硅基流动），`_FallbackClient` 自动回落本地 Ollama。
 
 ### 配置要点
 
@@ -228,6 +230,8 @@ ssh tc "cd /home/baiyefeng/work/joplinai && git pull && sudo systemctl restart -
 | `vision_enabled` | `false` | CPU 跑视觉太慢，默认关闭 |
 | `hyde_enabled` | `true` | HyDE 假设文档嵌入增强检索 |
 | `rerank_enabled` | `true` | LLM 精排候选块重排序 |
+| `embedding_provider` | `siliconflow` | 嵌入后端: ollama(本地) / siliconflow(云端+回落) |
+| `siliconflow_api_key` | `sk-xxx` | 硅基流动 API Key（仅 siliconflow 模式） |
 
 ## Production Incidents
 
