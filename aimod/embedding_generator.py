@@ -57,7 +57,69 @@ with pathmagic.Context():
 # %%
 __all__ = ["EmbeddingGenerator"]
 
-_ollama_embed_semaphore = Semaphore(2)  # HCX 8核CPU，2并发平衡吞吐与超时风险
+
+# ---- 嵌入后端客户端（策略模式） ----
+
+class _EmbeddingClient:
+    """嵌入后端统一接口"""
+    def embed(self, text: str):
+        raise NotImplementedError
+    def embed_batch(self, texts: list) -> list:
+        raise NotImplementedError
+
+
+class _OllamaClient(_EmbeddingClient):
+    """Ollama 本地/远程嵌入"""
+
+    def __init__(self, config: dict, model_name: str):
+        self.base_url = config.get("ollama_host") or ""
+        self.model_name = model_name
+        self._semaphore = Semaphore(2)
+
+    def embed(self, text: str):
+        url = f"{self.base_url}/api/embed"
+        with self._semaphore:
+            resp = requests.post(url, json={"model": self.model_name, "input": text}, timeout=45)
+        resp.raise_for_status()
+        return resp.json()["embeddings"][0]
+
+    def embed_batch(self, texts: list):
+        url = f"{self.base_url}/api/embed"
+        with self._semaphore:
+            resp = requests.post(url, json={"model": self.model_name, "input": texts}, timeout=60)
+        resp.raise_for_status()
+        return resp.json()["embeddings"]
+
+
+class _SiliconFlowClient(_EmbeddingClient):
+    """硅基流动云端嵌入 — BAAI/bge-large-zh-v1.5"""
+
+    URL = "https://api.siliconflow.cn/v1/embeddings"
+    MODEL = "BAAI/bge-large-zh-v1.5"
+
+    def __init__(self, config: dict):
+        self.api_key = config.get("siliconflow_api_key") or ""
+
+    def _post(self, payload: dict, timeout: int = 15):
+        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
+        resp = requests.post(self.URL, json=payload, headers=headers, timeout=timeout)
+        resp.raise_for_status()
+        return resp.json()
+
+    def embed(self, text: str):
+        data = self._post({"model": self.MODEL, "input": text, "encoding_format": "float"})
+        return data["data"][0]["embedding"]
+
+    def embed_batch(self, texts: list):
+        data = self._post({"model": self.MODEL, "input": texts, "encoding_format": "float"}, timeout=30)
+        return [d["embedding"] for d in data["data"]]
+
+
+def _make_embedding_client(config: dict, model_name: str) -> _EmbeddingClient:
+    if config.get("embedding_provider") == "siliconflow":
+        return _SiliconFlowClient(config)
+    return _OllamaClient(config, model_name)
+
 
 class EmbeddingGenerator:
     """嵌入生成器，支持长文本分块处理"""
@@ -104,6 +166,7 @@ class EmbeddingGenerator:
         self._set_chunk_size()
 
         self.enable_adaptive_chunking = enable_adaptive_chunking
+        self.embedding_client = _make_embedding_client(config, model_name)
 
     def __repr__(self):
         return f"EmbeddingGenerator(model={self.model_name!r}, dim={self.embedding_dim}, chunk_size={self.chunk_size})"
@@ -204,7 +267,7 @@ class EmbeddingGenerator:
             return True
         try:
             processed = self.text_prep.preprocess_for_embedding(chunk_text)
-            self._chunk_embedding_cache[key] = self._get_embedding(processed)
+            self._chunk_embedding_cache[key] = self.embedding_client.embed(processed)
             return True
         except Exception as e:
             msg = str(e).lower()
@@ -1022,87 +1085,16 @@ class EmbeddingGenerator:
         return chunks
 
 # %% [markdown]
-# ## _get_embedding(text) — 嵌入后端分发
+# ## get_ollama_embedding / get_ollama_embeddings_batch — 向后兼容包装
 
     # %%
-    def _get_embedding(self, text: str):
-        """根据 embedding_provider 配置分发到 Ollama 或云端 API。"""
-        provider = self.config.get("embedding_provider", "ollama")
-        if provider == "siliconflow":
-            return self._get_cloud_embedding(text)
-        return self.get_ollama_embedding(text)
+    def get_ollama_embedding(self, text: str, base_url: str = ""):
+        """单次嵌入（保留旧接口，内部走当前激活的 embedding_client）。"""
+        return self.embedding_client.embed(text)
 
-    def _get_cloud_embedding(self, text: str):
-        """硅基流动云端嵌入 — BAAI/bge-large-zh-v1.5，与本地 Ollama 同模型同维度。"""
-        api_key = self.config.get("siliconflow_api_key", "")
-        url = "https://api.siliconflow.cn/v1/embeddings"
-        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-        payload = {"model": "BAAI/bge-large-zh-v1.5", "input": text, "encoding_format": "float"}
-        resp = requests.post(url, json=payload, headers=headers, timeout=15)
-        resp.raise_for_status()
-        return resp.json()["data"][0]["embedding"]
-
-# ## get_ollama_embedding(self, text: str, host: str = "10.9.0.2", port: int = 11434)
-
-    # %%
-    def get_ollama_embedding(
-        self, text: str, base_url: str = ""
-    ):
-        """调用远程Ollama生成嵌入"""
-        base_url = base_url or self.config.get("ollama_host") or ""
-        url = f"{base_url}/api/embed"
-        model = self.model_name
-        # print(host, port, model)
-        payload = {"model": model, "input": text}
-        try:
-            with _ollama_embed_semaphore:
-                resp = requests.post(url, json=payload, timeout=45)
-            resp.raise_for_status()
-            return resp.json()["embeddings"][0]
-        except Exception as e:
-            # 从响应体中提取 Ollama 详细错误信息（如"input length exceeds context length"）
-            error_msg = str(e)
-            if hasattr(e, "response") and e.response is not None:
-                try:
-                    body = e.response.text
-                    if body:
-                        error_msg = f"{error_msg} | {body}"
-                except Exception:
-                    pass
-            log.debug(f"[远程Ollama] 嵌入调用失败: {error_msg}")
-            raise Exception(error_msg) from e
-
-# %% [markdown]
-# ## get_ollama_embeddings_batch(self, texts: List[str], host: str = "10.9.0.2", port: int = 11034) -> List[List[float]]
-
-    # %%
-    def get_ollama_embeddings_batch(
-        self, texts: List[str], base_url: str = ""
-    ) -> List[List[float]]:
-        """批量调用远程Ollama生成嵌入，一次请求嵌入多个文本。
-
-        Ollama /api/embed 支持 input 为字符串列表，返回 {"embeddings": [[...], [...], ...]}
-        """
-        base_url = base_url or self.config.get("ollama_host") or ""
-        url = f"{base_url}/api/embed"
-        model = self.model_name
-        payload = {"model": model, "input": texts}
-        try:
-            with _ollama_embed_semaphore:
-                resp = requests.post(url, json=payload, timeout=60)
-            resp.raise_for_status()
-            return resp.json()["embeddings"]
-        except Exception as e:
-            error_msg = str(e)
-            if hasattr(e, "response") and e.response is not None:
-                try:
-                    body = e.response.text
-                    if body:
-                        error_msg = f"{error_msg} | {body}"
-                except Exception:
-                    pass
-            log.debug(f"[远程Ollama] 批量嵌入调用失败: {error_msg}")
-            raise Exception(error_msg) from e
+    def get_ollama_embeddings_batch(self, texts: List[str], base_url: str = "") -> List[List[float]]:
+        """批量嵌入（保留旧接口，内部走当前激活的 embedding_client）。"""
+        return self.embedding_client.embed_batch(texts)
 
 # %% [markdown]
 # ## get_cached_embedding(self, text_hash: str) -> Optional[List[float]]
@@ -1147,7 +1139,7 @@ class EmbeddingGenerator:
         max_retries = 5
         for attempt in range(1, max_retries + 1):
             try:
-                embedding = self._get_embedding(processed_text)
+                embedding = self.embedding_client.embed(processed_text)
                 if embedding:
                     break
             except Exception as e:
@@ -1172,7 +1164,7 @@ class EmbeddingGenerator:
                             f"句子边界截断至{len(truncated)}字符（安全上限={safe_chars}字符）"
                         )
                         try:
-                            embedding = self._get_embedding(truncated)
+                            embedding = self.embedding_client.embed(truncated)
                         except Exception as e2:
                             log.error(f"[嵌入失败] 截断回退嵌入仍失败: {e2}")
                             return []
