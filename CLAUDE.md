@@ -31,7 +31,7 @@ Joplinai is an AI-powered knowledge retrieval and Q&A system for [Joplin](https:
 
 两台 Joplin Server 互为备份：HCX 运行 Docker 版（主），TC 运行 CLI 版（备）。各自通过 Apache 反代对外暴露 HTTPS 端点,本机 client 直连 localhost:41184。
 
-TC 是数据核心+向量化，HCX 是推理+门户。TC 向量化时通过公网 IP 调用 HCX 的 Ollama 生成嵌入向量。HCX 的 Web 门户通过 HTTP API Key 认证远程调用 TC 的 center_api。
+TC 是数据核心+向量化，HCX 是推理+门户。TC 向量化时通过公网 IP 调用 HCX 的 Ollama 生成嵌入向量（已迁移至硅基流动云端为主，HCX Ollama 为回落）。HCX 的 Web 门户通过 HTTP API Key 认证远程调用 TC 的 center_api。
 
 ## Architecture — Four Independent Services
 
@@ -44,6 +44,7 @@ All services are Flask apps。No Docker/containerization in production (docker-c
 | Center API | `aimod/center_api/` | 0.0.0.0:5003 | TC | Centralized data service for multi-host sharing, 含 monitor/system 端点供面板查询 |
 | Vectorization Engine | `joplinai.py` | — | TC | 分块编排 / AI增强 / 写 ChromaDB / 报告。joplinai-sync.timer 每8小时触发 |
 | Embedding Inference | SiliconFlow Cloud | — | Cloud | 嵌入向量生成 (`BAAI/bge-large-zh-v1.5`)，回落 HCX Ollama |
+| Vision Inference | SiliconFlow Cloud | — | Cloud | 笔记图片描述 (`Qwen/Qwen3-VL-8B-Instruct`)，资源ID缓存 |
 
 Center API 的 gunicorn 入口：`"aimod.center_api:create_app()"`（app factory 模式）。
 Web App 入口：`joplin_web_app:app`（模块级 `app = create_app()`，勿放 `if __name__` 内——gunicorn 不执行该块）。
@@ -119,7 +120,7 @@ log/                    # 日志 (gitignored)
 - `text_splitter.py` — 文本切分器，按句子边界切分
 - `vector_db_manager.py` — VectorDBManager 类，ChromaDB CRUD
 - `cache_manager.py` — SQLite LRU 缓存（本地回退用）
-- `note_enhancer.py` — AI增强 摘要/标签增强（cloud/local/none），含 Ollama vision 描述
+- `note_enhancer.py` — AI增强 摘要/标签增强（cloud/local/none），含 SiliconFlow Vision 图片描述（策略模式 `_VisionClient` / `_SiliconFlowVisionClient`，按 `resource_id+model` 缓存）
 - `run_tracker.py` — RunTracker 类，运行数据采集和历史记录 (remote-first)
 - `cache_client.py` — CacheClient，增强缓存纯远程（无本地回退）
 - `history_client.py` — HistoryClient，运行历史远程存储
@@ -133,7 +134,7 @@ log/                    # 日志 (gitignored)
 ### Utility Submodule (`func/`)
 
 Proper git submodule registered in `.gitmodules` pointing to `heart5/func`. Clone with `git submodule update --init` to fetch. Key modules:
-- `jpfuncs.py` — Joplin API wrapper (CRUD for notes, notebooks, tags)
+- `jpfuncs.py` — Joplin API wrapper (CRUD for notes, notebooks, tags)，`_validate_uuid()` 校验所有 `parent_id` 参数
 - `configpr.py` — INI config reader
 - `first.py` — Project root detection (looks for `rootfile` marker)
 - `logme.py` — Logging setup
@@ -211,7 +212,7 @@ ssh tc "cd /home/baiyefeng/work/joplinai && git pull && sudo systemctl restart -
 | `deepseek-v4-flash` | QA 对话主路 + AI增强（`cloud_model=deepseek-v4-flash`） | ~5秒/次 |
 | `deepseek-v4-pro` | 图片精细描述（`vision_model`） | ~数秒/图 |
 | `BAAI/bge-large-zh-v1.5` | 文本嵌入（硅基流动云端，与本地同模型同维度） | ~0.1秒/次 |
-| `Qwen/Qwen3-VL-32B-Instruct` | 笔记图片描述（硅基流动云端视觉） | ~1-3秒/图 |
+| `Qwen/Qwen3-VL-8B-Instruct` | 笔记图片描述（硅基流动云端视觉，默认） | ~1-5秒/图 |
 
 可通过 `cloud_api_url` + `cloud_api_key` + `cloud_model` 切换至 Qwen/ChatGPT 等兼容提供者。
 嵌入可通过 `embedding_provider=siliconflow` 切至云端（硅基流动），`_FallbackClient` 自动回落本地 Ollama。
@@ -233,7 +234,7 @@ ssh tc "cd /home/baiyefeng/work/joplinai && git pull && sudo systemctl restart -
 | `rerank_enabled` | `true` | LLM 精排候选块重排序 |
 | `embedding_provider` | `siliconflow` | 嵌入后端: ollama(本地) / siliconflow(云端+回落) |
 | `siliconflow_api_key` | `sk-xxx` | 硅基流动 API Key（嵌入+Vision共用） |
-| `vision_model` | (空=默认) | Vision 模型，默认 `Qwen/Qwen3-VL-32B-Instruct` |
+| `vision_model` | (空=默认) | Vision 模型，默认 `Qwen/Qwen3-VL-8B-Instruct`（可选 `Qwen/Qwen3-VL-32B-Instruct`） |
 
 ## Production Incidents
 
