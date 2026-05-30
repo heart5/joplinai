@@ -224,10 +224,10 @@ class EmbeddingGenerator:
         """获取模型维度"""
         # 已知模型维度映射
         known_dimensions = {
-            "dengcao/bge-large-zh-v1.5": 1024,  # 根据日志显示实际是1024维
+            "dengcao/bge-large-zh-v1.5": 1024,
+            "BAAI/bge-large-zh-v1.5": 1024,  # 硅基流动云端同款模型
             "nomic-embed-text": 768,
             "qwen:1.8b": 2048,
-            # 可以添加更多已知模型
         }
 
         if self.model_name in known_dimensions:
@@ -262,7 +262,8 @@ class EmbeddingGenerator:
             self.chunk_size = 1850
             self.text_prep.chunk_size = self.chunk_size
             return
-        elif self.model_name == "dengcao/bge-large-zh-v1.5":
+        elif self.model_name == "dengcao/bge-large-zh-v1.5" \
+                or self.model_name == "BAAI/bge-large-zh-v1.5":
             self.chunk_size = 512
             self.text_prep.chunk_size = self.chunk_size
             return
