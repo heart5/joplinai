@@ -204,7 +204,7 @@ class EmbeddingGenerator:
             return True
         try:
             processed = self.text_prep.preprocess_for_embedding(chunk_text)
-            self._chunk_embedding_cache[key] = self.get_ollama_embedding(processed)
+            self._chunk_embedding_cache[key] = self._get_embedding(processed)
             return True
         except Exception as e:
             msg = str(e).lower()
@@ -1021,6 +1021,26 @@ class EmbeddingGenerator:
         return chunks
 
 # %% [markdown]
+# ## _get_embedding(text) — 嵌入后端分发
+
+    # %%
+    def _get_embedding(self, text: str):
+        """根据 embedding_provider 配置分发到 Ollama 或云端 API。"""
+        provider = self.config.get("embedding_provider", "ollama")
+        if provider == "siliconflow":
+            return self._get_cloud_embedding(text)
+        return self.get_ollama_embedding(text)
+
+    def _get_cloud_embedding(self, text: str):
+        """硅基流动云端嵌入 — BAAI/bge-large-zh-v1.5，与本地 Ollama 同模型同维度。"""
+        api_key = self.config.get("siliconflow_api_key", "")
+        url = "https://api.siliconflow.cn/v1/embeddings"
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        payload = {"model": "BAAI/bge-large-zh-v1.5", "input": text, "encoding_format": "float"}
+        resp = requests.post(url, json=payload, headers=headers, timeout=15)
+        resp.raise_for_status()
+        return resp.json()["data"][0]["embedding"]
+
 # ## get_ollama_embedding(self, text: str, host: str = "10.9.0.2", port: int = 11434)
 
     # %%
@@ -1126,7 +1146,7 @@ class EmbeddingGenerator:
         max_retries = 5
         for attempt in range(1, max_retries + 1):
             try:
-                embedding = self.get_ollama_embedding(processed_text)
+                embedding = self._get_embedding(processed_text)
                 if embedding:
                     break
             except Exception as e:
@@ -1151,7 +1171,7 @@ class EmbeddingGenerator:
                             f"句子边界截断至{len(truncated)}字符（安全上限={safe_chars}字符）"
                         )
                         try:
-                            embedding = self.get_ollama_embedding(truncated)
+                            embedding = self._get_embedding(truncated)
                         except Exception as e2:
                             log.error(f"[嵌入失败] 截断回退嵌入仍失败: {e2}")
                             return []
