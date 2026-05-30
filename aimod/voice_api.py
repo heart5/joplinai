@@ -2,10 +2,12 @@
 # jupyter:
 #   jupytext:
 #     formats: ipynb,py:percent
+#     split_at_heading: true
 #     text_representation:
 #       extension: .py
 #       format_name: percent
 #       format_version: '1.3'
+#       jupytext_version: 1.19.1
 # ---
 
 # %% [markdown]
@@ -54,13 +56,18 @@ def _get_model():
 
 
 # %%
-def _save_transcription(account, msg_time, sender, text, engine="ollama", filepath=None):
+def _save_transcription(account, msg_time, sender, text, engine="ollama", source="unknown", filepath=None):
     """写入转录结果到 v4txt_v2，INSERT OR IGNORE 保证幂等。"""
     try:
         conn = sqlite3.connect(str(V4TXT_DB))
+        # 确保 source 列存在（向后兼容旧 schema）
+        try:
+            conn.execute("ALTER TABLE v4txt_v2 ADD COLUMN source TEXT DEFAULT 'unknown'")
+        except sqlite3.OperationalError:
+            pass
         conn.execute(
-            "INSERT OR IGNORE INTO v4txt_v2 (account, msg_time, sender, text, engine, filepath) VALUES (?, ?, ?, ?, ?, ?)",
-            (account, msg_time, sender, text, engine, filepath),
+            "INSERT OR IGNORE INTO v4txt_v2 (account, msg_time, sender, text, engine, source, filepath) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (account, msg_time, sender, text, engine, source, filepath),
         )
         conn.commit()
         conn.close()
@@ -125,6 +132,7 @@ def transcribe():
     account = request.form.get("account", "")
     msg_time = request.form.get("msg_time", "")
     sender = request.form.get("sender", "")
+    source = request.form.get("source", "unknown")
 
     # 写入临时文件
     suffix = Path(file.filename).suffix or ".mp3"
@@ -144,7 +152,7 @@ def transcribe():
         # 写入 v4txt_v2（如果提供了身份参数）
         if account and msg_time and sender:
             rel_path = f"img/webchat/{msg_time[:4]}{msg_time[5:7]}{msg_time[8:10]}/{sender}_{Path(file.filename).stem}"
-            _save_transcription(account, msg_time, sender, text, "ollama", rel_path)
+            _save_transcription(account, msg_time, sender, text, "ollama", source, rel_path)
 
         return jsonify({"text": text, "language": info.language, "probability": info.language_probability})
     except Exception as e:
