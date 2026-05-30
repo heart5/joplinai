@@ -13,6 +13,8 @@ with pathmagic.Context():
         createnote,
         get_notes_in_notebook_by_title,
         getinivaluefromcloud,
+        jpapi,
+        searchnotebook,
     )
     from func.logme import log
     from aimod.note_enhancer import describe_images
@@ -26,7 +28,7 @@ MODEL_8B = "Qwen/Qwen3-VL-8B-Instruct"
 # 3 target notes (note_id -> max_images)
 TARGET_NOTES = {
     "94690027c8944bddb05e4c0dd758646b": 2,   # 黄鹤楼细枝感恩
-    "cae77915c0154e69bb3c729ef9ca53df": 2,   # 力博得智能声波牙刷-星芒
+    "98174d03b0b44a9d937b49055ed2eda5": 2,   # 小米音箱
     "a59b0eeb2b104604908ed7cbc9d6d77c": 1,   # 台灯LP005
 }
 
@@ -40,9 +42,8 @@ target_notes = [n for n in notes if n.id in TARGET_NOTES]
 print(f"\nFound {len(target_notes)} target notes")
 
 # 2. Extract images per note
-from func.jpfuncs import jpapi as jpapi_instance
-
-image_proc = ImageProcessor(jpapi_instance)
+image_proc = ImageProcessor(jpapi)
+nb_id = searchnotebook(NOTEBOOK)
 
 all_comparisons = []  # [(note_title, resource_id, mime, b64, result_32b, result_8b, time_32b, time_8b)]
 
@@ -162,7 +163,7 @@ note_title = f"Vision模型对比 32Bvs8B {time.strftime('%m%d %H:%M')}"
 print(f"Creating note: {note_title}")
 print(f"Body size: {len(note_body)} chars (with {len(all_comparisons)} embedded images)")
 
-createnote(note_title, note_body, NOTEBOOK)
+createnote(title=note_title, body=note_body, parent_id=nb_id)
 print("Note created! Now run `joplin sync` to sync...")
 
 # 5. Sync Joplin (local - will push to cloud)

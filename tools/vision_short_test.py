@@ -6,16 +6,18 @@ with pathmagic.Context():
     from func.jpfuncs import (
         createnote,
         get_notes_in_notebook_by_title,
+        jpapi,
+        searchnotebook,
     )
     from func.logme import log
     from aimod.note_enhancer import describe_images
     from aimod.image_processor import ImageProcessor
-    from func.jpfuncs import jpapi as _jpapi
 
 NOTEBOOK = "美食消费单"
 MODEL = "Qwen/Qwen3-VL-8B-Instruct"
 
 print(f"笔记本: {NOTEBOOK}  模型: {MODEL}")
+nb_id = searchnotebook(NOTEBOOK)
 notes = get_notes_in_notebook_by_title(notebook_title=NOTEBOOK)
 
 img_notes = []
@@ -27,7 +29,7 @@ for n in notes:
 
 print(f"共{len(notes)}条笔记, {len(img_notes)}条有图")
 
-image_proc = ImageProcessor(_jpapi)
+image_proc = ImageProcessor(jpapi)
 results = []
 
 for n, rids in img_notes[:3]:
@@ -75,5 +77,5 @@ for r in results:
     md.append(f"| {r['title']} | {r['time']:.1f}s | {len(r['desc'] or '')} |")
 
 title = f"Vision简版测试 8B {time.strftime('%m%d %H:%M')}"
-createnote(title, "\n".join(md), NOTEBOOK)
+createnote(title=title, body="\n".join(md), parent_id=nb_id)
 print(f"\nNote: {title}")
