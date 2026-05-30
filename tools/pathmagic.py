@@ -1,6 +1,7 @@
 # ---
 # jupyter:
 #   jupytext:
+#     split_at_heading: true
 #     text_representation:
 #       extension: .py
 #       format_name: percent

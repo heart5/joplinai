@@ -2,6 +2,7 @@
 # jupyter:
 #   jupytext:
 #     formats: ipynb,py:percent
+#     split_at_heading: true
 #     text_representation:
 #       extension: .py
 #       format_name: percent
@@ -47,7 +48,7 @@ _DEFAULT_CLOUD_API_URL = "https://api.deepseek.com/v1/chat/completions"
 _DEFAULT_CLOUD_MODEL = "deepseek-v4-flash"
 _DEFAULT_VISION_MODEL = "deepseek-v4-pro"
 _SILICONFLOW_VISION_URL = "https://api.siliconflow.cn/v1/chat/completions"
-_DEFAULT_SF_VISION_MODEL = "Qwen/Qwen3-VL-32B-Instruct"
+_DEFAULT_SF_VISION_MODEL = "Qwen/Qwen3-VL-8B-Instruct"
 
 
 def _get_cloud_api_url() -> str:
@@ -639,12 +640,11 @@ def describe_images(
             except Exception:
                 pass
 
-        prompt = "请用中文描述这张图片的内容，重点说明图片传达的关键信息。"
+        prompt = "请用一句话（50字以内）描述这张图片的核心内容。"
         if context:
             prompt = (
-                f"以下是笔记的部分文本上下文，请结合上下文描述图片内容：\n"
-                f"{context[:3000]}\n\n"
-                f"请用中文描述这张图片的内容，重点说明图片与上下文的关系。"
+                f"结合以下笔记上下文，用一句话（50字以内）描述这张图片：\n"
+                f"{context[:2000]}"
             )
 
         result = client.describe(img_data["b64"], img_data["mime"], prompt)
