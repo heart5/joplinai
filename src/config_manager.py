@@ -82,6 +82,10 @@ class ConfigManager:
             "cloud_api_url",
             "cloud_api_key",
             "enhance_ollama_chat_model",
+            "ollama_host",
+            "ollama_embedding_model",
+            "embedding_provider",
+            "siliconflow_api_key",
             # 可以根据需要无限扩展...
         ]
         self._fetch_and_update()  # 初始加载

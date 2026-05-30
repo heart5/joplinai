@@ -105,6 +105,9 @@ CONFIG = {
     "cloud_model": getinivaluefromcloud("joplinai", "cloud_model") or "deepseek-v4-flash",
     "enhance_ollama_chat_model": getinivaluefromcloud("joplinai", "enhance_ollama_chat_model") or "qwen2.5:1.5b",
     "cloud_api_key": getinivaluefromcloud("joplinai", "cloud_api_key") or getinivaluefromcloud("joplinai", "deepseek_token"),
+    # 嵌入后端选择: ollama(默认) / siliconflow
+    "embedding_provider": getinivaluefromcloud("joplinai", "embedding_provider") or "ollama",
+    "siliconflow_api_key": getinivaluefromcloud("joplinai", "siliconflow_api_key") or "",
 
     "force_update": False,  # 新增：强制更新开关，默认关闭
     "chunk_overlap": 50,
