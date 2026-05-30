@@ -56,18 +56,19 @@ def _get_model():
 
 
 # %%
-def _save_transcription(account, msg_time, sender, text, engine="ollama", source="unknown", filepath=None):
+def _save_transcription(account, msg_time, sender, text, send=0, engine="ollama", source="unknown", filepath=None):
     """写入转录结果到 v4txt_v2，INSERT OR IGNORE 保证幂等。"""
     try:
         conn = sqlite3.connect(str(V4TXT_DB))
-        # 确保 source 列存在（向后兼容旧 schema）
-        try:
-            conn.execute("ALTER TABLE v4txt_v2 ADD COLUMN source TEXT DEFAULT 'unknown'")
-        except sqlite3.OperationalError:
-            pass
+        # 确保旧列存在（向后兼容旧 schema）
+        for col, default in [("source", "'unknown'"), ("send", "0")]:
+            try:
+                conn.execute(f"ALTER TABLE v4txt_v2 ADD COLUMN {col} TEXT DEFAULT {default}")
+            except sqlite3.OperationalError:
+                pass
         conn.execute(
-            "INSERT OR IGNORE INTO v4txt_v2 (account, msg_time, sender, text, engine, source, filepath) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (account, msg_time, sender, text, engine, source, filepath),
+            "INSERT OR IGNORE INTO v4txt_v2 (account, msg_time, sender, send, text, engine, source, filepath) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (account, msg_time, sender, send, text, engine, source, filepath),
         )
         conn.commit()
         conn.close()
@@ -81,7 +82,7 @@ def _query_transcriptions(account, records):
     """批量查询 v4txt_v2。
 
     records 为 [(msg_time, sender), ...]。
-    返回 dict: {(msg_time, sender): {text, engine}, ...}
+    返回 dict: {(msg_time, sender): {text, engine, send}, ...}
     """
     if not records:
         return {}
@@ -90,11 +91,11 @@ def _query_transcriptions(account, records):
         result = {}
         for msg_time, sender in records:
             row = conn.execute(
-                "SELECT text, engine FROM v4txt_v2 WHERE account=? AND msg_time=? AND sender=?",
+                "SELECT text, engine, send FROM v4txt_v2 WHERE account=? AND msg_time=? AND sender=?",
                 (account, msg_time, sender),
             ).fetchone()
             if row:
-                result[(msg_time, sender)] = {"text": row[0], "engine": row[1]}
+                result[(msg_time, sender)] = {"text": row[0], "engine": row[1], "send": row[2]}
         conn.close()
         return result
     except Exception as e:
@@ -132,6 +133,7 @@ def transcribe():
     account = request.form.get("account", "")
     msg_time = request.form.get("msg_time", "")
     sender = request.form.get("sender", "")
+    send = int(request.form.get("send", "0"))
     source = request.form.get("source", "unknown")
 
     # 写入临时文件
@@ -146,13 +148,13 @@ def transcribe():
         segments, info = model.transcribe(tmp_path, beam_size=5, language=lang)
         text = " ".join(seg.text.strip() for seg in segments)
         log.info(
-            f"转录完成: {file.filename} → {len(text)} 字, 检测语言: {info.language} (p={info.language_probability:.2f})"
+            f"转录完成: [{source}] {sender} send={send} | {file.filename} → {len(text)} 字, lang={info.language} p={info.language_probability:.2f}"
         )
 
         # 写入 v4txt_v2（如果提供了身份参数）
         if account and msg_time and sender:
             rel_path = f"img/webchat/{msg_time[:4]}{msg_time[5:7]}{msg_time[8:10]}/{sender}_{Path(file.filename).stem}"
-            _save_transcription(account, msg_time, sender, text, "ollama", source, rel_path)
+            _save_transcription(account, msg_time, sender, text, send=send, engine="ollama", source=source, filepath=rel_path)
 
         return jsonify({"text": text, "language": info.language, "probability": info.language_probability})
     except Exception as e:
