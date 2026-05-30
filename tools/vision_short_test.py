@@ -40,10 +40,11 @@ for n, rids in img_notes[:3]:
         continue
     img_data = imgs[rid]
     t0 = time.time()
-    desc = describe_images({rid: img_data}, context=n.body or '', model=MODEL)
+    desc_map = describe_images({rid: img_data}, context=n.body or '', model=MODEL)
+    desc = desc_map.get(rid, "")
     elapsed = time.time() - t0
     size_kb = len(img_data['b64']) * 3 // 4 // 1024
-    print(f"  {n.title}: {elapsed:.1f}s | {len(desc or '')}字 | {size_kb}KB")
+    print(f"  {n.title}: {elapsed:.1f}s | {len(desc)}字 | {size_kb}KB")
     if desc:
         print(f"    {desc[:100]}...")
     results.append({

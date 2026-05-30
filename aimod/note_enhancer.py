@@ -595,7 +595,7 @@ def describe_images(
     images: dict[str, dict],
     context: str = "",
     model: str = "",
-) -> Optional[str]:
+) -> dict[str, str]:
     """Describe images using SiliconFlow vision model with resource-id based caching.
 
     缓存键: (resource_id, "vision_desc", model)
@@ -606,10 +606,10 @@ def describe_images(
         context: surrounding text context for better descriptions
         model: vision model ID (default Qwen/Qwen2.5-VL-32B-Instruct)
 
-    Returns concatenated image description text, or None if all fail.
+    Returns: {resource_id: description} 映射，全部失败返回 {}
     """
     if not images:
-        return None
+        return {}
 
     if not model:
         model = _DEFAULT_SF_VISION_MODEL
@@ -617,13 +617,13 @@ def describe_images(
     api_key = _get_vision_api_key()
     if not api_key:
         log.warning("未配置 siliconflow_api_key，无法调用视觉模型")
-        return None
+        return {}
 
     client = _SiliconFlowVisionClient(api_key, model)
     cache_manager = get_cache_manager()
 
     task = "vision_desc"
-    descriptions = []
+    result_map: dict[str, str] = {}
 
     for rid, img_data in images.items():
         # 按 resource_id + model 查缓存
@@ -631,7 +631,7 @@ def describe_images(
             try:
                 cache_result = cache_manager.get(rid, task, model)
                 if cache_result.content is not None and _is_valid_vision_result(cache_result.content):
-                    descriptions.append(cache_result.content)
+                    result_map[rid] = cache_result.content
                     log.info(
                         f"Vision 缓存命中: {rid[:12]}... "
                         f"model={model} ({len(cache_result.content)}字符)"
@@ -649,7 +649,7 @@ def describe_images(
 
         result = client.describe(img_data["b64"], img_data["mime"], prompt)
         if result and _is_valid_vision_result(result):
-            descriptions.append(result)
+            result_map[rid] = result
             log.info(
                 f"硅基流动 Vision 描述成功: {rid[:12]}... "
                 f"model={model} ({len(result)}字符)"
@@ -662,9 +662,7 @@ def describe_images(
         else:
             log.warning(f"图片 {rid} 描述失败 (model={model})")
 
-    if not descriptions:
-        return None
-    return "\n".join(descriptions)
+    return result_map
 
 
 # %% [markdown]
@@ -676,13 +674,10 @@ def process_note_vision(
     images: dict[str, dict],
     context: str = "",
     model: str = "",
-) -> Optional[str]:
-    """Generate a comprehensive note enhancement using vision + text.
+) -> dict[str, str]:
+    """Generate image descriptions for note images via SiliconFlow vision model.
 
-    Combines note text and embedded images, sends to SiliconFlow vision model,
-    returns a description that enriches the text-only understanding.
-
-    Results are cached by resource_id + model to avoid repeat API calls.
+    Returns {resource_id: description} mapping, cached by resource_id + model.
     """
     return describe_images(images, context=context or note_content, model=model)
 

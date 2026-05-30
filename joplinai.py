@@ -319,7 +319,7 @@ def process_note_chunks(
             vision_enabled = True  # 默认开启
         elif isinstance(vision_enabled, str):
             vision_enabled = vision_enabled.lower() not in ("false", "0", "no", "off")
-        image_descriptions = None
+        image_descs = {}
         resource_ids = TextPreprocessor.extract_resource_ids(note.body)
 
         if vision_enabled and resource_ids:
@@ -335,36 +335,33 @@ def process_note_chunks(
                         f"笔记《{note.title}》成功获取 {len(images)}/{len(resource_ids)} 张图片"
                     )
                     from aimod.note_enhancer import describe_images
-                    image_descriptions = describe_images(
+                    image_descs = describe_images(
                         images,
                         context=note.body,
                         model=config.get("vision_model", ""),
                     )
-                    if image_descriptions:
+                    if image_descs:
+                        total_chars = sum(len(d) for d in image_descs.values())
                         log.info(
                             f"笔记《{note.title}》图片视觉描述生成成功"
-                            f"（{len(image_descriptions)}字符）"
+                            f"（{len(image_descs)}张，{total_chars}字符）"
                         )
                 else:
                     log.debug(f"笔记《{note.title}》图片资源获取失败，回退纯文本模式")
             except Exception as e:
                 log.warning(f"笔记《{note.title}》图片处理异常，回退纯文本模式: {e}")
 
-        # 清理图片 markdown 语法：vision成功→删除；失败→保留alt_text作为标注
-        if resource_ids:
-            keep_alt = not bool(image_descriptions)
-            text = TextPreprocessor.remove_image_syntax(text, keep_alt=keep_alt)
-            log.debug(
-                f"笔记《{note.title}》图片语法已清理 "
-                f"（{'保留alt_text' if keep_alt else '已用vision描述替代'}）"
-            )
+        # 图片描述内联替换原图片链接位置
+        if image_descs:
+            text = TextPreprocessor.replace_images_with_descriptions(text, image_descs)
+        elif resource_ids:
+            text = TextPreprocessor.remove_image_syntax(text, keep_alt=True)
 
         chunk_dicts = embedding_generator.split_into_semantic_chunks(
             text=text,
             note_title=note.title,
             note_tags=tags_str,
-            source_notebook_title=notebook_title,  # 新增参数
-            image_descriptions=image_descriptions,
+            source_notebook_title=notebook_title,
         )
         if not chunk_dicts:
             log.warning(f"笔记《{note.title}》拆分不出有效内容块，跳过。")

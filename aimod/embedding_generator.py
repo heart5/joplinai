@@ -809,21 +809,12 @@ class EmbeddingGenerator:
         note_title: str = "",
         note_tags: str = "",
         source_notebook_title: str = "",
-        image_descriptions: Optional[str] = None,
     ) -> List[Dict]:
         """将文本分割成语义块，并返回块字典列表。
         【增强】使用统一的正则表达式处理带`###`或不带的日期行，确保日期保留在块头部并被提取。
-
-        Args:
-            image_descriptions: 图片视觉描述文本，若提供则前置到原文，
-                               使图片信息融入分块上下文。
         """
         if not text:
             return []
-
-        # 图片描述前置到文本开头，随分块自然分布
-        if image_descriptions:
-            text = f"【图片内容描述】\n{image_descriptions}\n\n{text}"
 
         chunks = []
         # ========== 第一：统一按日期行进行一级分割 ==========

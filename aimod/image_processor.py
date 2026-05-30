@@ -25,6 +25,8 @@ __all__ = ["ImageProcessor"]
 SUPPORTED_IMAGE_MIMES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
 MAX_IMAGE_SIZE = 8 * 1024 * 1024  # 8MB
 MAX_IMAGE_WORKERS = 5
+_MAX_IMAGE_BYTES = 1 * 1024 * 1024  # 1MB — 超过此值压缩
+_MAX_IMAGE_DIM = 2048  # 压缩时最长边上限
 
 
 class ImageProcessor:
@@ -36,6 +38,31 @@ class ImageProcessor:
 
     def __init__(self, joplin_api):
         self.api = joplin_api
+
+    @staticmethod
+    def _compress_image(content: bytes) -> bytes:
+        """图片 >1MB 时压缩：缩尺寸+降质量，返回压缩后字节（失败返回原图）"""
+        if len(content) <= _MAX_IMAGE_BYTES:
+            return content
+        try:
+            from io import BytesIO
+            from PIL import Image
+
+            img = Image.open(BytesIO(content))
+            w, h = img.size
+            if max(w, h) > _MAX_IMAGE_DIM:
+                ratio = _MAX_IMAGE_DIM / max(w, h)
+                img = img.resize((int(w * ratio), int(h * ratio)), Image.LANCZOS)
+            out = BytesIO()
+            if img.mode in ("RGBA", "P"):
+                img = img.convert("RGB")
+            img.save(out, format="JPEG", quality=80, optimize=True)
+            compressed = out.getvalue()
+            if len(compressed) < len(content):
+                return compressed
+        except Exception:
+            pass
+        return content
 
     def _get_resource_url(self, resource_id: str) -> str:
         """Build the raw resource file URL from the API's base URL."""
@@ -75,8 +102,11 @@ class ImageProcessor:
                     f"资源 {resource_id} 图片 {len(content)} 字节超过8MB限制，跳过"
                 )
                 return None
+            orig_len = len(content)
+            content = self._compress_image(content)
+            actual_mime = "image/jpeg" if len(content) != orig_len else mime
             b64 = base64.b64encode(content).decode("ascii")
-            return {"b64": b64, "mime": mime}
+            return {"b64": b64, "mime": actual_mime}
         except Exception as e:
             log.warning(f"获取资源 {resource_id} 失败: {e}")
             return None

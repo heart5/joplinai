@@ -14,8 +14,8 @@ class TextPreprocessor:
     def __init__(self, chunk_size: int = 1024):
         self.chunk_size = chunk_size
 
-    RESOURCE_ID_PATTERN = re.compile(r"!\[.*?\]\(:/([a-fA-F0-9]{32})\)")
-    IMAGE_SYNTAX_PATTERN = re.compile(r"!\[(.*?)\]\(:/([a-fA-F0-9]{32})\)")
+    RESOURCE_ID_PATTERN = re.compile(r"!?\[.*?\]\(:/([a-fA-F0-9]{32})\)")
+    IMAGE_SYNTAX_PATTERN = re.compile(r"!?\[(.*?)\]\(:/([a-fA-F0-9]{32})\)")
 
     @staticmethod
     def extract_resource_ids(text: str) -> list[str]:
@@ -42,6 +42,22 @@ class TextPreprocessor:
         if keep_alt:
             return TextPreprocessor.IMAGE_SYNTAX_PATTERN.sub(r"\1", text)
         return TextPreprocessor.IMAGE_SYNTAX_PATTERN.sub("", text)
+
+    @staticmethod
+    def replace_images_with_descriptions(text: str, descriptions: dict[str, str]) -> str:
+        """将 ![alt](:/rid) / [text](:/rid) 替换为 【图片：{desc}】"""
+        if not text or not descriptions:
+            return text
+
+        def _replacer(match):
+            rid = match.group(2)
+            desc = descriptions.get(rid, "")
+            if desc:
+                return f"【图片：{desc}】"
+            alt = match.group(1).strip()
+            return alt if alt else ""
+
+        return TextPreprocessor.IMAGE_SYNTAX_PATTERN.sub(_replacer, text)
 
     def clean_text(self, text: str) -> str:
         """Remove images, formatting symbols, and excess whitespace from note text."""

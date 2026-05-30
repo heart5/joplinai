@@ -63,20 +63,22 @@ for note in target_notes:
 
         # 32B
         t0 = time.time()
-        r32 = describe_images(
+        r32_map = describe_images(
             {rid: img_data},
             context=body[:2000],
             model=MODEL_32B,
         )
+        r32 = r32_map.get(rid, "")
         t32 = time.time() - t0
 
         # 8B
         t0 = time.time()
-        r8 = describe_images(
+        r8_map = describe_images(
             {rid: img_data},
             context=body[:2000],
             model=MODEL_8B,
         )
+        r8 = r8_map.get(rid, "")
         t8 = time.time() - t0
 
         all_comparisons.append({
@@ -91,8 +93,8 @@ for note in target_notes:
             'time_8b': t8,
         })
 
-        print(f"    32B: {t32:.1f}s, {len(r32 or '')} chars")
-        print(f"    8B:  {t8:.1f}s, {len(r8 or '')} chars")
+        print(f"    32B: {t32:.1f}s, {len(r32)} chars")
+        print(f"    8B:  {t8:.1f}s, {len(r8)} chars")
 
 # 3. Build comparison note
 print("\n" + "=" * 60)
