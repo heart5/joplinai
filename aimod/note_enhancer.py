@@ -43,10 +43,11 @@ with pathmagic.Context():
 # # 模型配置
 
 # %%
-DEFAULT_OLLAMA_VISION_MODEL = "minicpm-v"  # Ollama Vision 模型
 _DEFAULT_CLOUD_API_URL = "https://api.deepseek.com/v1/chat/completions"
 _DEFAULT_CLOUD_MODEL = "deepseek-v4-flash"
 _DEFAULT_VISION_MODEL = "deepseek-v4-pro"
+_SILICONFLOW_VISION_URL = "https://api.siliconflow.cn/v1/chat/completions"
+_DEFAULT_SF_VISION_MODEL = "Qwen/Qwen3-VL-32B-Instruct"
 
 
 def _get_cloud_api_url() -> str:
@@ -78,13 +79,14 @@ __all__ = [
     "cloud_process_note",
     "describe_images",
     "process_note_vision",
-    "ollama_vision_describe",
     "ollama_process_note",
     "enhance_note",
     "get_call_stats",
     "reset_call_stats",
     "get_ollama_call_stats",
     "reset_ollama_call_stats",
+    "_VisionClient",
+    "_SiliconFlowVisionClient",
 ]
 
 def get_cache_manager():
@@ -481,64 +483,111 @@ def enhance_note(
 
 
 # %% [markdown]
-# # DeepSeek Vision API（图片处理）
+# # Vision API（硅基流动云端视觉模型）
 
 # %% [markdown]
-# ## _call_cloud_vision_api(messages: list[dict], model: str, max_retries: int)
+# ## _VisionClient — 视觉模型策略模式
 
 # %%
-def _call_cloud_vision_api(
-    messages: list[dict],
-    model: str = "",
-    max_retries: int = 2,
-) -> Optional[str]:
-    """Call vision API with native multimodal format.
+class _VisionClient:
+    """视觉模型统一接口"""
+    def describe(self, image_b64: str, mime: str, prompt: str) -> Optional[str]:
+        raise NotImplementedError
 
-    Each message dict has top-level 'image_data' (pure base64, no prefix)
-    or 'image_url' field alongside 'role' and 'content':
-    {"role": "user", "content": "描述图片", "image_data": "base64..."}
-    """
-    api_key = _get_cloud_api_key()
-    if not api_key:
-        log.warning("未配置云端 API Key")
+
+class _SiliconFlowVisionClient(_VisionClient):
+    """硅基流动视觉模型（OpenAI兼容格式）"""
+
+    URL = _SILICONFLOW_VISION_URL
+
+    def __init__(self, api_key: str, model_id: str):
+        self.api_key = api_key
+        self.model_id = model_id
+
+    def describe(self, image_b64: str, mime: str, prompt: str) -> Optional[str]:
+        data_url = f"data:{mime};base64,{image_b64}"
+        payload = {
+            "model": self.model_id,
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": data_url}},
+                    {"type": "text", "text": prompt},
+                ]
+            }],
+            "temperature": 0.3,
+            "max_tokens": 800,
+        }
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        for attempt in range(2):
+            try:
+                resp = requests.post(
+                    self.URL, json=payload, headers=headers, timeout=60
+                )
+                if resp.status_code == 400:
+                    log.error(f"硅基流动 Vision API 400错误: {resp.text[:200]}")
+                    return None
+                resp.raise_for_status()
+                return resp.json()["choices"][0]["message"]["content"].strip()
+            except Exception as e:
+                log.warning(
+                    f"硅基流动 Vision API调用失败({attempt + 1}/2): {str(e)[:100]}"
+                )
+                time.sleep(2 ** attempt)
         return None
-
-    if not model:
-        model = _DEFAULT_VISION_MODEL
-
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "model": model,
-        "messages": messages,
-        "temperature": 0.3,
-        "max_tokens": 800,
-    }
-
-    api_url = _get_cloud_api_url()
-    for attempt in range(max_retries):
-        try:
-            response = requests.post(
-                api_url, headers=headers, json=payload, timeout=60
-            )
-            if response.status_code == 400:
-                log.error(f"云端 Vision API 400错误: {response.text[:200]}")
-                return None
-            response.raise_for_status()
-            result = response.json()["choices"][0]["message"]["content"].strip()
-            return result
-        except Exception as e:
-            log.warning(
-                f"云端 Vision API调用失败({attempt + 1}/{max_retries}): {str(e)[:100]}"
-            )
-            time.sleep(2 ** attempt)
-    return None
 
 
 # %% [markdown]
-# ## describe_images(images: dict[str, dict], context: str, model: str) -> Optional[str]
+# ## _get_vision_api_key() -> str
+
+# %%
+def _get_vision_api_key() -> str:
+    """获取硅基流动 API Key（复用 siliconflow_api_key）"""
+    return getinivaluefromcloud("joplinai", "siliconflow_api_key") or ""
+
+
+# %% [markdown]
+# ## _is_valid_vision_result(content: str) -> bool
+
+# %%
+def _is_valid_vision_result(content: str, min_length: int = 30) -> bool:
+    """Check if a vision model response is a valid description (not a refusal/hallucination)."""
+    if not content or len(content) < min_length:
+        return False
+
+    refusal_patterns = [
+        "很抱歉，我无法",
+        "对不起，我不能",
+        "抱歉，无法提供",
+        "由于我无法访问",
+        "我无法查看",
+        "无法提供对您提到的",
+        "错误的链接或损坏",
+        "I cannot provide",
+        "I'm unable to",
+        "cannot access the image",
+    ]
+    for pattern in refusal_patterns:
+        if pattern in content:
+            return False
+
+    import re
+    meta_only_patterns = [
+        r"^这是一[张个幅].*(?:图片|照片|截图|图像)[，。]?$",
+        r"^该.*(?:图片|照片|截图|图像).*(?:显示|展示|包含).*[。，]?$",
+    ]
+    for pattern in meta_only_patterns:
+        if re.match(pattern, content.strip()):
+            return False
+
+    return True
+
+
+# %% [markdown]
+# ## describe_images(images, context, model) -> Optional[str]
 
 # %%
 def describe_images(
@@ -546,12 +595,15 @@ def describe_images(
     context: str = "",
     model: str = "",
 ) -> Optional[str]:
-    """Describe a set of images using Vision API (native multimodal format).
+    """Describe images using SiliconFlow vision model with resource-id based caching.
+
+    缓存键: (resource_id, "vision_desc", model)
+    同一图片+同一模型不会重复调用API。
 
     Args:
         images: {resource_id: {'b64': str, 'mime': str}} dict
         context: surrounding text context for better descriptions
-        model: vision model name
+        model: vision model ID (default Qwen/Qwen2.5-VL-32B-Instruct)
 
     Returns concatenated image description text, or None if all fail.
     """
@@ -559,13 +611,34 @@ def describe_images(
         return None
 
     if not model:
-        model = _DEFAULT_VISION_MODEL
+        model = _DEFAULT_SF_VISION_MODEL
 
-    # One message per image
-    image_items = list(images.items())
+    api_key = _get_vision_api_key()
+    if not api_key:
+        log.warning("未配置 siliconflow_api_key，无法调用视觉模型")
+        return None
+
+    client = _SiliconFlowVisionClient(api_key, model)
+    cache_manager = get_cache_manager()
+
+    task = "vision_desc"
     descriptions = []
 
-    for rid, img_data in image_items:
+    for rid, img_data in images.items():
+        # 按 resource_id + model 查缓存
+        if cache_manager:
+            try:
+                cache_result = cache_manager.get(rid, task, model)
+                if cache_result.content is not None and _is_valid_vision_result(cache_result.content):
+                    descriptions.append(cache_result.content)
+                    log.info(
+                        f"Vision 缓存命中: {rid[:12]}... "
+                        f"model={model} ({len(cache_result.content)}字符)"
+                    )
+                    continue
+            except Exception:
+                pass
+
         prompt = "请用中文描述这张图片的内容，重点说明图片传达的关键信息。"
         if context:
             prompt = (
@@ -573,16 +646,21 @@ def describe_images(
                 f"{context[:3000]}\n\n"
                 f"请用中文描述这张图片的内容，重点说明图片与上下文的关系。"
             )
-        message = {
-            "role": "user",
-            "content": prompt,
-            "image_data": img_data["b64"],
-        }
-        result = _call_cloud_vision_api([message], model=model)
-        if result:
+
+        result = client.describe(img_data["b64"], img_data["mime"], prompt)
+        if result and _is_valid_vision_result(result):
             descriptions.append(result)
+            log.info(
+                f"硅基流动 Vision 描述成功: {rid[:12]}... "
+                f"model={model} ({len(result)}字符)"
+            )
+            if cache_manager:
+                try:
+                    cache_manager.set(rid, task, result, model)
+                except Exception:
+                    pass
         else:
-            log.warning(f"图片 {rid} 描述失败")
+            log.warning(f"图片 {rid} 描述失败 (model={model})")
 
     if not descriptions:
         return None
@@ -601,155 +679,12 @@ def process_note_vision(
 ) -> Optional[str]:
     """Generate a comprehensive note enhancement using vision + text.
 
-    Combines note text and embedded images, sends to vision model,
+    Combines note text and embedded images, sends to SiliconFlow vision model,
     returns a description that enriches the text-only understanding.
 
-    Use cache-friendly: wrap with cloud_process_note for caching.
+    Results are cached by resource_id + model to avoid repeat API calls.
     """
     return describe_images(images, context=context or note_content, model=model)
-
-
-# %% [markdown]
-# # Ollama Vision API
-
-# %% [markdown]
-# ## _is_valid_vision_result(content: str) -> bool
-
-# %%
-def _is_valid_vision_result(content: str, min_length: int = 30) -> bool:
-    """Check if a vision model response is a valid description (not a refusal/hallucination)."""
-    if not content or len(content) < min_length:
-        return False
-
-    # 直接拒绝
-    refusal_patterns = [
-        "很抱歉，我无法",
-        "对不起，我不能",
-        "抱歉，无法提供",
-        "由于我无法访问",
-        "我无法查看",
-        "无法提供对您提到的",
-        "错误的链接或损坏",
-        "I cannot provide",
-        "I'm unable to",
-        "cannot access the image",
-    ]
-    for pattern in refusal_patterns:
-        if pattern in content:
-            return False
-
-    # 纯元描述（没有实际内容，只是说"这是一张图片"）
-    meta_only_patterns = [
-        r"^这是一[张个幅].*(?:图片|照片|截图|图像)[，。]?$",
-        r"^该.*(?:图片|照片|截图|图像).*(?:显示|展示|包含).*[。，]?$",
-    ]
-    import re
-    for pattern in meta_only_patterns:
-        if re.match(pattern, content.strip()):
-            return False
-
-    return True
-
-
-# %% [markdown]
-# ## ollama_vision_describe(images, context, model, ollama_host) -> Optional[str]
-
-# %%
-def ollama_vision_describe(
-    images: dict[str, dict],
-    context: str = "",
-    model: str = DEFAULT_OLLAMA_VISION_MODEL,
-    ollama_host: str = "http://127.0.0.1:11434",
-    use_cache: bool = True,
-) -> Optional[str]:
-    """Describe images using a local Ollama vision model.
-
-    Args:
-        images: {resource_id: {'b64': str, 'mime': str}} dict
-        context: surrounding text context for better descriptions
-        model: Ollama model name
-        ollama_host: Ollama API base URL
-        use_cache: cache vision results by image hash to avoid repeat Ollama calls
-
-    Returns concatenated image description text, or None if all fail.
-    """
-    if not images:
-        return None
-
-    cache_manager = None
-    if use_cache:
-        try:
-            cache_manager = get_cache_manager()
-        except Exception:
-            pass
-
-    prompt = "请用中文描述这张图片的内容，重点说明图片中的文字信息和关键数据。"
-    if context:
-        prompt = (
-            f"以下是笔记的部分文本上下文：\n{context[:2000]}\n\n"
-            f"请结合上下文用中文描述这张图片的内容，"
-            f"重点说明图片中的文字信息和关键数据，以及图片与上下文的关系。"
-        )
-
-    task = f"vision_desc:{model}"
-    descriptions = []
-    for rid, img_data in images.items():
-        img_hash = compute_content_hash(img_data["b64"])
-
-        # Check cache
-        if cache_manager is not None:
-            cache_result = cache_manager.get(img_hash, task)
-            if cache_result.content is not None:
-                if _is_valid_vision_result(cache_result.content):
-                    descriptions.append(cache_result.content)
-                    log.info(
-                        f"Ollama Vision 缓存命中: {rid[:12]}... "
-                        f"({len(cache_result.content)}字符)"
-                    )
-                else:
-                    log.info(
-                        f"Ollama Vision 缓存无效(拒绝/过短)，跳过: {rid[:12]}..."
-                    )
-                continue
-
-        # Call Ollama
-        try:
-            response = requests.post(
-                f"{ollama_host}/api/chat",
-                json={
-                    "model": model,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "images": [img_data["b64"]],
-                    "stream": False,
-                },
-                timeout=300,
-            )
-            if response.status_code == 200:
-                content = response.json()["message"]["content"].strip()
-                if _is_valid_vision_result(content):
-                    descriptions.append(content)
-                    log.info(f"Ollama Vision 描述成功: {rid[:12]}... ({len(content)}字符)")
-                    if cache_manager is not None:
-                        try:
-                            cache_manager.set(img_hash, task, content)
-                        except Exception:
-                            pass
-                else:
-                    log.warning(
-                        f"Ollama Vision 结果无效(拒绝/过短/元描述)，丢弃: "
-                        f"{rid[:12]}... ({len(content)}字符)"
-                    )
-            else:
-                log.warning(
-                    f"Ollama Vision 失败({response.status_code}): {rid[:12]}..."
-                    f" {response.text[:100]}"
-                )
-        except Exception as e:
-            log.warning(f"Ollama Vision 异常: {rid[:12]}... {e}")
-
-    if not descriptions:
-        return None
-    return "\n".join(descriptions)
 
 
 # %% [markdown]

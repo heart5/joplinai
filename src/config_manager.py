@@ -2,6 +2,7 @@
 # jupyter:
 #   jupytext:
 #     formats: py:percent,ipynb:percent
+#     split_at_heading: true
 #     text_representation:
 #       extension: .py
 #       format_name: percent
@@ -86,6 +87,8 @@ class ConfigManager:
             "ollama_embedding_model",
             "embedding_provider",
             "siliconflow_api_key",
+            "vision_model",
+            "vision_enabled",
             # 可以根据需要无限扩展...
         ]
         self._fetch_and_update()  # 初始加载

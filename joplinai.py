@@ -117,9 +117,7 @@ CONFIG = {
     ),
     # 【新增】图片视觉处理开关，默认开启
     "vision_enabled": getinivaluefromcloud("joplinai", "vision_enabled"),
-    # 【新增】Ollama Vision 模型和主机
-    "vision_model": getinivaluefromcloud("joplinai", "vision_model") or "minicpm-v",
-    "vision_ollama_host": getinivaluefromcloud("joplinai", "vision_ollama_host") or "http://127.0.0.1:11434",
+    "vision_model": getinivaluefromcloud("joplinai", "vision_model") or "",
 }
 
 # %% [markdown]
@@ -336,12 +334,11 @@ def process_note_chunks(
                     log.info(
                         f"笔记《{note.title}》成功获取 {len(images)}/{len(resource_ids)} 张图片"
                     )
-                    from aimod.note_enhancer import ollama_vision_describe
-                    image_descriptions = ollama_vision_describe(
+                    from aimod.note_enhancer import describe_images
+                    image_descriptions = describe_images(
                         images,
                         context=note.body,
-                        model=config.get("vision_model", "minicpm-v"),
-                        ollama_host=config.get("vision_ollama_host", "http://127.0.0.1:11434"),
+                        model=config.get("vision_model", ""),
                     )
                     if image_descriptions:
                         log.info(

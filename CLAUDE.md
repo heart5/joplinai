@@ -43,12 +43,12 @@ All services are Flask apps。No Docker/containerization in production (docker-c
 | Q&A API | `joplin_qa_api.py` | 127.0.0.1:5000 | HCX | Internal HTTP API for vector search + LLM Q&A |
 | Center API | `aimod/center_api/` | 0.0.0.0:5003 | TC | Centralized data service for multi-host sharing, 含 monitor/system 端点供面板查询 |
 | Vectorization Engine | `joplinai.py` | — | TC | 分块编排 / AI增强 / 写 ChromaDB / 报告。joplinai-sync.timer 每8小时触发 |
-| Embedding Inference | Ollama | 11434 | HCX | 嵌入向量生成 (`dengcao/bge-large-zh-v1.5`)，TC 经公网 IP 远程调用 |
+| Embedding Inference | SiliconFlow Cloud | — | Cloud | 嵌入向量生成 (`BAAI/bge-large-zh-v1.5`)，回落 HCX Ollama |
 
 Center API 的 gunicorn 入口：`"aimod.center_api:create_app()"`（app factory 模式）。
 Web App 入口：`joplin_web_app:app`（模块级 `app = create_app()`，勿放 `if __name__` 内——gunicorn 不执行该块）。
 
-Data flow: `joplinai.py` → TC 本地 (Joplin Server / ChromaDB / center_api) + 远程 HCX (Ollama embedding / 11434) + 外部 Cloud API (AI增强, 默认 DeepSeek)。各 `aimod/*_client.py` 通过 HTTP + API Key → `aimod/center_api/` → `data/joplinai_center.db`
+Data flow: `joplinai.py` → TC 本地 (Joplin Server / ChromaDB / center_api) + 外部 SiliconFlow Cloud (嵌入+Vision) + 外部 Cloud API (AI增强, 默认 DeepSeek)。嵌入回落 HCX Ollama。各 `aimod/*_client.py` 通过 HTTP + API Key → `aimod/center_api/` → `data/joplinai_center.db`
 
 向量化优化：chunk 内容未变仅元数据（tags/summary）变更时，跳过嵌入生成，仅通过 `VectorDBManager.batch_update_chunks_metadata()` 一次性批量更新 ChromaDB metadata（不含 embeddings），避免不必要的远程序列调用。内容未变+增强完成时走 `_process_metadata_only_fast_path` 快速路径，完全跳过重复分块/嵌入/增强。
 
@@ -198,7 +198,7 @@ ssh tc "cd /home/baiyefeng/work/joplinai && git pull && sudo systemctl restart -
 |------|------|------|------|
 | `dengcao/bge-large-zh-v1.5` | 651 MB | 文本嵌入（向量化） | ~2秒/次 |
 | `qwen2.5:1.5b` | 986 MB | 标签提取、内容分类 | ~40-80秒/条 |
-| `minicpm-v:latest` | 5.5 GB | 笔记图片描述（`vision_enabled=False` 默认关闭） | ~数分钟/图 |
+| `minicpm-v:latest` | 5.5 GB | (已废弃) 笔记图片描述，不可用 | - |
 
 - **`qwen2.5:1.5b`** 通过 `enhance_ollama_chat_model` 配置键指定，供向量化管线离线批量任务使用
 - **无本地 QA 回退**：`qa_ollama_chat_model=none`，Cloud API 不可用时直接返回服务不可用，不尝试本地模型
@@ -211,6 +211,7 @@ ssh tc "cd /home/baiyefeng/work/joplinai && git pull && sudo systemctl restart -
 | `deepseek-v4-flash` | QA 对话主路 + AI增强（`cloud_model=deepseek-v4-flash`） | ~5秒/次 |
 | `deepseek-v4-pro` | 图片精细描述（`vision_model`） | ~数秒/图 |
 | `BAAI/bge-large-zh-v1.5` | 文本嵌入（硅基流动云端，与本地同模型同维度） | ~0.1秒/次 |
+| `Qwen/Qwen3-VL-32B-Instruct` | 笔记图片描述（硅基流动云端视觉） | ~1-3秒/图 |
 
 可通过 `cloud_api_url` + `cloud_api_key` + `cloud_model` 切换至 Qwen/ChatGPT 等兼容提供者。
 嵌入可通过 `embedding_provider=siliconflow` 切至云端（硅基流动），`_FallbackClient` 自动回落本地 Ollama。
@@ -227,11 +228,12 @@ ssh tc "cd /home/baiyefeng/work/joplinai && git pull && sudo systemctl restart -
 | `tags_model` | `cloud` | 标签模型: cloud/ollama/none |
 | `enhance_ollama_chat_model` | `qwen2.5:1.5b` | Ollama 标签/分类模型 |
 | `validation_threshold` | `300` | 增强缓存验证阈值，命中>N次触发重验 |
-| `vision_enabled` | `false` | CPU 跑视觉太慢，默认关闭 |
+| `vision_enabled` | `false` | 图片视觉描述（SiliconFlow云端），默认关闭 |
 | `hyde_enabled` | `true` | HyDE 假设文档嵌入增强检索 |
 | `rerank_enabled` | `true` | LLM 精排候选块重排序 |
 | `embedding_provider` | `siliconflow` | 嵌入后端: ollama(本地) / siliconflow(云端+回落) |
-| `siliconflow_api_key` | `sk-xxx` | 硅基流动 API Key（仅 siliconflow 模式） |
+| `siliconflow_api_key` | `sk-xxx` | 硅基流动 API Key（嵌入+Vision共用） |
+| `vision_model` | (空=默认) | Vision 模型，默认 `Qwen/Qwen3-VL-32B-Instruct` |
 
 ## Production Incidents
 

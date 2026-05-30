@@ -48,17 +48,18 @@ cache_bp = Blueprint("cache", __name__)
 
 # %%
 def enhance_cache_get(content_hash: str, task: str, model: str = "") -> dict:
-    """按 content_hash + task 列匹配（不依赖 cache_key 格式）。"""
+    """按 cache_key 精确匹配（含 model 区分不同模型结果）。"""
+    cache_key = f"{content_hash}_{task}_{model}" if model else f"{content_hash}_{task}"
     conn = _init_db()
     row = conn.execute(
         "SELECT result, hit_count, total_hits, cache_key FROM enhance_cache "
-        "WHERE content_hash=? AND task=? ORDER BY created_at DESC LIMIT 1",
-        (content_hash, task),
+        "WHERE cache_key=?",
+        (cache_key,),
     ).fetchone()
 
     if not row:
         conn.close()
-        return {"found": False, "cache_key": f"{content_hash}_{task}"}
+        return {"found": False, "cache_key": cache_key}
 
     cached_result, current_hit_count, total_hits, effective_key = row
     new_hit_count = current_hit_count + 1
