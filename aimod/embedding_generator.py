@@ -964,6 +964,7 @@ class EmbeddingGenerator:
                 "content_hash": chunk_hash,
                 "note_author": note_meta['note_author'],
                 "note_type": note_meta['note_type'],
+                "has_images": "【图片：" in chunk_content,
             }
             # AI增强生成摘要和标签
             enhanced_metadata = {}
