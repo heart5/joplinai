@@ -48,14 +48,28 @@ cache_bp = Blueprint("cache", __name__)
 
 # %%
 def enhance_cache_get(content_hash: str, task: str, model: str = "") -> dict:
-    """按 cache_key 精确匹配（含 model 区分不同模型结果）。"""
+    """精确匹配优先，回落 content_hash+task（向后兼容旧条目）。"""
     cache_key = f"{content_hash}_{task}_{model}" if model else f"{content_hash}_{task}"
     conn = _init_db()
+
+    # 1. 精确 cache_key 匹配（区分 model）
     row = conn.execute(
         "SELECT result, hit_count, total_hits, cache_key FROM enhance_cache "
         "WHERE cache_key=?",
         (cache_key,),
     ).fetchone()
+
+    # 2. 未命中且有 model 时，回落旧行为（兼容 model 参数引入前的缓存条目）
+    if not row and model:
+        row = conn.execute(
+            "SELECT result, hit_count, total_hits, cache_key FROM enhance_cache "
+            "WHERE content_hash=? AND task=? ORDER BY created_at DESC LIMIT 1",
+            (content_hash, task),
+        ).fetchone()
+        # 回落条目必须是期望 key 的前缀（仅缺 model 后缀），
+        # 否则说明是不同 model 的结果，不能串用。
+        if row and not cache_key.startswith(row[3]):
+            row = None
 
     if not row:
         conn.close()
