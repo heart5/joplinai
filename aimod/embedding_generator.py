@@ -115,10 +115,33 @@ class _SiliconFlowClient(_EmbeddingClient):
         return [d["embedding"] for d in data["data"]]
 
 
+class _FallbackClient(_EmbeddingClient):
+    """主后端失败时自动回落备后端"""
+
+    def __init__(self, primary: _EmbeddingClient, fallback: _EmbeddingClient):
+        self.primary = primary
+        self.fallback = fallback
+
+    def embed(self, text: str):
+        try:
+            return self.primary.embed(text)
+        except Exception as e:
+            log.warning(f"云端嵌入失败({e})，回落本地 Ollama")
+            return self.fallback.embed(text)
+
+    def embed_batch(self, texts: list):
+        try:
+            return self.primary.embed_batch(texts)
+        except Exception as e:
+            log.warning(f"云端嵌入批处理失败({e})，回落本地 Ollama")
+            return self.fallback.embed_batch(texts)
+
+
 def _make_embedding_client(config: dict, model_name: str) -> _EmbeddingClient:
+    ollama = _OllamaClient(config, model_name)
     if config.get("embedding_provider") == "siliconflow":
-        return _SiliconFlowClient(config)
-    return _OllamaClient(config, model_name)
+        return _FallbackClient(primary=_SiliconFlowClient(config), fallback=ollama)
+    return ollama
 
 
 class EmbeddingGenerator:
