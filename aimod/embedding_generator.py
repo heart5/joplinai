@@ -875,6 +875,7 @@ class EmbeddingGenerator:
             # 在分割逻辑中，对每个 raw_chunk 进行转换，当下仅针对《健康运动笔记》
             converted_chunk = self.text_prep.convert_health_data_to_text(raw_chunk)
             converted_chunk = self.text_prep.condense_dense_lists(converted_chunk)
+            converted_chunk = self.text_prep.convert_tables_to_text(converted_chunk)
             converted_chunk = converted_chunk.strip()
             # 1. 提取该日期单元的日期 (仍使用 UNIFIED_DATE_PATTERN 搜索当前块)
             date_match = self.UNIFIED_DATE_PATTERN.search(converted_chunk)

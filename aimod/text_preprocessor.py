@@ -59,6 +59,151 @@ class TextPreprocessor:
 
         return TextPreprocessor.IMAGE_SYNTAX_PATTERN.sub(_replacer, text)
 
+    @staticmethod
+    def _looks_like_table_header(line: str) -> bool:
+        """表头/数据行：以|开头结尾，内部至少含一个|"""
+        line = line.strip()
+        if not line.startswith("|") or not line.endswith("|"):
+            return False
+        inner = line[1:-1]
+        return "|" in inner
+
+    @staticmethod
+    def _looks_like_table_separator(line: str) -> bool:
+        """分隔行：以|开头结尾，内部仅含| - : 空格"""
+        line = line.strip()
+        if not line.startswith("|") or not line.endswith("|"):
+            return False
+        inner = line[1:-1]
+        return bool(re.match(r"^[\|\-:\s]+$", inner))
+
+    @staticmethod
+    def _looks_like_table_data_row(line: str) -> bool:
+        """数据行：同表头检测"""
+        return TextPreprocessor._looks_like_table_header(line)
+
+    @staticmethod
+    def _split_table_row(row: str) -> list[str]:
+        """切分管道分隔的行为单元格列表"""
+        row = row.strip()
+        if row.startswith("|"):
+            row = row[1:]
+        if row.endswith("|"):
+            row = row[:-1]
+        return [cell.strip() for cell in row.split("|")]
+
+    @staticmethod
+    def _normalize_cell(cells: list[str]) -> list[str]:
+        """规范列名，空列名补充为列1/列2..."""
+        result = []
+        for i, c in enumerate(cells):
+            c = c.strip()
+            if not c:
+                c = f"列{i + 1}"
+            result.append(c)
+        return result
+
+    @staticmethod
+    def _truncate_cell(value: str, max_len: int = 50) -> str:
+        """截断过长的单元格内容"""
+        value = value.strip()
+        if len(value) > max_len:
+            return value[:max_len] + "…"
+        return value
+
+    @staticmethod
+    def _convert_table_block(table_lines: list[str]) -> str:
+        """将解析的表格块转换为自然语言描述
+
+        【表格：包含N列（a、b、c），共M行数据。第1行：a为v1，b为v2。...】
+        """
+        if len(table_lines) < 2:
+            return ""
+
+        header_cells = TextPreprocessor._split_table_row(table_lines[0])
+        num_cols = len(header_cells)
+        col_names = TextPreprocessor._normalize_cell(header_cells)
+
+        data_rows = []
+        for line in table_lines[2:]:
+            cells = TextPreprocessor._split_table_row(line)
+            if len(cells) < num_cols:
+                cells += [""] * (num_cols - len(cells))
+            data_rows.append(cells[:num_cols])
+
+        num_rows = len(data_rows)
+
+        max_cols = 8
+        max_rows = 20
+
+        parts = []
+        if num_cols <= max_cols:
+            col_desc = "、".join(col_names)
+            parts.append(f"包含{num_cols}列（{col_desc}）")
+        else:
+            col_desc = "、".join(col_names[:max_cols])
+            parts.append(f"包含{num_cols}列（{col_desc}等）")
+
+        if num_rows == 0:
+            return "【表格：" + "，".join(parts) + "，暂无数据行。】"
+
+        parts.append(f"共{num_rows}行数据")
+        row_parts = []
+        for row_idx, row in enumerate(data_rows[:max_rows], 1):
+            if num_cols <= max_cols:
+                cell_parts = []
+                for col_idx, cell in enumerate(row):
+                    cell_val = TextPreprocessor._truncate_cell(cell)
+                    if cell_val == "":
+                        cell_val = "空"
+                    cell_parts.append(f"{col_names[col_idx]}为{cell_val}")
+                row_parts.append(f"第{row_idx}行：" + "，".join(cell_parts))
+            else:
+                vals = [TextPreprocessor._truncate_cell(c) for c in row]
+                row_parts.append(f"第{row_idx}行：" + "、".join(vals))
+
+        row_text = "。".join(row_parts)
+        if num_rows > max_rows:
+            row_text += f"。后{num_rows - max_rows}行数据略"
+
+        # 保护破折号：替换为–（en-dash U+2013），避免被clean_text误删
+        result = "【表格：" + "，".join(parts) + "。" + row_text + "。】"
+        result = result.replace("-", "–")
+        return result
+
+    @staticmethod
+    def convert_tables_to_text(text: str) -> str:
+        """检测文本中所有 Markdown 表格块，替换为自然语言描述
+
+        逐行状态机：表头+分隔行→收集数据行→转换→继续扫描
+        """
+        if not text:
+            return ""
+
+        lines = text.split("\n")
+        result_lines = []
+        i = 0
+
+        while i < len(lines):
+            line = lines[i]
+            if (TextPreprocessor._looks_like_table_header(line)
+                    and i + 1 < len(lines)
+                    and TextPreprocessor._looks_like_table_separator(lines[i + 1])):
+                table_lines = [line, lines[i + 1]]
+                i += 2
+                while (i < len(lines)
+                       and TextPreprocessor._looks_like_table_data_row(lines[i])):
+                    table_lines.append(lines[i])
+                    i += 1
+                nl_text = TextPreprocessor._convert_table_block(table_lines)
+                if nl_text:
+                    result_lines.append(nl_text)
+            else:
+                result_lines.append(line)
+                i += 1
+
+        return "\n".join(result_lines)
+
     def clean_text(self, text: str) -> str:
         """Remove images, formatting symbols, and excess whitespace from note text."""
         if not text:

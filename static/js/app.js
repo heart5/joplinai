@@ -44,9 +44,26 @@ window.parseMarkdown = function(text) {
             var html = _realMarked.parse(String(text));
             html = html.replace(
                 /<pre><code class="language-mermaid">([\s\S]*?)<\/code><\/pre>/g,
-                '<div class="mermaid">$1</div>'
+                function(_, mermaidCode) {
+                    // 1. 边界位置中文引号→ASCII（mermaid语法只认ASCII引号）
+                    //    “ 在 [ ( { | subgraph 后→”；” 在 ] ) } | 或行尾前→”
+                    // 2. 标签内部残留中文引号→直角引号（避免mermaid解析错误）
+                    //    聚焦”抗湿热”场景 → 聚焦「抗湿热」场景
+                    var fixed = mermaidCode
+                        .replace(/([\[{\(|]|subgraph\s+)”/g, '$1”')
+                        .replace(/”(?=[\]\}\)|]|\s*$)/gm, '”')
+                        .replace(/”/g, '「')
+                        .replace(/”/g, '」');
+                    // 3. 给含特殊字符的 subgraph 标题加英文双引号（兜底修复）
+                    fixed = fixed.replace(
+                        /^([ \t]*subgraph\s+)([^\n"{]+[()（）[\]{}<>"'][^\n"]*?)(\s*)$/gm,
+                        function(m, prefix, title, suffix) {
+                            return prefix + '"' + title.trim() + '"' + suffix;
+                        }
+                    );
+                    return '<div class="mermaid">' + fixed + '</div>';
+                }
             );
-            setTimeout(function() { try { mermaid.run(); } catch(e) {} }, 50);
             return html;
         } catch (e) {
             console.warn('[Markdown] marked.js 失败，降级手写解析器:', e.message);
@@ -202,6 +219,13 @@ function appendMessage(sender, text, timestamp = null, attachedSources = null) {
         } catch (e) {
             console.warn('[appendMessage] 渲染嵌入式参考笔记失败:', e);
         }
+    }
+
+    // 渲染 mermaid 图表（DOM 就绪后延迟执行）
+    if (sender === 'bot' && msgDiv.querySelector('.mermaid')) {
+        setTimeout(function() {
+            try { mermaid.run(); } catch(e) { console.warn('[Mermaid] 渲染失败:', e); }
+        }, 50);
     }
 
     // 自动滚动到顶部
