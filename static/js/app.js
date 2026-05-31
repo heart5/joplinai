@@ -28,6 +28,20 @@ window.marked = {
                 .replace(/^### (.*$)/gm, '<h3>$1</h3>')
                 .replace(/^## (.*$)/gm, '<h2>$1</h2>')
                 .replace(/^# (.*$)/gm, '<h1>$1</h1>')
+                // 无序列表（连续 - 行合并为 <ul>）
+                .replace(/((?:^- .*\n?)+)/gm, function(match) {
+                    const items = match.trim().split('\n').map(function(line) {
+                        return '<li>' + line.replace(/^- /, '') + '</li>';
+                    }).join('');
+                    return '<ul>' + items + '</ul>';
+                })
+                // 有序列表（连续 数字. 行合并为 <ol>）
+                .replace(/((?:^\d+\. .*\n?)+)/gm, function(match) {
+                    const items = match.trim().split('\n').map(function(line) {
+                        return '<li>' + line.replace(/^\d+\. /, '') + '</li>';
+                    }).join('');
+                    return '<ol>' + items + '</ol>';
+                })
                 // 加粗和斜体
                 .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
                 .replace(/\*(.*?)\*/g, '<em>$1</em>')
