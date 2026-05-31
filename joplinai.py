@@ -108,6 +108,13 @@ CONFIG = {
     # 嵌入后端选择: ollama(默认) / siliconflow
     "embedding_provider": getinivaluefromcloud("joplinai", "embedding_provider") or "ollama",
     "siliconflow_api_key": getinivaluefromcloud("joplinai", "siliconflow_api_key") or "",
+    "siliconflow_embedding_model": getinivaluefromcloud("joplinai", "siliconflow_embedding_model") or "",
+    "siliconflow_embedding_chunk_size": siliconflow_embedding_chunk_size
+    if (siliconflow_embedding_chunk_size := getinivaluefromcloud("joplinai", "siliconflow_embedding_chunk_size"))
+    else 1500,
+    "siliconflow_embedding_dimension": siliconflow_embedding_dimension
+    if (siliconflow_embedding_dimension := getinivaluefromcloud("joplinai", "siliconflow_embedding_dimension"))
+    else 1024,
 
     "force_update": False,  # 新增：强制更新开关，默认关闭
     "chunk_overlap": 50,
@@ -709,10 +716,13 @@ def process_notes_incremental(notebook_title: str, config: Dict, note_ids: List[
 # #### 初始化向量库
 
     # %%
+    # 根据 provider 选主模型：siliconflow_embedding_model 配了即用 SF 模型，否则 Ollama
+    primary_model = config.get("siliconflow_embedding_model") or config["ollama_embedding_model"]
+
     # 初始化向量数据库（在整个处理过程中只初始化一次）
     if not hasattr(process_notes_incremental, "vector_db"):
         process_notes_incremental.vector_db = VectorDBManager(
-            config["db_path"], config["ollama_embedding_model"], True
+            config["db_path"], primary_model, True
         )
         log.info(
             f"向量数据库初始化完成，集合: {process_notes_incremental.vector_db.collection_name}"
@@ -723,11 +733,11 @@ def process_notes_incremental(notebook_title: str, config: Dict, note_ids: List[
     # 输出向量库信息
     log.info(f"向量库《{vector_db}》信息：{vector_db.get_collection_info()}")
 
-    # 初始化向量数据库（在整个处理过程中只初始化一次）
+    # 初始化嵌入生成器（在整个处理过程中只初始化一次）
     if not hasattr(process_notes_incremental, "embedding_gen"):
         process_notes_incremental.embedding_gen = EmbeddingGenerator(
             config,
-            config["ollama_embedding_model"],
+            primary_model,
             chunk_size=config.get("chunk_size", 512),
             chunk_overlap=config.get("chunk_overlap", 50),
             # 【新增】传递自适应分块配置
@@ -772,7 +782,8 @@ def process_notes_incremental(notebook_title: str, config: Dict, note_ids: List[
     # 加载处理状态（纯远程，无本地 fallback）
     state_client = config.get("state_client")
     if state_client:
-        model_name_str = config["ollama_embedding_model"].replace(":", "_").replace("/", "_").replace("-", "_")
+        from func.datatools import normalize_collection_name
+        model_name_str = normalize_collection_name(primary_model)
         try:
             process_state = state_client.batch_load(model_name_str)
         except CenterAPIUnreachableError:
@@ -990,7 +1001,8 @@ def process_notes_incremental(notebook_title: str, config: Dict, note_ids: List[
     # 保存状态（纯远程，无本地 fallback）
     state_client = config.get("state_client")
     if state_client:
-        model_name_str = config["ollama_embedding_model"].replace(":", "_").replace("/", "_").replace("-", "_")
+        from func.datatools import normalize_collection_name
+        model_name_str = normalize_collection_name(primary_model)
         state_client.batch_save(model_name_str, process_state)
     else:
         log.error("state_client 未配置，处理状态未能持久化")

@@ -44,6 +44,13 @@ CONFIG = {
     "embedding_provider": getinivaluefromcloud("joplinai", "embedding_provider") or "ollama",
     "ollama_host": getinivaluefromcloud("joplinai", "ollama_host") or "",
     "siliconflow_api_key": getinivaluefromcloud("joplinai", "siliconflow_api_key") or "",
+    "siliconflow_embedding_model": getinivaluefromcloud("joplinai", "siliconflow_embedding_model") or "",
+    "siliconflow_embedding_chunk_size": siliconflow_embedding_chunk_size
+    if (siliconflow_embedding_chunk_size := getinivaluefromcloud("joplinai", "siliconflow_embedding_chunk_size"))
+    else 1500,
+    "siliconflow_embedding_dimension": siliconflow_embedding_dimension
+    if (siliconflow_embedding_dimension := getinivaluefromcloud("joplinai", "siliconflow_embedding_dimension"))
+    else 1024,
     "qa_ollama_chat_model": qa_ollama_chat_model
     if (qa_ollama_chat_model := getinivaluefromcloud("joplinai", "qa_ollama_chat_model"))
     else "qwen2.5:1.5b",
@@ -73,8 +80,5 @@ CONFIG = {
     "min_answer_length": 50,
 }
 
-# %%
-model_name = (
-    CONFIG.get("ollama_embedding_model").replace(":", "_").replace("/", "_").replace("-", "_")
-)
-CONFIG["collection_name"] = f"joplin_{model_name}"
+# VectorDBManager 通过 normalize_collection_name() 自行派生集合名，无需此键
+

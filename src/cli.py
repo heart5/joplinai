@@ -164,8 +164,9 @@ def main() -> None:
     )
 
     # ==== 1. 文件锁 ====
-    model_name = dynamic_config["ollama_embedding_model"]
-    model_name_str2 = model_name.replace(":", "_").replace("/", "_").replace("-", "_")
+    from func.datatools import normalize_collection_name
+    model_name = dynamic_config.get("siliconflow_embedding_model") or dynamic_config["ollama_embedding_model"]
+    model_name_str2 = normalize_collection_name(model_name)
     lock_name = f"joplinai_{model_name_str2}.lock"
     lock_file, lock_acquired = add_file_lock(model_name, lock_name, timeout=10800)
     if not lock_acquired:

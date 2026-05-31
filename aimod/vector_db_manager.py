@@ -75,7 +75,8 @@ class VectorDBManager:
             )
             self._model_dimension_cache = {}  # 添加这行：初始化缓存字典
             self.embedding_model = embedding_model
-            self.collection_name = f"joplin_{embedding_model.replace(':', '_').replace('/', '_').replace('-', '_')}"
+            from func.datatools import normalize_collection_name
+            self.collection_name = f"joplin_{normalize_collection_name(embedding_model)}"
 
             # 先尝试获取集合，如果不存在则创建
             try:

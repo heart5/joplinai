@@ -75,15 +75,17 @@ class QASystem:
         if config:
             config_all.update(config)
         self.config = config_all
+        # 按 provider 选主模型：siliconflow_embedding_model 配了即用，否则回 Ollama
+        primary_model = self.config.get("siliconflow_embedding_model") or self.config["ollama_embedding_model"]
         self.vector_db = VectorDBManager(
-            self.config["db_path"], self.config["ollama_embedding_model"], for_creation=False
+            self.config["db_path"], primary_model, for_creation=False
         )
         self.conversation_history = []
 
         from aimod.embedding_generator import EmbeddingGenerator
         self.embedding_generator = EmbeddingGenerator(
             self.config,
-            model_name=self.config["ollama_embedding_model"],
+            model_name=primary_model,
         )
         log.info(
             f"QASystem 初始化完成，已加载 embedding_generator，"

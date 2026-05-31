@@ -71,9 +71,9 @@ class _EmbeddingClient:
 class _OllamaClient(_EmbeddingClient):
     """Ollama 本地/远程嵌入"""
 
-    def __init__(self, config: dict, model_name: str):
+    def __init__(self, config: dict):
         self.base_url = config.get("ollama_host") or ""
-        self.model_name = model_name
+        self.model_name = config.get("ollama_embedding_model", "dengcao/bge-large-zh-v1.5")
         self._semaphore = Semaphore(2)
 
     def embed(self, text: str):
@@ -92,13 +92,13 @@ class _OllamaClient(_EmbeddingClient):
 
 
 class _SiliconFlowClient(_EmbeddingClient):
-    """硅基流动云端嵌入 — BAAI/bge-large-zh-v1.5"""
+    """硅基流动云端嵌入"""
 
     URL = "https://api.siliconflow.cn/v1/embeddings"
-    MODEL = "BAAI/bge-large-zh-v1.5"
 
     def __init__(self, config: dict):
         self.api_key = config.get("siliconflow_api_key") or ""
+        self.model = config.get("siliconflow_embedding_model", "Qwen/Qwen3-Embedding-0.6B")
 
     def _post(self, payload: dict, timeout: int = 15):
         headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
@@ -107,11 +107,11 @@ class _SiliconFlowClient(_EmbeddingClient):
         return resp.json()
 
     def embed(self, text: str):
-        data = self._post({"model": self.MODEL, "input": text, "encoding_format": "float"})
+        data = self._post({"model": self.model, "input": text, "encoding_format": "float"})
         return data["data"][0]["embedding"]
 
     def embed_batch(self, texts: list):
-        data = self._post({"model": self.MODEL, "input": texts, "encoding_format": "float"}, timeout=30)
+        data = self._post({"model": self.model, "input": texts, "encoding_format": "float"}, timeout=30)
         return [d["embedding"] for d in data["data"]]
 
 
@@ -140,9 +140,10 @@ class _FallbackClient(_EmbeddingClient):
             return self.fallback.embed_batch(texts)
 
 
-def _make_embedding_client(config: dict, model_name: str) -> _EmbeddingClient:
-    ollama = _OllamaClient(config, model_name)
-    if config.get("embedding_provider") == "siliconflow":
+def _make_embedding_client(config: dict) -> _EmbeddingClient:
+    """创建嵌入客户端。siliconflow_embedding_model 配了即走 SF+Ollama回落；否则纯 Ollama。"""
+    ollama = _OllamaClient(config)
+    if config.get("siliconflow_embedding_model"):
         return _FallbackClient(primary=_SiliconFlowClient(config), fallback=ollama)
     return ollama
 
@@ -190,9 +191,12 @@ class EmbeddingGenerator:
         self._chunk_embedding_cache = {}
         self.text_prep = TextPreprocessor(chunk_size=self.chunk_size)
         self._set_chunk_size()
+        # 大上下文模型（chunk_size >= 1000）无需长度探测，避免 safe_len x1.05 膨胀
+        if self.chunk_size >= 1000:
+            enable_adaptive_chunking = False
 
         self.enable_adaptive_chunking = enable_adaptive_chunking
-        self.embedding_client = _make_embedding_client(config, model_name)
+        self.embedding_client = _make_embedding_client(config)
 
     def __repr__(self):
         return f"EmbeddingGenerator(model={self.model_name!r}, dim={self.embedding_dim}, chunk_size={self.chunk_size})"
@@ -311,7 +315,10 @@ class EmbeddingGenerator:
     # %%
     def _get_model_dimension(self):
         """获取模型维度"""
-        # 已知模型维度映射
+        # SiliconFlow 云端模型维度由配置决定
+        if self.config.get("siliconflow_embedding_model"):
+            return int(self.config.get("siliconflow_embedding_dimension", 1024))
+        # 已知 Ollama 模型维度映射
         known_dimensions = {
             "dengcao/bge-large-zh-v1.5": 1024,
             "BAAI/bge-large-zh-v1.5": 1024,  # 硅基流动云端同款模型
@@ -346,7 +353,12 @@ class EmbeddingGenerator:
     # %%
     def _set_chunk_size(self) -> None:
         """精确获取模型上下文限制（token→字符转换）"""
-        # 特殊处理已知模型
+        # SiliconFlow 云端模型均 32K+ 上下文，chunk_size 由配置决定
+        if self.config.get("siliconflow_embedding_model"):
+            self.chunk_size = int(self.config.get("siliconflow_embedding_chunk_size", 1500))
+            self.text_prep.chunk_size = self.chunk_size
+            return
+        # 以下 Ollama 本地模型
         if self.model_name == "nomic-embed-text":
             self.chunk_size = 1850
             self.text_prep.chunk_size = self.chunk_size
