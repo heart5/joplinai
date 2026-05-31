@@ -102,6 +102,7 @@ def api_ask():
         sources_notes = metadata.get("sources", [])
         relevant_chunks = metadata.get("relevant_chunks", [])
         is_based = metadata.get("is_based_on_notes", False)
+        gen_meta = metadata.get("gen_meta", {})
         USER_MANAGER.log_audit(
             session["user"]["id"],
             "ASK_QUESTION",
@@ -112,6 +113,19 @@ def api_ask():
             ip_address=request.remote_addr,
         )
 
+        # 精简 chunk 信息避免字段过大
+        chunk_summaries = []
+        for c in relevant_chunks[:20]:
+            cm = c.get("metadata", {})
+            chunk_summaries.append({
+                "chunk_id": c.get("chunk_id", ""),
+                "note_title": cm.get("source_note_title", ""),
+                "summary": cm.get("summary", ""),
+                "tags": cm.get("tags", ""),
+                "has_images": cm.get("has_images", False),
+                "content_preview": c.get("content", "")[:120],
+            })
+
         try:
             USER_MANAGER.save_qa_history(
                 user_id=session["user"]["id"],
@@ -119,13 +133,12 @@ def api_ask():
                 question=question,
                 answer=result.get("answer", ""),
                 metadata={
-                    "is_based_on_notes": result.get("metadata", {}).get(
-                        "is_based_on_notes", False
-                    ),
-                    "relevant_notes_count": result.get("metadata", {}).get(
-                        "relevant_notes_count", 0
-                    ),
-                    "sources": result.get("metadata", {}).get("sources", []),
+                    "is_based_on_notes": metadata.get("is_based_on_notes", False),
+                    "relevant_notes_count": len(sources_notes),
+                    "sources": sources_notes,
+                    "gen_meta": gen_meta,
+                    "chunks": chunk_summaries,
+                    "context_length": metadata.get("context_length", 0),
                 },
             )
         except Exception as e:

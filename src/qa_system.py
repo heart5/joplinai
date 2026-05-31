@@ -156,7 +156,7 @@ class QASystem:
         log.debug(f"构建的上下文长度: {len(context)}")
 
         # 6. 生成答案
-        answer = self._generate_optimized_answer(question, context)
+        answer, gen_meta = self._generate_optimized_answer(question, context)
         final_answer = self._postprocess_answer(answer)
 
         # 构建兼容的返回字典：将 filtered_chunks 转换为 relevant_notes 格式
@@ -184,6 +184,7 @@ class QASystem:
             "relevant_chunks": filtered_chunks,
             "context_length": len(context),
             "is_based_on_notes": len(filtered_chunks) > 0,
+            "gen_meta": gen_meta,
         }
 
 # %% [markdown]
@@ -625,8 +626,8 @@ class QASystem:
 # ### _generate_optimized_answer(self, question: str, context: str) -> str
 
     # %%
-    def _generate_optimized_answer(self, question: str, context: str) -> str:
-        """生成优化答案"""
+    def _generate_optimized_answer(self, question: str, context: str):
+        """生成优化答案，返回 (answer, gen_meta)"""
         if self.config["cloud_model"] != "none" and self.config["cloud_api_key"]:
             log.info(f"启用云端聊天模式")
             return self._generate_answer_with_cloud(question, context)
@@ -640,8 +641,8 @@ class QASystem:
     # %%
     def _generate_answer_with_cloud(
         self, question: str, context: str
-    ) -> str:
-        """优化版的云端答案生成"""
+    ):
+        """优化版的云端答案生成，返回 (answer, gen_meta)"""
         try:
             import requests
 
@@ -659,8 +660,9 @@ class QASystem:
 4. 语言自然，像在对话"""
 
             max_output_tokens = self.config.get("max_output_tokens", 4096)
+            model = self.config["cloud_model"]
             payload = {
-                "model": self.config["cloud_model"],
+                "model": model,
                 "messages": [
                     {
                         "role": "system",
@@ -684,13 +686,22 @@ class QASystem:
             answer = response.json()["choices"][0]["message"]["content"].strip()
             finish = response.json()["choices"][0].get("finish_reason", "?")
 
-            log.info(f"云端生成答案: {len(answer)}字, finish={finish}, max_tokens={payload['max_tokens']}")
+            gen_meta = {
+                "provider": "cloud",
+                "model": model,
+                "max_output_tokens": max_output_tokens,
+                "finish_reason": finish,
+                "answer_chars": len(answer),
+            }
+            log.info(f"云端生成答案: {len(answer)}字, finish={finish}, max_tokens={max_output_tokens}")
 
             if len(answer) < self.config.get("min_answer_length", 30):
                 log.warning(f"答案过短: {len(answer)}字符")
                 answer = self._regenerate_answer(question, context)
+                gen_meta["regenerated"] = True
+                gen_meta["answer_chars"] = len(answer)
 
-            return answer
+            return answer, gen_meta
 
         except Exception as e:
             resp_body = ""
@@ -699,7 +710,12 @@ class QASystem:
             except Exception:
                 pass
             log.error(f"云端模型生成答案失败: {e} | body: {resp_body}")
-            return f"抱歉，生成答案时出错: {str(e)[:100]}"
+            return f"抱歉，生成答案时出错: {str(e)[:100]}", {
+                "provider": "cloud",
+                "model": self.config.get("cloud_model", "?"),
+                "error": str(e)[:200],
+                "answer_chars": 0,
+            }
 
 # %% [markdown]
 # ### _regenerate_answer(self, question: str, context: str) -> str
@@ -759,12 +775,11 @@ class QASystem:
 # ### _generate_answer_with_ollama(self, question: str, context: str) -> str
 
     # %%
-    def _generate_answer_with_ollama(self, question: str, context: str) -> str:
-        """使用本地Ollama生成答案"""
+    def _generate_answer_with_ollama(self, question: str, context: str):
+        """使用本地Ollama生成答案，返回 (answer, gen_meta)"""
         try:
             model_name = self.config["qa_ollama_chat_model"]
 
-            # 构建消息
             messages = [
                 {
                     "role": "system",
@@ -780,12 +795,24 @@ class QASystem:
             )
 
             answer = response["message"]["content"]
+            gen_meta = {
+                "provider": "ollama",
+                "model": model_name,
+                "max_output_tokens": 2000,
+                "finish_reason": response.get("done_reason", "stop"),
+                "answer_chars": len(answer),
+            }
             log.info(f"使用Ollama模型 {model_name} 生成答案，长度: {len(answer)}")
-            return answer
+            return answer, gen_meta
 
         except Exception as e:
             log.error(f"Ollama生成答案失败: {e}")
-            return f"抱歉，生成答案时出现错误: {str(e)}"
+            return f"抱歉，生成答案时出现错误: {str(e)}", {
+                "provider": "ollama",
+                "model": self.config.get("qa_ollama_chat_model", "?"),
+                "error": str(e)[:200],
+                "answer_chars": 0,
+            }
 
 # %% [markdown]
 # ### _extract_sources(self, notes: List[Dict]) -> List[Dict]

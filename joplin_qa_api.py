@@ -326,9 +326,10 @@ def api_ask():
                 "relevant_chunks": result.get("relevant_chunks", []),
                 "sources": result.get("sources", []),
                 "context_length": result.get("context_length", 0),
+                "gen_meta": result.get("gen_meta", {}),
                 "processing_time": result.get(
                     "processing_time", None
-                ),  # 如果原方法返回
+                ),
             },
         }
         return jsonify(response_data), 200
