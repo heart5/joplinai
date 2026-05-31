@@ -263,59 +263,83 @@ class VectorDBManager:
 # %% [markdown]
 # ### search_similar_chunks(self, query_embedding: list, top_k: int = 10)
 
+    @staticmethod
+    def _apply_where_filter(metadata: dict, where_filter: Optional[dict]) -> bool:
+        """Python 侧等价 ChromaDB where 过滤，避过 ChromaDB metadata 全扫描。
+
+        支持 $eq / $in / $or / $and，递归求值。
+        """
+        if where_filter is None:
+            return True
+
+        for key, cond in where_filter.items():
+            if key == "$or":
+                if not any(
+                    VectorDBManager._apply_where_filter(metadata, sub)
+                    for sub in cond
+                ):
+                    return False
+            elif key == "$and":
+                if not all(
+                    VectorDBManager._apply_where_filter(metadata, sub)
+                    for sub in cond
+                ):
+                    return False
+            elif isinstance(cond, dict):
+                for op, val in cond.items():
+                    if op == "$eq":
+                        if metadata.get(key) != val:
+                            return False
+                    elif op == "$in":
+                        if metadata.get(key) not in val:
+                            return False
+            else:
+                # 裸值等价于 $eq
+                if metadata.get(key) != cond:
+                    return False
+        return True
+
+
     # %%
     def search_similar_chunks(self, query_embedding: List[float], limit: int = 10, user_identity: Optional[Dict] = None):
         """查询相似块，支持基于用户身份的权限过滤"""
         if not self.collection:
             log.error("集合未加载")
             return []
-    
-        # === 【新增】调试日志：记录传入的身份信息 ===
+
         log.debug(f"[权限过滤] 查询请求 received. user_identity: {user_identity}")
-        
-        # 构建基础查询
-        n_results = min(limit * 2, 50)
 
         # === 权限过滤逻辑 ===
         where_filter = None
-        
+
         if user_identity:
             user_role = user_identity.get('role')
             user_display_name = user_identity.get('display_name')
-            
-            # 获取笔记本白名单（JSON数组格式）
+
             allowed_notebooks = user_identity.get('allowed_notebooks', [])
-            
+
             log.debug(
                 f"[权限过滤] 用户: {user_display_name}, 角色: {user_role}, "
                 f"授权笔记本数: {len(allowed_notebooks)}"
             )
-            
+
             if user_role == 'admin':
-                # 管理员：无过滤，访问全部
                 where_filter = None
                 log.debug("[权限过滤] 管理员角色，无过滤。")
-                
+
             elif user_role in ['team_leader', 'team_member']:
-                # 团队领导 & 团队成员：统一使用笔记本白名单机制
-                # 个人作者标识（根据您的命名规范）
                 personal_author = f"{user_display_name}"
-                
+
                 if not allowed_notebooks:
-                    # 如果没有授权任何笔记本，只能访问个人笔记
                     where_filter = {
                         "note_author": {"$eq": personal_author}
                     }
                     log.debug(f"[权限过滤] 无授权笔记本，仅限个人笔记。")
-                    
+
                 else:
-                    # 构建复合过滤器：个人笔记 OR (团队笔记 AND 在授权笔记本中)
                     where_filter = {
                         "$or": [
-                            # 条件1：个人创建的笔记
                             {"note_author": {"$eq": personal_author}},
-                            
-                            # 条件2：团队笔记且在授权笔记本范围内
                             {
                                 "$and": [
                                     {"note_author": {"$eq": "团队_共同维护"}},
@@ -329,45 +353,46 @@ class VectorDBManager:
                         f"授权笔记本: {allowed_notebooks[:3]}{'...' if len(allowed_notebooks) > 3 else ''}"
                     )
             else:
-                # 未知角色：严格限制
                 where_filter = {"note_author": {"$eq": "__NO_ACCESS__"}}
                 log.warning(f"[权限过滤] 未知角色 '{user_role}'，禁止访问。")
-    
-        # === 【新增】调试日志：显示最终发送给ChromaDB的过滤器 ===
-        log.debug(f"[权限过滤] 即将发送给 ChromaDB 的 where 参数: {where_filter}")
+
+        # ChromaDB metadata where 是全扫描——perms 过滤移入 Python 侧，ANN 不带 where 多取
+        if where_filter is not None:
+            fetch_count = min(limit * 4, 200)
+            chroma_where = None
+        else:
+            fetch_count = min(limit * 2, 50)
+            chroma_where = None
+
+        log.debug(f"[权限过滤] fetch_count={fetch_count}, where_filter={where_filter}")
 
         try:
-           # ChromaDB 的正确查询方法
             results = self.collection.query(
                 query_embeddings=[query_embedding],
-                n_results=n_results,
-                where=where_filter,  # ChromaDB 将应用此过滤器
-                include=["documents", "metadatas", "distances"] # 确保包含这些字段
+                n_results=fetch_count,
+                where=chroma_where,
+                include=["documents", "metadatas", "distances"]
             )
 
-            # 格式化返回结果
             similar_chunks = []
 
-            # 检查结果结构
             if results and "ids" in results and results["ids"]:
-                num_returned = len(results["ids"][0]) if results["ids"] and results["ids"][0] else 0
-                log.debug(f"[权限过滤] ChromaDB 返回了 {num_returned} 个结果。")
-                # ChromaDB返回的ids、metadatas、documents、distances都是列表的列表
-                # 因为query_embeddings是单元素列表，所以取第一个元素
                 ids_list = results["ids"][0] if results["ids"] else []
                 metadatas_list = results["metadatas"][0] if results.get("metadatas") else []
                 documents_list = results["documents"][0] if results.get("documents") else []
                 distances_list = results["distances"][0] if results.get("distances") else []
 
+                passed = 0
                 for i in range(len(ids_list)):
-                    chunk_id = ids_list[i]
                     metadata = metadatas_list[i] if i < len(metadatas_list) else {}
-                    document = documents_list[i] if i < len(documents_list) else ""
-                    # **关键修正**：distances_list[i] 是单个距离值
-                    distance = distances_list[i] if i < len(distances_list) else 0.0
 
-                    # 将距离转换为相似度（余弦距离越小，相似度越高）
-                    # 注意：余弦距离范围是[0, 2]，但通常归一化到[0, 1]
+                    # Python 侧权限过滤
+                    if not self._apply_where_filter(metadata, where_filter):
+                        continue
+
+                    chunk_id = ids_list[i]
+                    document = documents_list[i] if i < len(documents_list) else ""
+                    distance = distances_list[i] if i < len(distances_list) else 0.0
                     similarity = 1.0 - distance if distance <= 1.0 else 0.0
 
                     similar_chunks.append({
@@ -378,7 +403,11 @@ class VectorDBManager:
                         "metadata": metadata
                     })
 
-                log.info(f"成功检索到 {len(similar_chunks)} 个相关块")
+                    passed += 1
+                    if passed >= limit:
+                        break
+
+                log.info(f"成功检索到 {len(similar_chunks)} 个相关块（ANN取{fetch_count}条，过滤后{passed}条通过）")
                 return similar_chunks
             else:
                 log.warning("未检索到相关块")
