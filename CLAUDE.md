@@ -54,7 +54,7 @@ Data flow: `joplinai.py` → TC 本地 (Joplin Server / ChromaDB / center_api) +
 向量化优化：chunk 内容未变仅元数据（tags/summary）变更时，跳过嵌入生成，仅通过 `VectorDBManager.batch_update_chunks_metadata()` 一次性批量更新 ChromaDB metadata（不含 embeddings），避免不必要的远程序列调用。内容未变+增强完成时走 `_process_metadata_only_fast_path` 快速路径，完全跳过重复分块/嵌入/增强。
 
 `joplinai_center.db` 包含 10 张表：
-- 缓存与历史：`enhance_cache`、`notebook_history`、`global_run_history`
+- 缓存与历史：`enhance_cache`（缓存键 `{content_hash}_{task}`，`summary`/`tags`/`vision_desc` 三类 task）、`notebook_history`、`global_run_history`
 - 笔记状态：`note_process_state`（含 `enhance_config` 字段追踪摘要/标签模型，模型变更时自动触发重处理；`meta_hash` 仅含标签+笔记本元数据，不含增强配置）
 - 笔记本级增强策略覆盖：`enhance_override` 云端 JSON 配置，格式 `{"笔记本标题": {"summary_model": "cloud|ollama|none", "tags_model": "cloud|ollama|none"}}`，`_resolve_enhance_config()` 合并全局配置与笔记本级覆盖
 - 用户管理：`users`、`sessions`、`audit_log`、`qa_history`、`chat_sessions`
@@ -120,9 +120,9 @@ log/                    # 日志 (gitignored)
 - `text_splitter.py` — 文本切分器，按句子边界切分
 - `vector_db_manager.py` — VectorDBManager 类，ChromaDB CRUD
 - `cache_manager.py` — SQLite LRU 缓存（本地回退用）
-- `note_enhancer.py` — AI增强 摘要/标签增强（cloud/local/none），含 SiliconFlow Vision 图片描述（策略模式 `_VisionClient` / `_SiliconFlowVisionClient`，按 `resource_id+model` 缓存，返回 `dict[str,str]` 内联替换至原文）
+- `note_enhancer.py` — AI增强 摘要/标签增强（cloud/local/none），含 SiliconFlow Vision 图片描述（策略模式 `_VisionClient` / `_SiliconFlowVisionClient`，按 `resource_id` 缓存到 `enhance_cache`，返回 `dict[str,str]` 内联替换至原文）
 - `image_processor.py` — 图片处理器，从 Joplin 资源文件解析图片+提取 base64，>1MB 自动压缩（Pillow 缩尺寸+JPEG80），>8MB 跳过
-- `text_preprocessor.py` — 文本预处理器，`replace_images_with_descriptions()` 将 `![alt](:/rid)` 原位置替换为 `【图片：{desc}】`，`RESOURCE_ID_PATTERN` 同时匹配 `!?\[` 有无感叹号两种格式
+- `text_preprocessor.py` — 文本预处理器，`replace_images_with_descriptions()` 将 `![alt](:/rid)` 原位置替换为 `【图片：{desc}】`，`convert_tables_to_text()` 将 Markdown 表格转为 NL 描述，`RESOURCE_ID_PATTERN` 同时匹配 `!?\[` 有无感叹号两种格式
 - `run_tracker.py` — RunTracker 类，运行数据采集和历史记录 (remote-first)
 - `cache_client.py` — CacheClient，增强缓存纯远程（无本地回退）
 - `history_client.py` — HistoryClient，运行历史远程存储
@@ -220,7 +220,7 @@ ssh tc "cd /home/baiyefeng/work/joplinai && git pull && sudo systemctl restart -
 | `Qwen/Qwen3-VL-8B-Instruct` | 笔记图片描述（硅基流动云端视觉，默认） | ~1-5秒/图 |
 
 可通过 `cloud_api_url` + `cloud_api_key` + `cloud_model` 切换至 Qwen/ChatGPT 等兼容提供者。
-嵌入可通过 `embedding_provider=siliconflow` 切至云端（硅基流动），`_FallbackClient` 自动回落本地 Ollama。
+嵌入可通过 `embedding_provider=siliconflow` 切至云端（硅基流动），`_FallbackClient` 自动回落本地 Ollama。长度超限（413/too large）时直接上抛不回落——同源模型限制相同回落无意义——由 `_try_embed_or_fail` 识别后触发 `safe_len` 缩减。
 
 ### 配置要点
 
