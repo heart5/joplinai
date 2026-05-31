@@ -75,7 +75,7 @@ class ConfigManager:
             "default_personal_author",
             "colleague",
             "similarity_threshold",
-            "max_context_chars",
+            "context_max_length",
             "max_output_tokens",
             "max_retrieved_chunks",
             "summary_model",
@@ -105,11 +105,8 @@ class ConfigManager:
         config_snapshot = {}
         for key in self.monitored_keys:
             value = getinivaluefromcloud("joplinai", key)
-            # 处理特殊类型的值（如逗号分隔的字符串）
             if value is not None:
                 config_snapshot[key] = value
-            else:
-                config_snapshot[key] = None  # 显式记录None，便于检测删除
         return config_snapshot
 
     def _compute_fingerprint(self, config: Dict) -> str:
