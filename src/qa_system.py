@@ -532,10 +532,30 @@ class QASystem:
 
 请基于以上笔记内容回答，如果笔记中没有相关信息，请说明。"""
 
-        max_len = self.config.get("context_max_length", 2000)
+        max_len = int(self.config.get("context_max_length", 2000))
         log.info(f"设置的最大上下文长度为：{max_len}，本次提交的上下文长度为：{len(context)}")
         if len(context) > max_len:
-            context = context[:max_len] + "..."
+            tail = f"{chr(10).join(history_parts)}\n\n我的问题：{question}\n\n请基于以上笔记内容回答，如果笔记中没有相关信息，请说明。"
+            head = f"{sys_prompt}\n\n相关笔记内容：\n"
+            fixed_len = len(head) + len(tail)
+            note_budget = max_len - fixed_len - 20
+            if note_budget > 500:
+                truncated_notes = []
+                used = 0
+                for nc in note_contexts:
+                    if used + len(nc) <= note_budget:
+                        truncated_notes.append(nc)
+                        used += len(nc)
+                    else:
+                        remaining = note_budget - used
+                        if remaining > 200:
+                            truncated_notes.append(nc[:remaining] + "\n...")
+                        truncated_notes.append("（后续笔记因上下文长度限制已省略）")
+                        break
+                context = head + chr(10).join(truncated_notes) + "\n" + tail
+            else:
+                context = context[:max_len] + "..."
+            log.info(f"上下文截断: {len(context)}/{max_len} 字符")
 
         return context
 
@@ -648,7 +668,7 @@ class QASystem:
                     {"role": "user", "content": prompt},
                 ],
                 "temperature": 0.3,
-                "max_tokens": 1800,
+                "max_tokens": 4096,
                 "top_p": 0.9,
             }
 
