@@ -4,28 +4,58 @@
 // ===== 全局变量（供控制台调试和提问请求使用）=====
 window.currentSessionId = null;
 
-// ===== Markdown 解析器（marked.js + mermaid）=====
+// ===== Markdown 解析器：marked.js → 手写兜底 → 纯文本（三级降级）=====
 mermaid.initialize({ startOnLoad: false, theme: 'default' });
+
+// 手写简易解析器（marked.js 不可用时的兜底）
+function _fallbackMarkdown(text) {
+    if (!text) return '';
+    var safe = String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+    return safe
+        .replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code class="language-$1">$2</code></pre>')
+        .replace(/`([^`]+)`/g, '<code>$1</code>')
+        .replace(/^##### (.*$)/gm, '<h5>$1</h5>')
+        .replace(/^#### (.*$)/gm, '<h4>$1</h4>')
+        .replace(/^### (.*$)/gm, '<h3>$1</h3>')
+        .replace(/^## (.*$)/gm, '<h2>$1</h2>')
+        .replace(/^# (.*$)/gm, '<h1>$1</h1>')
+        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*(.*?)\*/g, '<em>$1</em>')
+        .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+        .replace(/^> (.*$)/gm, '<blockquote>$1</blockquote>')
+        .replace(/\n\n/g, '</p><p>')
+        .replace(/\n/g, '<br>')
+        .replace(/^/, '<p>').replace(/$/, '</p>')
+        .replace(/<p><\/p>/g, '');
+}
 
 window.marked = {
     parse: function(text) {
+        if (!text) return '';
+        // 第1级：marked.js
+        if (typeof marked !== 'undefined' && typeof marked.parse === 'function') {
+            try {
+                var html = marked.parse(String(text));
+                html = html.replace(
+                    /<pre><code class="language-mermaid">([\s\S]*?)<\/code><\/pre>/g,
+                    '<div class="mermaid">$1</div>'
+                );
+                setTimeout(function() { try { mermaid.run(); } catch(e) {} }, 50);
+                return html;
+            } catch (e) {
+                console.warn('[Markdown] marked.js 失败，降级手写解析器:', e.message);
+            }
+        }
+        // 第2级：手写解析器
         try {
-            if (!text) return '';
-            // marked.js 渲染 Markdown（自带 XSS 防护）
-            let html = marked.parse(String(text));
-            // mermaid 代码块后处理：<pre><code class="language-mermaid"> → <div class="mermaid">
-            html = html.replace(
-                /<pre><code class="language-mermaid">([\s\S]*?)<\/code><\/pre>/g,
-                '<div class="mermaid">$1</div>'
-            );
-            // 异步渲染 mermaid 图表（setTimeout 确保 DOM 就绪）
-            setTimeout(function() {
-                try { mermaid.run(); } catch(e) {}
-            }, 50);
-            return html;
-        } catch (e) {
-            console.warn('[Markdown] 渲染失败，降级为纯文本:', e);
-            return String(text || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            return _fallbackMarkdown(String(text));
+        } catch (e2) {
+            console.warn('[Markdown] 手写解析器也失败，降级纯文本:', e2.message);
+            // 第3级：纯文本
+            return String(text).replace(/</g, '&lt;').replace(/>/g, '&gt;');
         }
     }
 };
