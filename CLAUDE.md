@@ -120,7 +120,9 @@ log/                    # 日志 (gitignored)
 - `text_splitter.py` — 文本切分器，按句子边界切分
 - `vector_db_manager.py` — VectorDBManager 类，ChromaDB CRUD
 - `cache_manager.py` — SQLite LRU 缓存（本地回退用）
-- `note_enhancer.py` — AI增强 摘要/标签增强（cloud/local/none），含 SiliconFlow Vision 图片描述（策略模式 `_VisionClient` / `_SiliconFlowVisionClient`，按 `resource_id+model` 缓存）
+- `note_enhancer.py` — AI增强 摘要/标签增强（cloud/local/none），含 SiliconFlow Vision 图片描述（策略模式 `_VisionClient` / `_SiliconFlowVisionClient`，按 `resource_id+model` 缓存，返回 `dict[str,str]` 内联替换至原文）
+- `image_processor.py` — 图片处理器，从 Joplin 资源文件解析图片+提取 base64，>1MB 自动压缩（Pillow 缩尺寸+JPEG80），>8MB 跳过
+- `text_preprocessor.py` — 文本预处理器，`replace_images_with_descriptions()` 将 `![alt](:/rid)` 原位置替换为 `【图片：{desc}】`，`RESOURCE_ID_PATTERN` 同时匹配 `!?\[` 有无感叹号两种格式
 - `run_tracker.py` — RunTracker 类，运行数据采集和历史记录 (remote-first)
 - `cache_client.py` — CacheClient，增强缓存纯远程（无本地回退）
 - `history_client.py` — HistoryClient，运行历史远程存储
@@ -280,6 +282,7 @@ Pre-commit (`.pre-commit-config.yaml`): jupytext 误注释检测 + flake8。
 - **TC 配置更新流程**：修改云端 INI → `ssh tc "source /usr/miniconda3/etc/profile.d/conda.sh && conda activate newlsp && joplin sync"` → `ssh tc "sudo systemctl restart --no-block joplinai-sync"`。joplinai-sync 是 timer 触发的 oneshot 服务，需手动 start/restart。
 - **center_api 日志查看**：TC 上 `sudo journalctl -u joplinai-center-api -f`。logger 配置在 `aimod/center_api/__init__.py`：`propagate=False` 避免 `func/logme` root handler 双重输出。
 - **ChromaDB 在 TC 以 Docker 运行**：`docker run chromadb/chroma`，端口映射 8009→8000。配置中 `chroma_port=8009`，但 `vector_db_manager.py` 硬编码默认 8000——依赖云端配置覆盖。直接 `chromadb.HttpClient(host='127.0.0.1', port=8009)` 才能连上。
+- **ChromaDB metadata 键对**：含 `has_images`（boolean，chunk 是否含图片描述，`meta_hash` 不包含此键）、`estimated_date`、`chunk_summary`、`tags`、`meta_hash` 等。
 - **Ollama 在 HCX 以公网 IP 暴露**：TC 向量化通过 `149.30.242.156:11434` 远程调 HCX 的 Ollama 生成嵌入。端口 11434 需对外网开放。
 
 ## Git
