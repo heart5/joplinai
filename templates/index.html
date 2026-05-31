@@ -11,8 +11,8 @@
     <!-- 引入 jQuery (Bootstrap 5 依赖 Popper.js，但 bundle 已包含) -->
     <!-- 引入 Bootstrap JS Bundle (包含 Popper.js) -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/marked@4/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="{{ url_for('static', filename='js/marked.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/mermaid.min.js') }}"></script>
 </head>
 <body>
     <div class="container">
