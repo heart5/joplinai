@@ -40,6 +40,9 @@ __all__ = ["CONFIG"]
 
 CONFIG = {
     "ollama_embedding_model": getinivaluefromcloud("joplinai", "ollama_embedding_model") or "dengcao/bge-large-zh-v1.5",
+    "embedding_provider": getinivaluefromcloud("joplinai", "embedding_provider") or "ollama",
+    "ollama_host": getinivaluefromcloud("joplinai", "ollama_host") or "",
+    "siliconflow_api_key": getinivaluefromcloud("joplinai", "siliconflow_api_key") or "",
     "qa_ollama_chat_model": qa_ollama_chat_model
     if (qa_ollama_chat_model := getinivaluefromcloud("joplinai", "qa_ollama_chat_model"))
     else "qwen2.5:1.5b",
