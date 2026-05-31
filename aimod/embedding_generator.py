@@ -126,6 +126,9 @@ class _FallbackClient(_EmbeddingClient):
         try:
             return self.primary.embed(text)
         except Exception as e:
+            msg = str(e).lower()
+            if any(kw in msg for kw in ["too large", "413"]):
+                raise  # 长度超限，回落也没用，直接上报让 safe_len 缩减
             log.warning(f"云端嵌入失败({e})，回落本地 Ollama")
             return self.fallback.embed(text)
 
@@ -294,7 +297,7 @@ class EmbeddingGenerator:
             return True
         except Exception as e:
             msg = str(e).lower()
-            if any(kw in msg for kw in ["context length", "input length", "too long"]):
+            if any(kw in msg for kw in ["context length", "input length", "too long", "too large", "413"]):
                 log.warning(
                     f"[chunk嵌入] 长度超限({len(chunk_text)}字符): {str(e)[:100]}"
                 )
