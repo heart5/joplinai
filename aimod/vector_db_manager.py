@@ -403,19 +403,22 @@ class VectorDBManager:
 
         # 构建要存储的元数据，合并所有必要信息
         db_metadata = {
-            "chunk_id": chunk_id, # 当前块的ID
+            "chunk_id": chunk_id,
             "tags": ",".join(tags),
             "summary": metadata.get("chunk_summary", ""),
             "source_note_title": metadata.get("source_note_title", ""),
             "source_note_id": metadata.get("source_note_id", ""),
             "chunk_index": metadata.get("chunk_index", 1),
             "content_hash": metadata.get("content_hash", ""),
-            # === 新增字段 ===
             "meta_hash": metadata.get("meta_hash", ""),
             "source_notebook_title": metadata.get("source_notebook_title", ""),
             "source_notebook_id": metadata.get("source_notebook_id", ""),
             "note_author": metadata.get("note_author", "白晔峰"),
             "note_type": metadata.get("note_type", "个人笔记"),
+            "has_images": metadata.get("has_images", False),
+            "word_count": metadata.get("word_count", 0),
+            "estimated_date": metadata.get("estimated_date", ""),
+            "enhanced": metadata.get("enhanced", False),
         }
 
         # 确保使用 upsert 方法
@@ -479,6 +482,10 @@ class VectorDBManager:
                 "source_notebook_id": md.get("source_notebook_id", ""),
                 "note_author": md.get("note_author", "白晔峰"),
                 "note_type": md.get("note_type", "个人笔记"),
+                "has_images": md.get("has_images", False),
+                "word_count": md.get("word_count", 0),
+                "estimated_date": md.get("estimated_date", ""),
+                "enhanced": md.get("enhanced", False),
             })
 
         self.collection.update(ids=chunk_ids, metadatas=db_metadatas)
