@@ -178,7 +178,7 @@ ssh tc "cd /home/baiyefeng/work/joplinai && git pull && sudo systemctl restart -
 
 - **`pathmagic.Context()`**: All modules use `with pathmagic.Context():` to ensure both the project root and `src/` are on `sys.path` before importing project-local modules. Always wrap project imports in this context manager.
 - **Jupytext paired notebooks**：编辑 `.py` 源文件后，jupytext 自动生成/更新同目录同名 `.ipynb` 供 Jupyter Notebook 阅览。`.py` → `ipynb`（percent 格式）。`.ipynb` 永不入库。配置：`jupytext.toml`（默认 `formats = "ipynb,py:percent"`）+ `.git/hooks/pre-commit`（staged .py/.md 自动 `jupytext --sync`）。手动同步：`jupytext --sync <file>`。
-  - **重要 `.md` 文档同样关联 `.ipynb`**：`CLAUDE.md`、`README.md`、`docs/CHANGELOG.md`、`docs/TECHNICAL_MANUAL.md`、`docs/QA_PIPELINE.md`、`docs/CHUNK_EMBED_SYSTEM.md` 通过 YAML frontmatter 声明 `formats: ipynb,md`。内容变更后必须同步 ipynb（pre-commit hook 自动执行）。
+  - **重要 `.md` 文档同样关联 `.ipynb`**：`CLAUDE.md`、`README.md`、`docs/CHANGELOG.md`、`docs/TECHNICAL_MANUAL.md`、`docs/QA_SYSTEM.md`、`docs/CHUNK_EMBED_SYSTEM.md` 通过 YAML frontmatter 声明 `formats: ipynb,md`。内容变更后必须同步 ipynb（pre-commit hook 自动执行）。
   - `# %%` 标记代码 cell，`# %% [markdown]` 标记 markdown cell。**关键规则**：markdown cell 后的下一段代码前必须有显式 `# %%`，否则 jupytext sync 会把代码当作 markdown 注释掉。
       - **自动检测**：`tools/check_jupytext_comment.py` 扫描被误注释的 Flask route/endpoint。pre-commit hook（`.git/hooks/pre-commit`）在 jupytext sync 后自动执行，CI 兜底。
 - **`__all__`**: 所有 `aimod/`、`src/`、`aimod/center_api/` 的公开模块都有 `__all__` 明确导出列表。
@@ -306,7 +306,7 @@ Main config stored in cloud-synced Joplin note (INI format). Local override: `da
 
 **Joplin 连接配置** (`data/joplinai.ini` `[joplin]` section)：`local_server`（本机运行 Joplin Server 时设为 `true`，直连 localhost:41184 免绕公网）、`fallback_url`（回退 Joplin Server 的 HTTPS 反代端点）、`fallback_token`（对应 API token）。
 
-**模型配置**：`qa_ollama_chat_model`（本地 QA 对话模型，当前 `none` 无本地回退）、`enhance_ollama_chat_model`（Ollama 标签/分类小模型）、`ollama_embedding_model`（嵌入模型）、`vision_model`（视觉模型）、`cloud_model` / `summary_model` / `tags_model`（cloud/ollama/none 三态切换）、`cloud_api_url` / `cloud_api_key`（云端 API 端点/密钥，支持切换提供者）。详见上方 Model Strategy 章节。QA 检索链路详见 `docs/QA_PIPELINE.md`。
+**模型配置**：`qa_ollama_chat_model`（本地 QA 对话模型，当前 `none` 无本地回退）、`enhance_ollama_chat_model`（Ollama 标签/分类小模型）、`ollama_embedding_model`（嵌入模型）、`vision_model`（视觉模型）、`cloud_model` / `summary_model` / `tags_model`（cloud/ollama/none 三态切换）、`cloud_api_url` / `cloud_api_key`（云端 API 端点/密钥，支持切换提供者）。详见上方 Model Strategy 章节。QA 检索链路详见 `docs/QA_SYSTEM.md`。
 
 ### Remote Joplin fallback
 
