@@ -692,7 +692,7 @@ class QASystem:
 2. 如果笔记信息不完整，可以合理推断但需说明
 3. 回答要具体、实用
 4. 语言自然，像在对话
-5. 涉及流程、架构、关系、对比等结构化内容时，必须用mermaid语法绘制图表。严禁用ascii字符画代替"""
+5. 涉及流程、架构、关系、对比等结构化内容时，必须用mermaid语法绘制图表。严禁用ascii字符画代替。注意：mermaid节点标签含特殊符号（括号、引号、中文标点等）时，必须用英文双引号包裹"""
 
             max_output_tokens = self.config.get("max_output_tokens") or 4096
             model = self.config["cloud_model"]
