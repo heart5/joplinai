@@ -96,7 +96,10 @@ CONFIG = {
     # "chunk_size": 512,  # 文本分块大小（字符数，根据模型上下文调整）
     # "max_context": 512,  # 模型最大上下文（字符数）
     "concurrency_type": "thread",  # 固定使用多线程，移除 process 选项
-    "max_workers": 4,  # 与 Ollama semaphore(2) 匹配：2嵌入+1增强+1分块/写库
+    "max_workers": 4,  # 默认：嵌入走 Ollama 本地（semaphore=2）
+
+    # 嵌入走硅基流动云端时，并发可调高（无 Ollama 本地瓶颈）
+    # 注意：CONFIG["max_workers"] 在硅基流动模式下动态调整为 8，见模块尾部
     "db_path": str(getdirmain() / "data" / "joplin_vector_db"),  # ChromaDB存储路径
 
     # provider-agnostic 增强模型配置: "cloud" / "ollama" / "none"
@@ -126,6 +129,10 @@ CONFIG = {
     "vision_enabled": getinivaluefromcloud("joplinai", "vision_enabled"),
     "vision_model": getinivaluefromcloud("joplinai", "vision_model") or "",
 }
+
+# 硅基流动云端嵌入无 Ollama 本地瓶颈（semaphore=2），并发可调高
+if CONFIG.get("siliconflow_embedding_model"):
+    CONFIG["max_workers"] = 8
 
 # %% [markdown]
 # # 功能函数集

@@ -39,6 +39,7 @@ with pathmagic.Context():
         from func.first import getdirmain
         from func.jpfuncs import (
             get_tag_titles,
+            getinivaluefromcloud,
             getnote,
         )
         from func.logme import log
@@ -231,6 +232,12 @@ class VectorDBManager:
     # %%
     def _get_model_dimension(self, model_name: str) -> int:
         """获取模型维度"""
+        # SiliconFlow 云端模型维度由配置决定，无需探测 Ollama
+        if getinivaluefromcloud("joplinai", "siliconflow_embedding_model"):
+            dim_str = getinivaluefromcloud("joplinai", "siliconflow_embedding_dimension")
+            if dim_str:
+                return int(dim_str)
+            return 1024
         # 已知模型维度映射
         known_dimensions = {
             "dengcao/bge-large-zh-v1.5": 1024,  # 根据日志显示实际是1024维
@@ -776,7 +783,7 @@ class VectorDBManager:
             count = self.collection.count()
             return {
                 "collection_name": self.collection_name,
-                "note_count": count,
+                "chunk_count": count,
                 "embedding_model": self.embedding_model,
                 "dimension": self._get_model_dimension(self.embedding_model),
             }

@@ -234,7 +234,7 @@ class EmbeddingGenerator:
 
         for retry in range(MAX_RETRIES + 1):
             # header_body_equiv: 头部字符按token密度折算为正文等价长度
-            header_body_equiv = int(header_overhead * self.chunk_size / 512)
+            header_body_equiv = header_overhead
             margin = max(MIN_SAFE, int((safe_len - header_body_equiv) * 0.95))
 
             # 灰色地带：剩余文本整体可放入margin
@@ -674,11 +674,12 @@ class EmbeddingGenerator:
                 last_safe_len = new_safe_len
             else:
                 # ─── 固定大小路径：header-aware margin ───
-                safe_len = int(self.chunk_size * 0.85)
+                # 大上下文模型无需 token 膨胀预算，chunk_size 直接用满
+                safe_len = self.chunk_size if self.chunk_size >= 1000 else int(self.chunk_size * 0.85)
                 header_overhead = len(
                     ctx_splitter._inject_context("", note_title, source_date)
                 )
-                header_body_equiv = int(header_overhead * self.chunk_size / 512)
+                header_body_equiv = header_overhead
                 margin = max(MIN_SIZE, int((safe_len - header_body_equiv) * 0.95))
 
                 if remaining_len <= margin:
