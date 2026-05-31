@@ -269,8 +269,13 @@ class QASystem:
             m = _re.search(r"\{[^{}]*\}", text, _re.DOTALL)
             if m:
                 result = json.loads(m.group())
-                if result.get("search_query") and result.get("hypothetical_answer"):
-                    log.info(f"[HyDE] search_query={result['search_query'][:60]}")
+                sq = result.get("search_query")
+                ha = result.get("hypothetical_answer")
+                if isinstance(sq, list):
+                    sq = " ".join(sq)
+                if sq and ha:
+                    log.info(f"[HyDE] search_query={str(sq)[:60]}")
+                    result["search_query"] = sq
                     return result
             log.warning(f"[HyDE] 解析失败: {text[:200]}")
             return None
@@ -297,9 +302,12 @@ class QASystem:
 
         将3个文本批量发送给Ollama，一次请求替代3次串行调用，省约6-9秒。
         """
+        sq = hyde["search_query"]
+        if isinstance(sq, list):
+            sq = " ".join(sq)
         texts = [
             (question, 0.3),
-            (hyde["search_query"], 0.4),
+            (sq, 0.4),
             (hyde["hypothetical_answer"], 0.3),
         ]
 
