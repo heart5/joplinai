@@ -31,6 +31,8 @@ from datetime import datetime
 from typing import Dict, List, Optional
 
 import jieba
+
+jieba.initialize()  # 预加载词典，避免首次问答时耗时5秒+
 import ollama
 
 # %% [markdown]
