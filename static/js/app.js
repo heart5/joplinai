@@ -5,9 +5,12 @@
 window.currentSessionId = null;
 
 // ===== Markdown 解析器：marked.js → 手写兜底 → 纯文本（三级降级）=====
-mermaid.initialize({ startOnLoad: false, theme: 'default' });
+try { mermaid.initialize({ startOnLoad: false, theme: 'default' }); } catch(e) {}
 
-// 手写简易解析器（marked.js 不可用时的兜底）
+// 保存 marked.js CDN 库的引用（不被覆盖）
+var _realMarked = (typeof marked !== 'undefined' && marked.parse) ? marked : null;
+
+// 手写简易解析器（_realMarked 不可用时的兜底）
 function _fallbackMarkdown(text) {
     if (!text) return '';
     var safe = String(text)
@@ -32,31 +35,30 @@ function _fallbackMarkdown(text) {
         .replace(/<p><\/p>/g, '');
 }
 
-window.marked = {
-    parse: function(text) {
-        if (!text) return '';
-        // 第1级：marked.js
-        if (typeof marked !== 'undefined' && typeof marked.parse === 'function') {
-            try {
-                var html = marked.parse(String(text));
-                html = html.replace(
-                    /<pre><code class="language-mermaid">([\s\S]*?)<\/code><\/pre>/g,
-                    '<div class="mermaid">$1</div>'
-                );
-                setTimeout(function() { try { mermaid.run(); } catch(e) {} }, 50);
-                return html;
-            } catch (e) {
-                console.warn('[Markdown] marked.js 失败，降级手写解析器:', e.message);
-            }
-        }
-        // 第2级：手写解析器
+// 三级降级渲染入口
+window.parseMarkdown = function(text) {
+    if (!text) return '';
+    // 第1级：marked.js（CDN 本地化）
+    if (_realMarked) {
         try {
-            return _fallbackMarkdown(String(text));
-        } catch (e2) {
-            console.warn('[Markdown] 手写解析器也失败，降级纯文本:', e2.message);
-            // 第3级：纯文本
-            return String(text).replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            var html = _realMarked.parse(String(text));
+            html = html.replace(
+                /<pre><code class="language-mermaid">([\s\S]*?)<\/code><\/pre>/g,
+                '<div class="mermaid">$1</div>'
+            );
+            setTimeout(function() { try { mermaid.run(); } catch(e) {} }, 50);
+            return html;
+        } catch (e) {
+            console.warn('[Markdown] marked.js 失败，降级手写解析器:', e.message);
         }
+    }
+    // 第2级：手写解析器
+    try {
+        return _fallbackMarkdown(String(text));
+    } catch (e2) {
+        console.warn('[Markdown] 手写解析器也失败，降级纯文本:', e2.message);
+        // 第3级：纯文本
+        return String(text).replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
 };
 
@@ -138,8 +140,8 @@ function appendMessage(sender, text, timestamp = null, attachedSources = null) {
     if (sender === 'bot') {
         try {
             // 使用增强版 Markdown 解析
-            const renderedText = window.marked && typeof window.marked.parse === 'function'
-                ? window.marked.parse(safeText)
+            const renderedText = window.parseMarkdown
+                ? window.parseMarkdown(safeText)
                 : escapeHtml(safeText);
             const sourceContainerId = 'src_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
 
