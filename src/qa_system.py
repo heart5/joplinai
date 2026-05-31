@@ -661,6 +661,9 @@ class QASystem:
             response.raise_for_status()
 
             answer = response.json()["choices"][0]["message"]["content"].strip()
+            finish = response.json()["choices"][0].get("finish_reason", "?")
+
+            log.info(f"云端生成答案: {len(answer)}字, finish={finish}, max_tokens={payload['max_tokens']}")
 
             if len(answer) < self.config.get("min_answer_length", 30):
                 log.warning(f"答案过短: {len(answer)}字符")
@@ -711,6 +714,9 @@ class QASystem:
             response.raise_for_status()
 
             answer = response.json()["choices"][0]["message"]["content"].strip()
+            finish = response.json()["choices"][0].get("finish_reason", "?")
+
+            log.info(f"重新生成答案: {len(answer)}字, finish={finish}, max_tokens={payload['max_tokens']}")
             return answer
 
         except Exception as e:
