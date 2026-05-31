@@ -4,62 +4,28 @@
 // ===== 全局变量（供控制台调试和提问请求使用）=====
 window.currentSessionId = null;
 
-// ===== 简易 Markdown 解析器（增强版）=====
+// ===== Markdown 解析器（marked.js + mermaid）=====
+mermaid.initialize({ startOnLoad: false, theme: 'default' });
+
 window.marked = {
     parse: function(text) {
         try {
             if (!text) return '';
-            // 先 HTML 转义，防止 XSS
-            let safeText = String(text)
-                .replace(/&/g, '&amp;')
-                .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;');
-            
-            // 然后进行 Markdown 语法转换
-            return safeText
-                // 代码块（必须优先处理，避免内部被其他规则解析）
-                .replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code class="language-$1">$2</code></pre>')
-                .replace(/`([^`]+)`/g, '<code>$1</code>')
-                // 引用块
-                .replace(/^> (.*$)/gm, '<blockquote>$1</blockquote>')
-                // 标题（从大到小，避免混淆）
-                .replace(/^##### (.*$)/gm, '<h5>$1</h5>')
-                .replace(/^#### (.*$)/gm, '<h4>$1</h4>')
-                .replace(/^### (.*$)/gm, '<h3>$1</h3>')
-                .replace(/^## (.*$)/gm, '<h2>$1</h2>')
-                .replace(/^# (.*$)/gm, '<h1>$1</h1>')
-                // 无序列表（连续 - 行合并为 <ul>）
-                .replace(/((?:^- .*\n?)+)/gm, function(match) {
-                    const items = match.trim().split('\n').map(function(line) {
-                        return '<li>' + line.replace(/^- /, '') + '</li>';
-                    }).join('');
-                    return '<ul>' + items + '</ul>';
-                })
-                // 有序列表（连续 数字. 行合并为 <ol>）
-                .replace(/((?:^\d+\. .*\n?)+)/gm, function(match) {
-                    const items = match.trim().split('\n').map(function(line) {
-                        return '<li>' + line.replace(/^\d+\. /, '') + '</li>';
-                    }).join('');
-                    return '<ol>' + items + '</ol>';
-                })
-                // 加粗和斜体
-                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-                .replace(/\*(.*?)\*/g, '<em>$1</em>')
-                // 链接（确保URL完整）
-                .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
-                // 图片（替换为链接）
-                .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">📷 图片：$1</a>')
-                // 换行处理（注意顺序）
-                .replace(/\n\n/g, '</p><p>')   // 段落
-                .replace(/\n/g, '<br>')         // 普通换行
-                // 包裹段落（避免重复包裹）
-                .replace(/^/, '<p>')
-                .replace(/$/, '</p>')
-                // 清理空段落
-                .replace(/<p><\/p>/g, '');
+            // marked.js 渲染 Markdown（自带 XSS 防护）
+            let html = marked.parse(String(text));
+            // mermaid 代码块后处理：<pre><code class="language-mermaid"> → <div class="mermaid">
+            html = html.replace(
+                /<pre><code class="language-mermaid">([\s\S]*?)<\/code><\/pre>/g,
+                '<div class="mermaid">$1</div>'
+            );
+            // 异步渲染 mermaid 图表（setTimeout 确保 DOM 就绪）
+            setTimeout(function() {
+                try { mermaid.run(); } catch(e) {}
+            }, 50);
+            return html;
         } catch (e) {
-            console.warn('[Markdown] 解析错误，返回原始文本:', e);
-            return String(text || '');
+            console.warn('[Markdown] 渲染失败，降级为纯文本:', e);
+            return String(text || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         }
     }
 };
