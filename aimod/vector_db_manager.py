@@ -260,9 +260,7 @@ class VectorDBManager:
             # 默认返回常见维度
             return 1024
 
-# %% [markdown]
-# ### search_similar_chunks(self, query_embedding: list, top_k: int = 10)
-
+    # %%
     @staticmethod
     def _apply_where_filter(metadata: dict, where_filter: Optional[dict]) -> bool:
         """Python 侧等价 ChromaDB where 过滤，避过 ChromaDB metadata 全扫描。
@@ -294,7 +292,6 @@ class VectorDBManager:
                         if metadata.get(key) not in val:
                             return False
             else:
-                # 裸值等价于 $eq
                 if metadata.get(key) != cond:
                     return False
         return True
