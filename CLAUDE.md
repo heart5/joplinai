@@ -190,6 +190,9 @@ ssh tc "cd /home/baiyefeng/work/joplinai && git pull && sudo systemctl restart -
 - **Cloud config**: Configuration is fetched dynamically via `getinivaluefromcloud()` from an INI stored in a Joplin note. The `ConfigManager` singleton in `src/config_manager.py` handles hot-reloading (5-minute check interval). Key cloud items: `imp_nbs` (notebook titles), `imp_note_ids` (specific note IDs as virtual notebook), both comma-separated. `ConfigManager.get_all()` is the alias for `get_config_snapshot()`.
 - **Inter-service auth**: `joplin_web_app.py` calls `joplin_qa_api.py` using an API key from the shared cloud config (`X-API-Key` header).
 - **Gunicorn entry points**: `aimod.center_api:create_app()` (app factory), `joplin_web_app:app` (module-level instance), `joplin_qa_api:app` (module-level instance).
+- **ConfigManager 监控键必须匹配云 INI 真实键名**：`monitored_keys` 列表中的键名直接传给 `getinivaluefromcloud()` 查云 INI。若代码重命名了 CONFIG 键但云 INI 键名未改，`_fetch_config_from_cloud` 会返回 `None`，被 `update()` 覆盖掉 `qa_config.py` 的默认值。解决方案：`config.get("key") or default` 防御 None（`.get("key", default)` 只在键缺失时生效，键存在但值为 None 时返回 None）。
+- **QA 上下文智能截断**：`_build_optimized_context_from_chunks` 超限时保留头（sys_prompt）尾（问题+历史+指令），只压缩中间笔记内容，确保问题永不被截断。
+- **jieba 预加载**：`qa_system.py` 模块导入时执行 `jieba.initialize()`，将词典加载提前到 gunicorn worker 启动阶段，避免首次问答现场加载耗时 5 秒+。
 
 ## Model Strategy
 
@@ -237,6 +240,8 @@ ssh tc "cd /home/baiyefeng/work/joplinai && git pull && sudo systemctl restart -
 | `embedding_provider` | `siliconflow` | 嵌入后端: ollama(本地) / siliconflow(云端+回落) |
 | `siliconflow_api_key` | `sk-xxx` | 硅基流动 API Key（嵌入+Vision共用） |
 | `vision_model` | (空=默认) | Vision 模型，默认 `Qwen/Qwen3-VL-8B-Instruct`（可选 `Qwen/Qwen3-VL-32B-Instruct`） |
+| `max_context_chars` | `30000` | QA 提交上下文上限（字符），超限压缩中间笔记内容，保留头尾 |
+| `max_output_tokens` | `4096` | 模型输出 token 上限，云配置可选（不配则默认 4096） |
 
 ## Production Incidents
 
