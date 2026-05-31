@@ -691,7 +691,8 @@ class QASystem:
 1. 基于笔记事实，不要编造
 2. 如果笔记信息不完整，可以合理推断但需说明
 3. 回答要具体、实用
-4. 语言自然，像在对话"""
+4. 语言自然，像在对话
+5. 如有必要，请尽量图文并茂（mermaid语法优先，ascii兜底）"""
 
             max_output_tokens = self.config.get("max_output_tokens") or 4096
             model = self.config["cloud_model"]
