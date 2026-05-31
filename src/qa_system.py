@@ -242,8 +242,9 @@ class QASystem:
                 "请生成两个字段：\n"
                 "1. search_query：3-8个关键词，用于向量检索\n"
                 "2. hypothetical_answer：假设用户笔记中可能如何记录这个主题，"
-                "生成一段100-200字的假设笔记\n\n"
-                '严格返回JSON：{"search_query": "...", "hypothetical_answer": "..."}'
+                "生成一段100-200字的纯文本假设笔记（禁止代码块、禁止markdown标记）\n\n"
+                '严格返回单行JSON（hypothetical_answer内的换行用\\n转义）：'
+                '{"search_query": "...", "hypothetical_answer": "..."}'
             )
             resp = requests.post(
                 self.config.get("cloud_api_url", "https://api.deepseek.com/v1/chat/completions"),
@@ -264,11 +265,34 @@ class QASystem:
             )
             resp.raise_for_status()
             text = resp.json()["choices"][0]["message"]["content"].strip()
-            # 提取JSON
-            import re as _re
-            m = _re.search(r"\{[^{}]*\}", text, _re.DOTALL)
-            if m:
-                result = json.loads(m.group())
+
+            # 提取JSON：用平衡括号匹配替代简单正则（容忍嵌套花括号）
+            def _extract_json_braces(s):
+                start = s.find("{")
+                if start == -1:
+                    return None
+                depth = 0
+                for i in range(start, len(s)):
+                    if s[i] == "{":
+                        depth += 1
+                    elif s[i] == "}":
+                        depth -= 1
+                        if depth == 0:
+                            return s[start : i + 1]
+                return None
+
+            json_str = _extract_json_braces(text)
+            if json_str:
+                try:
+                    result = json.loads(json_str)
+                except json.JSONDecodeError:
+                    # 尝试修复：换行→\\n，保留内部结构
+                    try:
+                        fixed = json_str.replace("\n", "\\n")
+                        result = json.loads(fixed)
+                    except json.JSONDecodeError:
+                        log.warning(f"[HyDE] JSON解析失败: {json_str[:200]}")
+                        return None
                 sq = result.get("search_query")
                 ha = result.get("hypothetical_answer")
                 if isinstance(sq, list):
