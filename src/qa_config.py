@@ -2,6 +2,7 @@
 # jupyter:
 #   jupytext:
 #     formats: ipynb,py:percent
+#     split_at_heading: true
 #     text_representation:
 #       extension: .py
 #       format_name: percent
@@ -63,9 +64,12 @@ CONFIG = {
     "cloud_model": cloud_model
     if (cloud_model := getinivaluefromcloud("joplinai", "cloud_model"))
     else "deepseek-v4-flash",
-    "context_max_length": context_max_length
-    if (context_max_length := getinivaluefromcloud("joplinai", "context_max_length"))
+    "max_context_chars": max_context_chars
+    if (max_context_chars := getinivaluefromcloud("joplinai", "context_max_length"))
     else 4000,
+    "max_output_tokens": max_output_tokens
+    if (max_output_tokens := getinivaluefromcloud("joplinai", "max_output_tokens"))
+    else 4096,
     "min_answer_length": 50,
 }
 

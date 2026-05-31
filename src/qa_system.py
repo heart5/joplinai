@@ -532,7 +532,7 @@ class QASystem:
 
 请基于以上笔记内容回答，如果笔记中没有相关信息，请说明。"""
 
-        max_len = int(self.config.get("context_max_length", 2000))
+        max_len = int(self.config.get("max_context_chars", 2000))
         log.info(f"设置的最大上下文长度为：{max_len}，本次提交的上下文长度为：{len(context)}")
         if len(context) > max_len:
             tail = f"{chr(10).join(history_parts)}\n\n我的问题：{question}\n\n请基于以上笔记内容回答，如果笔记中没有相关信息，请说明。"
@@ -658,6 +658,7 @@ class QASystem:
 3. 回答要具体、实用
 4. 语言自然，像在对话"""
 
+            max_output_tokens = self.config.get("max_output_tokens", 4096)
             payload = {
                 "model": self.config["cloud_model"],
                 "messages": [
@@ -668,7 +669,7 @@ class QASystem:
                     {"role": "user", "content": prompt},
                 ],
                 "temperature": 0.3,
-                "max_tokens": 4096,
+                "max_tokens": max_output_tokens,
                 "top_p": 0.9,
             }
 
