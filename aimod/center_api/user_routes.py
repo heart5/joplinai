@@ -31,6 +31,12 @@ __all__ = ["user_bp"]
 
 user_bp = Blueprint("user", __name__)
 
+
+def _missing(data, *fields):
+    """返回 data 中缺失的必填字段列表，无缺失返回 []"""
+    return [f for f in fields if not data.get(f)]
+
+
 # %% [markdown]
 # # 认证端点
 #
@@ -39,6 +45,8 @@ user_bp = Blueprint("user", __name__)
 @require_auth
 def api_auth_verify():
     data = request.get_json(force=True)
+    if missing := _missing(data, "username", "password_hash"):
+        return jsonify({"error": f"缺少必填字段: {', '.join(missing)}"}), 400
     conn = _init_db()
     conn.row_factory = sqlite3.Row
     row = conn.execute(
@@ -61,6 +69,8 @@ def api_auth_verify():
 @require_auth
 def api_auth_create_session():
     data = request.get_json(force=True)
+    if missing := _missing(data, "user_id"):
+        return jsonify({"error": f"缺少必填字段: {', '.join(missing)}"}), 400
     session_id = secrets.token_urlsafe(32)
     expires_at = datetime.now() + timedelta(hours=data.get("duration_hours", 24))
     conn = _init_db()
@@ -75,6 +85,8 @@ def api_auth_create_session():
 @require_auth
 def api_auth_validate_session():
     data = request.get_json(force=True)
+    if missing := _missing(data, "session_id"):
+        return jsonify({"error": f"缺少必填字段: {', '.join(missing)}"}), 400
     conn = _init_db()
     conn.row_factory = sqlite3.Row
     row = conn.execute(
@@ -93,6 +105,8 @@ def api_auth_validate_session():
 @require_auth
 def api_auth_delete_session():
     data = request.get_json(force=True)
+    if missing := _missing(data, "session_id"):
+        return jsonify({"error": f"缺少必填字段: {', '.join(missing)}"}), 400
     conn = _init_db()
     conn.execute("DELETE FROM sessions WHERE session_id=?", (data["session_id"],))
     conn.commit()
@@ -139,6 +153,8 @@ def api_users_get(username: str):
 @require_auth
 def api_users_create():
     data = request.get_json(force=True)
+    if missing := _missing(data, "username", "password_hash", "display_name"):
+        return jsonify({"error": f"缺少必填字段: {', '.join(missing)}"}), 400
     notebooks_json = json.dumps(data.get("allowed_notebooks", []), ensure_ascii=False)
     conn = _init_db()
     try:
@@ -160,6 +176,8 @@ def api_users_create():
 @require_auth
 def api_users_delete():
     data = request.get_json(force=True)
+    if missing := _missing(data, "target_username"):
+        return jsonify({"error": f"缺少必填字段: {', '.join(missing)}"}), 400
     conn = _init_db()
     row = conn.execute("SELECT id FROM users WHERE username=?", (data["target_username"],)).fetchone()
     if not row:
@@ -183,6 +201,8 @@ def api_users_delete():
 @require_auth
 def api_users_update_role():
     data = request.get_json(force=True)
+    if missing := _missing(data, "new_role", "target_username"):
+        return jsonify({"error": f"缺少必填字段: {', '.join(missing)}"}), 400
     conn = _init_db()
     cursor = conn.execute("UPDATE users SET role=? WHERE username=?", (data["new_role"], data["target_username"]))
     ok = cursor.rowcount > 0
@@ -204,6 +224,8 @@ def api_users_update_permissions():
         updates.append("allowed_notebooks=?"); params.append(json.dumps(data["allowed_notebooks"], ensure_ascii=False))
     if not updates:
         return jsonify({"ok": True})
+    if missing := _missing(data, "username"):
+        return jsonify({"error": f"缺少必填字段: {', '.join(missing)}"}), 400
     params.append(data["username"])
     conn = _init_db()
     conn.execute(f"UPDATE users SET {', '.join(updates)} WHERE username=?", params)
@@ -216,6 +238,8 @@ def api_users_update_permissions():
 @require_auth
 def api_users_reset_password():
     data = request.get_json(force=True)
+    if missing := _missing(data, "new_password_hash", "target_username"):
+        return jsonify({"error": f"缺少必填字段: {', '.join(missing)}"}), 400
     conn = _init_db()
     cursor = conn.execute("UPDATE users SET password_hash=? WHERE username=?", (data["new_password_hash"], data["target_username"]))
     ok = cursor.rowcount > 0
@@ -230,6 +254,8 @@ def api_users_reset_password():
 @require_auth
 def api_users_toggle_active():
     data = request.get_json(force=True)
+    if missing := _missing(data, "is_active", "target_username"):
+        return jsonify({"error": f"缺少必填字段: {', '.join(missing)}"}), 400
     conn = _init_db()
     cursor = conn.execute("UPDATE users SET is_active=? WHERE username=?", (1 if data["is_active"] else 0, data["target_username"]))
     ok = cursor.rowcount > 0
@@ -242,6 +268,8 @@ def api_users_toggle_active():
 @require_auth
 def api_users_update_display_name():
     data = request.get_json(force=True)
+    if missing := _missing(data, "new_display_name", "target_username"):
+        return jsonify({"error": f"缺少必填字段: {', '.join(missing)}"}), 400
     conn = _init_db()
     cursor = conn.execute("UPDATE users SET display_name=? WHERE username=?", (data["new_display_name"], data["target_username"]))
     ok = cursor.rowcount > 0
@@ -272,6 +300,8 @@ def api_chat_sessions_list(user_id: int):
 @require_auth
 def api_chat_sessions_create():
     data = request.get_json(force=True)
+    if missing := _missing(data, "user_id"):
+        return jsonify({"error": f"缺少必填字段: {', '.join(missing)}"}), 400
     session_id = f"chat_{data['user_id']}_{secrets.token_urlsafe(16)}"
     conn = _init_db()
     conn.execute("INSERT INTO chat_sessions (user_id, session_id, name) VALUES (?,?,?)",
@@ -285,6 +315,8 @@ def api_chat_sessions_create():
 @require_auth
 def api_chat_sessions_create_with_id():
     data = request.get_json(force=True)
+    if missing := _missing(data, "user_id", "session_id"):
+        return jsonify({"error": f"缺少必填字段: {', '.join(missing)}"}), 400
     conn = _init_db()
     conn.execute("INSERT OR IGNORE INTO chat_sessions (user_id, session_id, name) VALUES (?,?,?)",
                  (data["user_id"], data["session_id"], data.get("name", "默认对话")))
@@ -297,6 +329,8 @@ def api_chat_sessions_create_with_id():
 @require_auth
 def api_chat_sessions_rename():
     data = request.get_json(force=True)
+    if missing := _missing(data, "new_name", "session_id"):
+        return jsonify({"error": f"缺少必填字段: {', '.join(missing)}"}), 400
     conn = _init_db()
     cursor = conn.execute("UPDATE chat_sessions SET name=?, updated_at=? WHERE session_id=?",
                           (data["new_name"], datetime.now().isoformat(), data["session_id"]))
@@ -310,6 +344,8 @@ def api_chat_sessions_rename():
 @require_auth
 def api_chat_sessions_delete():
     data = request.get_json(force=True)
+    if missing := _missing(data, "session_id"):
+        return jsonify({"error": f"缺少必填字段: {', '.join(missing)}"}), 400
     conn = _init_db()
     cursor = conn.execute("DELETE FROM chat_sessions WHERE session_id=?", (data["session_id"],))
     ok = cursor.rowcount > 0
@@ -322,6 +358,8 @@ def api_chat_sessions_delete():
 @require_auth
 def api_chat_sessions_set_active():
     data = request.get_json(force=True)
+    if missing := _missing(data, "user_id", "session_id"):
+        return jsonify({"error": f"缺少必填字段: {', '.join(missing)}"}), 400
     conn = _init_db()
     conn.execute("UPDATE chat_sessions SET is_active=0 WHERE user_id=?", (data["user_id"],))
     conn.execute("UPDATE chat_sessions SET is_active=1, updated_at=? WHERE session_id=?",
@@ -351,6 +389,8 @@ def api_chat_sessions_active(user_id: int):
 @require_auth
 def api_qa_save():
     data = request.get_json(force=True)
+    if missing := _missing(data, "user_id", "session_id", "question", "answer"):
+        return jsonify({"error": f"缺少必填字段: {', '.join(missing)}"}), 400
     metadata_json = json.dumps(data.get("metadata")) if data.get("metadata") else None
     conn = _init_db()
     conn.execute("INSERT INTO qa_history (user_id, session_id, question, answer, metadata) VALUES (?,?,?,?,?)",
@@ -413,6 +453,8 @@ def api_qa_by_session(session_id: str):
 @require_auth
 def api_audit_log():
     data = request.get_json(force=True)
+    if missing := _missing(data, "action"):
+        return jsonify({"error": f"缺少必填字段: {', '.join(missing)}"}), 400
     conn = _init_db()
     conn.execute("INSERT INTO audit_log (user_id, action, details, ip_address) VALUES (?,?,?,?)",
                  (data.get("user_id"), data["action"], data.get("details", ""), data.get("ip_address", "")))
