@@ -39,8 +39,11 @@ function _fallbackMarkdown(text) {
 // AI 模型中文回答习惯性使用中文标点，mermaid 语法只认 ASCII。
 // 此函数做系统化归一，顺序不可随意调整。
 function normalizeMermaid(code) {
+    // 0. HTML实体解码：marked.js 将 "><& 转义为实体，须先还原
+    //    注意 &amp; 最后解码，避免将已解码的 & 再转一次
+    var fixed = code.replace(/&quot;/g, '"').replace(/&gt;/g, '>').replace(/&lt;/g, '<').replace(/&amp;/g, '&');
     // 1. 中文分号→ASCII（全局安全：；仅 mermaid 语法符，不会出现在标签内）
-    var fixed = code.replace(/；/g, ';');
+    fixed = fixed.replace(/；/g, ';');
 
     // 2. 边界位置中文弯引号→ASCII 双引号
     //    弯引号紧随语法符（[{(|subgraph）后 → 左双引号
