@@ -73,6 +73,15 @@ function normalizeMermaid(code) {
         return '[' + replaced + ']';
     });
 
+    // 6. subgraph ID [...] → subgraph "..."（消除ID与节点名冲突）
+    //    mermaid中subgraph和节点共享命名空间，AI常将同一ID同时用于节点和子图
+    fixed = fixed.replace(
+        /^([ \t]*subgraph\s+)(\w+)\s+\["([^"]*)"\]\s*$/gm,
+        function(m, prefix, id, title) {
+            return prefix + '"' + title + '"';
+        }
+    );
+
     return fixed;
 }
 
@@ -86,7 +95,7 @@ window.parseMarkdown = function(text) {
             html = html.replace(
                 /<pre><code class="language-mermaid">([\s\S]*?)<\/code><\/pre>/g,
                 function(_, mermaidCode) {
-                    return '<div class=”mermaid”>' + normalizeMermaid(mermaidCode) + '</div>';
+                    return '<div class="mermaid">' + normalizeMermaid(mermaidCode) + '</div>';
                 }
             );
             return html;
