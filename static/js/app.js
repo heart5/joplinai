@@ -39,9 +39,9 @@ function _fallbackMarkdown(text) {
 // AI 模型中文回答习惯性使用中文标点，mermaid 语法只认 ASCII。
 // 此函数做系统化归一，顺序不可随意调整。
 function normalizeMermaid(code) {
-    // 0. HTML实体解码：marked.js 将 "><& 转义为实体，须先还原
-    //    注意 &amp; 最后解码，避免将已解码的 & 再转一次
-    var fixed = code.replace(/&quot;/g, '"').replace(/&gt;/g, '>').replace(/&lt;/g, '<').replace(/&amp;/g, '&');
+    // 0. 仅解码 &quot; → "：步骤4-6的正则需匹配字面量双引号
+    //    不碰 &lt; &gt; &amp; —— 浏览器 innerHTML 自动解码，且保护 <br> 标签
+    var fixed = code.replace(/&quot;/g, '"');
     // 1. 中文分号→ASCII（全局安全：；仅 mermaid 语法符，不会出现在标签内）
     fixed = fixed.replace(/；/g, ';');
 
