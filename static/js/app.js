@@ -35,6 +35,47 @@ function _fallbackMarkdown(text) {
         .replace(/<p><\/p>/g, '');
 }
 
+// ===== Mermaid 中文标点规范化 =====
+// AI 模型中文回答习惯性使用中文标点，mermaid 语法只认 ASCII。
+// 此函数做系统化归一，顺序不可随意调整。
+function normalizeMermaid(code) {
+    // 1. 中文分号→ASCII（全局安全：；仅 mermaid 语法符，不会出现在标签内）
+    var fixed = code.replace(/；/g, ';');
+
+    // 2. 边界位置中文弯引号→ASCII 双引号
+    //    弯引号紧随语法符（[{(|subgraph）后 → 左双引号
+    //    弯引号在语法符（]})|行尾）前 → 右双引号
+    //    注意：$1" 中的 \" 是 ASCII U+0022，不是中文弯引号 U+201D
+    fixed = fixed.replace(/([\[{\(|]|subgraph\s+)“/g, '$1"');
+    fixed = fixed.replace(/”(?=[\]\}\)|]|\s*$)/gm, '"');
+
+    // 3. 标签内部残留中文弯引号→直角引号（避免 mermaid 解析错误）
+    fixed = fixed.replace(/“/g, '「'); // " → 「
+    fixed = fixed.replace(/”/g, '」'); // " → 」
+
+    // 4. 含特殊字符的 subgraph 标题→英文双引号包裹（兜底）
+    fixed = fixed.replace(
+        /^([ \t]*subgraph\s+)([^\n"{]+[()（）[\]{}<>"'][^\n"]*?)(\s*)$/gm,
+        function(m, prefix, title, suffix) {
+            return prefix + '"' + title.trim() + '"' + suffix;
+        }
+    );
+
+    // 5. 方括号标签内ASCII双引号→直角引号
+    //    ["完整引用"]格式保留不动；[标签内含"quote"]→替换为「」
+    fixed = fixed.replace(/\[([^\]]+)\]/g, function(m, content) {
+        if (/^\s*"[^"]*"\s*$/.test(content)) return m;
+        if (content.indexOf('"') === -1) return m;
+        var i = 0;
+        var replaced = content.replace(/"/g, function() {
+            return (i++ % 2 === 0) ? '「' : '」';
+        });
+        return '[' + replaced + ']';
+    });
+
+    return fixed;
+}
+
 // 三级降级渲染入口
 window.parseMarkdown = function(text) {
     if (!text) return '';
@@ -45,23 +86,7 @@ window.parseMarkdown = function(text) {
             html = html.replace(
                 /<pre><code class="language-mermaid">([\s\S]*?)<\/code><\/pre>/g,
                 function(_, mermaidCode) {
-                    // 1. 边界位置中文引号→ASCII（mermaid语法只认ASCII引号）
-                    //    “ 在 [ ( { | subgraph 后→”；” 在 ] ) } | 或行尾前→”
-                    // 2. 标签内部残留中文引号→直角引号（避免mermaid解析错误）
-                    //    聚焦”抗湿热”场景 → 聚焦「抗湿热」场景
-                    var fixed = mermaidCode
-                        .replace(/([\[{\(|]|subgraph\s+)”/g, '$1”')
-                        .replace(/”(?=[\]\}\)|]|\s*$)/gm, '”')
-                        .replace(/”/g, '「')
-                        .replace(/”/g, '」');
-                    // 3. 给含特殊字符的 subgraph 标题加英文双引号（兜底修复）
-                    fixed = fixed.replace(
-                        /^([ \t]*subgraph\s+)([^\n"{]+[()（）[\]{}<>"'][^\n"]*?)(\s*)$/gm,
-                        function(m, prefix, title, suffix) {
-                            return prefix + '"' + title.trim() + '"' + suffix;
-                        }
-                    );
-                    return '<div class="mermaid">' + fixed + '</div>';
+                    return '<div class=”mermaid”>' + normalizeMermaid(mermaidCode) + '</div>';
                 }
             );
             return html;
