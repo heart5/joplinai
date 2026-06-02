@@ -141,4 +141,231 @@
     }
     .debug-toggle { color: #666; cursor: pointer; user-select: none; }
     #sourcesList li { margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px dotted #ddd; }
+
+    /* 翻页栏 */
+    .pagination-bar {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 8px;
+        padding: 12px 0;
+        margin-bottom: 15px;
+    }
+    .pagination-bar.top {
+        border-bottom: 1px solid #eee;
+    }
+    .pagination-bar.bottom {
+        border-top: 1px solid #eee;
+        margin-top: 15px;
+        margin-bottom: 0;
+    }
+    .pagination-bar .page-btn {
+        padding: 4px 12px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        background: #fff;
+        cursor: pointer;
+        font-size: 13px;
+        color: #333;
+    }
+    .pagination-bar .page-btn:hover:not(:disabled) {
+        background: #e3f2fd;
+        border-color: #2196F3;
+    }
+    .pagination-bar .page-btn:disabled {
+        color: #ccc;
+        cursor: default;
+        background: #f5f5f5;
+    }
+    .pagination-bar .page-info {
+        font-size: 13px;
+        color: #666;
+        min-width: 150px;
+        text-align: center;
+    }
+
+    /* Mermaid 图表导出按钮 */
+    .mermaid-wrapper {
+        position: relative;
+        display: inline-block;
+        max-width: 100%;
+    }
+    .mermaid-export-btn {
+        position: absolute;
+        top: 6px;
+        right: 6px;
+        width: 30px;
+        height: 30px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        background: rgba(255,255,255,0.92);
+        cursor: pointer;
+        font-size: 14px;
+        line-height: 1;
+        opacity: 0;
+        transition: opacity 0.2s;
+        z-index: 10;
+        padding: 0;
+        color: #666;
+    }
+    .mermaid-wrapper:hover .mermaid-export-btn {
+        opacity: 1;
+    }
+    .mermaid-export-btn:hover {
+        background: #f0f0f0;
+        color: #333;
+        border-color: #2196F3;
+    }
+
+    /* 分享按钮 */
+    .share-btn {
+        float: right;
+        background: transparent;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 13px;
+        padding: 2px 8px;
+        color: #999;
+        transition: all 0.2s;
+        margin-left: 8px;
+    }
+    .share-btn:hover {
+        color: #2196F3;
+        border-color: #2196F3;
+        background: #e3f2fd;
+    }
+    .share-btn:disabled {
+        opacity: 0.5;
+        cursor: wait;
+    }
+    .share-btn.shared {
+        color: #4CAF50;
+        border-color: #a5d6a7;
+        background: #e8f5e9;
+    }
+    .share-btn.shared:hover {
+        color: #388E3C;
+        border-color: #4CAF50;
+        background: #c8e6c9;
+    }
+
+    /* 分享弹窗 */
+    .share-modal-overlay {
+        position: fixed;
+        top: 0; left: 0; right: 0; bottom: 0;
+        background: rgba(0,0,0,0.45);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 9999;
+    }
+    .share-modal {
+        background: white;
+        border-radius: 10px;
+        box-shadow: 0 4px 24px rgba(0,0,0,0.18);
+        width: 460px;
+        max-width: 90vw;
+        overflow: hidden;
+    }
+    .share-modal-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 16px 20px;
+        border-bottom: 1px solid #eee;
+    }
+    .share-modal-header h5 {
+        margin: 0;
+        font-size: 16px;
+        color: #333;
+    }
+    .share-modal-close {
+        background: none;
+        border: none;
+        font-size: 22px;
+        color: #999;
+        cursor: pointer;
+        padding: 0;
+        line-height: 1;
+    }
+    .share-modal-close:hover { color: #333; }
+    .share-modal-body {
+        padding: 20px;
+    }
+    .share-modal-body label {
+        font-size: 13px;
+        color: #666;
+        margin-bottom: 8px;
+        display: block;
+    }
+    .share-link-row {
+        display: flex;
+        gap: 8px;
+    }
+    .share-link-input {
+        flex: 1;
+        padding: 8px 10px;
+        border: 1px solid #ddd;
+        border-radius: 6px;
+        font-size: 13px;
+        color: #333;
+        background: #f9f9f9;
+    }
+    .share-copy-btn {
+        padding: 8px 16px;
+        background: #667eea;
+        color: white;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 13px;
+        white-space: nowrap;
+        transition: background 0.2s;
+    }
+    .share-copy-btn:hover { background: #5a6fd6; }
+    .share-expiry {
+        margin-top: 10px;
+        font-size: 12px;
+        color: #f5a623;
+    }
+    .share-actions {
+        margin-top: 16px;
+        text-align: right;
+    }
+    .share-revoke-btn {
+        background: none;
+        border: 1px solid #e8a0a0;
+        color: #d9534f;
+        padding: 6px 16px;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 13px;
+        transition: all 0.2s;
+    }
+    .share-revoke-btn:hover {
+        background: #fdf2f2;
+        border-color: #d9534f;
+    }
+    .share-new-btn {
+        background: none;
+        border: 1px solid #4CAF50;
+        color: #4CAF50;
+        padding: 6px 16px;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 13px;
+        margin-right: 8px;
+        transition: all 0.2s;
+    }
+    .share-new-btn:hover {
+        background: #e8f5e9;
+        border-color: #388E3C;
+    }
+    .share-revoked-msg {
+        text-align: center;
+        padding: 20px;
+        color: #999;
+        font-size: 14px;
+    }
 </style>

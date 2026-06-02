@@ -135,6 +135,24 @@ class UserManager:
             )
         """)
 
+        # 公开分享表（分享链接3天自动过期）
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS shared_qa (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                share_id TEXT UNIQUE NOT NULL,
+                user_id INTEGER NOT NULL,
+                question TEXT NOT NULL,
+                answer TEXT NOT NULL,
+                is_active INTEGER DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+            )
+        """)
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_shared_qa_share_id ON shared_qa(share_id)"
+        )
+
         conn.commit()
         conn.close()
         log.info(f"用户数据库初始化完成: {self.db_path}")
@@ -956,6 +974,53 @@ class UserManager:
                     pass
             result.append(item)
         return result
+
+    # %% [markdown]
+    # ## 公开分享管理
+
+    # %%
+    def create_share(self, user_id: int, question: str, answer: str) -> Dict:
+        """创建公开分享链接，3天后自动过期。返回 {share_id, expires_at, ...}"""
+        import secrets
+        share_id = secrets.token_urlsafe(16)
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(
+                """INSERT INTO shared_qa (share_id, user_id, question, answer, expires_at)
+                   VALUES (?, ?, ?, ?, datetime('now', '+3 days'))""",
+                (share_id, user_id, question, answer),
+            )
+            conn.commit()
+            cursor.execute("SELECT * FROM shared_qa WHERE share_id = ?", (share_id,))
+            row = cursor.fetchone()
+            return dict(row)
+
+    # %%
+    def revoke_share(self, share_id: str) -> bool:
+        """撤销分享链接。返回是否成功撤销。"""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE shared_qa SET is_active = 0 WHERE share_id = ?",
+                (share_id,),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+    # %%
+    def get_shared_qa(self, share_id: str) -> Optional[Dict]:
+        """获取公开分享的QA内容。自动过滤已过期/已撤销的记录。"""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(
+                """SELECT * FROM shared_qa
+                   WHERE share_id = ? AND is_active = 1 AND expires_at > datetime('now')""",
+                (share_id,),
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
 
 
 # %% [markdown]

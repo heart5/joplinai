@@ -135,6 +135,40 @@ def _register_core_routes(app):
             "static", "favicon.ico", mimetype="image/vnd.microsoft.icon"
         )
 
+    # === 公开分享 ===
+
+    @app.route("/share/<share_id>")
+    def view_shared_qa(share_id):
+        record = USER_MANAGER.get_shared_qa(share_id)
+        if not record:
+            return "<h3>此分享链接已失效</h3>", 404
+        return render_template("share.html", record=record)
+
+    @app.route("/api/share", methods=["POST"])
+    @login_required
+    def api_create_share():
+        data = request.get_json(force=True)
+        if not data or not data.get("question") or not data.get("answer"):
+            return jsonify({"ok": False, "error": "缺少问答内容"}), 400
+        record = USER_MANAGER.create_share(
+            user_id=session["user"]["id"],
+            question=data["question"],
+            answer=data["answer"],
+        )
+        share_url = url_for("view_shared_qa", share_id=record["share_id"], _external=True)
+        return jsonify({
+            "ok": True,
+            "share_id": record["share_id"],
+            "share_url": share_url,
+            "expires_at": record["expires_at"],
+        })
+
+    @app.route("/api/share/<share_id>", methods=["DELETE"])
+    @login_required
+    def api_revoke_share(share_id):
+        ok = USER_MANAGER.revoke_share(share_id)
+        return jsonify({"ok": ok})
+
 
 if __name__ == "__main__":
     template_dir = Path(__file__).resolve().parent.parent.parent / "templates"

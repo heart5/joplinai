@@ -377,7 +377,7 @@ class QASystem:
 
         chunks.sort(key=lambda x: x["similarity"], reverse=True)
 
-        threshold = self.config.get("similarity_threshold", 0.6)
+        threshold = self.config.get("similarity_threshold") or 0.5
         filtered = [chunk for chunk in chunks if chunk["similarity"] >= threshold]
 
         if len(filtered) < 3 and len(chunks) > 0:

@@ -328,3 +328,15 @@ class UserManagerClient:
         if resp is not None:
             return resp.json().get("deleted", 0)
         return self.local.clear_audit_logs(before_days)
+
+    def create_share(self, user_id: int, question: str, answer: str):
+        """创建公开分享链接（本地存储，3天自动过期）。"""
+        return self.local.create_share(user_id, question, answer)
+
+    def revoke_share(self, share_id: str) -> bool:
+        """撤销公开分享链接。"""
+        return self.local.revoke_share(share_id)
+
+    def get_shared_qa(self, share_id: str):
+        """获取公开分享的QA内容。"""
+        return self.local.get_shared_qa(share_id)
