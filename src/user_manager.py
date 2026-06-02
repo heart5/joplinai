@@ -2,6 +2,7 @@
 # jupyter:
 #   jupytext:
 #     formats: ipynb,py:percent
+#     split_at_heading: true
 #     text_representation:
 #       extension: .py
 #       format_name: percent
@@ -975,8 +976,8 @@ class UserManager:
             result.append(item)
         return result
 
-    # %% [markdown]
-    # ## 公开分享管理
+# %% [markdown]
+#     # ## 公开分享管理
 
     # %%
     def create_share(self, user_id: int, question: str, answer: str) -> Dict:
