@@ -39,9 +39,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-import chromadb
+try:
+    import chromadb
+except ImportError:
+    import types
+    from aimod.chromadb_http import ChromaDBHttpClient
+    chromadb = types.SimpleNamespace(HttpClient=ChromaDBHttpClient)
 import ollama
-from chromadb.config import Settings
 
 # %%
 import pathmagic
