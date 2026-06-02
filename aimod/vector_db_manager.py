@@ -34,7 +34,10 @@ except ImportError:
     import types
     from aimod.chromadb_http import ChromaDBHttpClient
     chromadb = types.SimpleNamespace(HttpClient=ChromaDBHttpClient)
-import ollama
+try:
+    import ollama
+except ImportError:
+    ollama = None
 
 # %%
 import pathmagic

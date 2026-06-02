@@ -30,7 +30,10 @@ from functools import lru_cache
 from threading import Semaphore
 from typing import Dict, List, Optional, Tuple
 
-import ollama
+try:
+    import ollama
+except ImportError:
+    ollama = None
 import pathmagic
 import requests
 
