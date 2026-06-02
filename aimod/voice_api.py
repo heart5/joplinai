@@ -22,8 +22,12 @@ import logging
 import os
 import sqlite3
 import tempfile
-from datetime import datetime
 from pathlib import Path
+
+import pathmagic
+
+with pathmagic.Context():
+    from func.datetimetools import normalize_time_to_unix
 
 from flask import Flask, jsonify, request
 
@@ -57,30 +61,6 @@ def _get_model():
 
 
 # %%
-def _normalize_time(val):
-    """统一转为10位unix时间戳字符串。"""
-    if val is None:
-        return ""
-    if isinstance(val, (int, float)):
-        return str(int(val))
-    try:
-        return str(int(val.timestamp()))
-    except Exception:
-        pass
-    if isinstance(val, str):
-        for fmt in ('%Y-%m-%d %H:%M:%S', '%Y-%m-%dT%H:%M:%S'):
-            try:
-                dt = datetime.strptime(val.strip(), fmt)
-                return str(int(dt.timestamp()))
-            except ValueError:
-                continue
-        try:
-            return str(int(float(val)))
-        except (ValueError, OverflowError):
-            pass
-    return str(val)
-
-
 def _save_transcription(account, msg_time, sender, text, send=0, engine="ollama", source="unknown", filepath=None):
     """写入转录结果到 v4txt_v2，INSERT OR IGNORE 保证幂等。"""
     try:
@@ -157,7 +137,7 @@ def transcribe():
     # 消息身份参数
     account = request.form.get("account", "")
     msg_time_raw = request.form.get("msg_time", "")
-    msg_time = _normalize_time(msg_time_raw)
+    msg_time = normalize_time_to_unix(msg_time_raw)
     sender = request.form.get("sender", "")
     send = int(request.form.get("send", "0"))
     source = request.form.get("source", "unknown")
