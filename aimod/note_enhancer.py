@@ -24,7 +24,10 @@
 import time
 from typing import Optional
 
-import ollama
+try:
+    import ollama
+except ImportError:
+    ollama = None
 import requests
 
 # %%
@@ -471,6 +474,9 @@ def enhance_note(
         return result
 
     if provider == "ollama":
+        if ollama is None:
+            log.warning("ollama 包未安装，无法使用本地模型增强")
+            return None
         if not model:
             model = "qwen2.5:1.5b"
         key = (task, provider)

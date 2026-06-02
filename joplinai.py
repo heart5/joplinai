@@ -1184,9 +1184,9 @@ def add_file_lock(
         lock_file_path (Path): 锁文件路径，用于后续清理。
         acquired (bool): 是否成功获取锁。
     """
-    # 确定锁文件存放目录，优先使用临时目录，其次使用脚本数据目录
+    # 确定锁文件存放目录，优先 /tmp，不可写时（如 Android Termux）回落项目 data/
     temp_dir = Path(os.getenv("TEMP", "/tmp"))
-    lock_dir = temp_dir if temp_dir.exists() else getdirmain() / "data"
+    lock_dir = temp_dir if (temp_dir.exists() and os.access(temp_dir, os.W_OK)) else getdirmain() / "data"
     lock_dir.mkdir(parents=True, exist_ok=True)
 
     lock_file_path = lock_dir / lock_name
@@ -1217,8 +1217,6 @@ def add_file_lock(
     except FileExistsError:
         # 锁文件已存在，检查是否已超时（进程可能已崩溃）
         try:
-            print(lock_file_path.stat().st_mtime)
-            print(time.time() - timeout)
             if lock_file_path.stat().st_mtime < (time.time() - timeout):
                 log.warning(
                     f"检测到过期的锁文件（超过{timeout}秒），将强制清理并继续。"
