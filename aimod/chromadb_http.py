@@ -2,7 +2,6 @@
 # jupyter:
 #   jupytext:
 #     formats: ipynb,py:percent
-#     split_at_heading: true
 #     text_representation:
 #       extension: .py
 #       format_name: percent
@@ -11,12 +10,12 @@
 # ---
 
 # %% [markdown]
-# # ChromaDB HTTP 薄封装 — 免编译纯 Python 实现 (v2 API)
+# # ChromaDB HTTP 薄封装 — 免编译纯 Python 实现
 
 # %%
 """当 `pip install chromadb` 在 Termux/Android 等环境编译失败时的替代方案。
 
-只依赖 requests，直接调 ChromaDB REST API（v2，含 tenant/database）。
+只依赖 requests，直接调 ChromaDB REST API（v1）。
 接口完全模拟 chromadb.HttpClient + Collection 的核心方法，
 覆盖 vector_db_manager.py 实际用到的所有调用。
 
@@ -33,14 +32,11 @@ import requests
 
 
 # %%
-_V2_BASE = "/api/v2/tenants/default_tenant/databases/default_database"
-
-
 class ChromaDBHttpClient:
     """模拟 chromadb.HttpClient，只实现 vector_db_manager 需要的部分。"""
 
     def __init__(self, host: str = "127.0.0.1", port: int = 8000, **kwargs):
-        self._base = f"http://{host}:{port}"
+        self._base = f"http://{host}:{port}/api/v1"
         self._session = requests.Session()
         self._session.headers["Content-Type"] = "application/json"
 
@@ -48,47 +44,47 @@ class ChromaDBHttpClient:
     # 集合管理
     # ------------------------------------------------------------------
 
-    def _list_collections(self) -> List[Dict]:
-        resp = self._session.get(f"{self._base}{_V2_BASE}/collections", timeout=10)
-        if resp.ok:
-            return resp.json()
-        return []
-
     def _get_collection_id(self, name: str) -> Optional[str]:
-        for coll in self._list_collections():
-            if coll.get("name") == name:
-                return coll["id"]
+        """按名称查 collection id。"""
+        resp = self._session.get(f"{self._base}/collections", timeout=10)
+        if resp.ok:
+            for coll in resp.json():
+                if coll.get("name") == name:
+                    return coll["id"]
         return None
 
     def get_collection(self, name: str):
+        """获取已存在的集合，不存在则抛异常。"""
         cid = self._get_collection_id(name)
         if cid is None:
             raise ValueError(f"Collection {name} does not exist.")
         return _ChromaCollection(self._base, self._session, cid, name)
 
     def create_collection(self, name: str, metadata: Optional[Dict] = None, **kwargs):
+        """创建新集合。"""
         body = {"name": name}
         if metadata:
             body["metadata"] = metadata
-        resp = self._session.post(
-            f"{self._base}{_V2_BASE}/collections", json=body, timeout=10
-        )
+        resp = self._session.post(f"{self._base}/collections", json=body, timeout=10)
         if resp.ok:
             data = resp.json()
             return _ChromaCollection(self._base, self._session, data["id"], name)
         raise RuntimeError(f"创建集合失败: {resp.status_code} {resp.text}")
 
     def delete_collection(self, name: str):
+        """删除集合。"""
         cid = self._get_collection_id(name)
         if cid:
-            resp = self._session.delete(
-                f"{self._base}{_V2_BASE}/collections/{cid}", timeout=10
-            )
+            resp = self._session.delete(f"{self._base}/collections/{cid}", timeout=10)
             if not resp.ok:
                 raise RuntimeError(f"删除集合失败: {resp.status_code} {resp.text}")
 
     def list_collections(self):
-        return self._list_collections()
+        """列出所有集合。"""
+        resp = self._session.get(f"{self._base}/collections", timeout=10)
+        if resp.ok:
+            return resp.json()
+        return []
 
 
 # %% [markdown]
@@ -105,21 +101,14 @@ class _ChromaCollection:
         self.id = cid
         self.name = name
 
-    @property
-    def _coll_url(self):
-        return f"{self._base}{_V2_BASE}/collections/{self.id}"
-
     # ------------------------------------------------------------------
     # count / get
     # ------------------------------------------------------------------
 
     def count(self) -> int:
-        resp = self._session.get(f"{self._coll_url}/count", timeout=10)
+        resp = self._session.get(f"{self._base}/collections/{self.id}/count", timeout=10)
         if resp.ok:
-            try:
-                return int(resp.text)
-            except (ValueError, TypeError):
-                pass
+            return int(resp.text)
         return 0
 
     def get(
@@ -131,6 +120,7 @@ class _ChromaCollection:
         include: Optional[List[str]] = None,
         **kwargs,
     ) -> Dict:
+        """获取集合中的条目。"""
         body: Dict = {}
         if ids:
             body["ids"] = list(ids)
@@ -142,7 +132,9 @@ class _ChromaCollection:
             body["offset"] = offset
         if include:
             body["include"] = include
-        resp = self._session.post(f"{self._coll_url}/get", json=body, timeout=30)
+        resp = self._session.post(
+            f"{self._base}/collections/{self.id}/get", json=body, timeout=30
+        )
         if resp.ok:
             return resp.json()
         return {}
@@ -169,7 +161,9 @@ class _ChromaCollection:
             body["where"] = where
         if include:
             body["include"] = include
-        resp = self._session.post(f"{self._coll_url}/query", json=body, timeout=30)
+        resp = self._session.post(
+            f"{self._base}/collections/{self.id}/query", json=body, timeout=30
+        )
         if resp.ok:
             return resp.json()
         return {}
@@ -193,7 +187,9 @@ class _ChromaCollection:
             body["metadatas"] = metadatas
         if documents is not None:
             body["documents"] = documents
-        resp = self._session.post(f"{self._coll_url}/upsert", json=body, timeout=60)
+        resp = self._session.post(
+            f"{self._base}/collections/{self.id}/upsert", json=body, timeout=60
+        )
         if not resp.ok:
             raise RuntimeError(f"upsert 失败: {resp.status_code} {resp.text}")
 
@@ -212,7 +208,9 @@ class _ChromaCollection:
             body["metadatas"] = metadatas
         if documents is not None:
             body["documents"] = documents
-        resp = self._session.post(f"{self._coll_url}/update", json=body, timeout=60)
+        resp = self._session.post(
+            f"{self._base}/collections/{self.id}/update", json=body, timeout=60
+        )
         if not resp.ok:
             raise RuntimeError(f"update 失败: {resp.status_code} {resp.text}")
 
@@ -227,6 +225,8 @@ class _ChromaCollection:
             body["ids"] = list(ids)
         if where:
             body["where"] = where
-        resp = self._session.post(f"{self._coll_url}/delete", json=body, timeout=60)
+        resp = self._session.post(
+            f"{self._base}/collections/{self.id}/delete", json=body, timeout=60
+        )
         if not resp.ok:
             raise RuntimeError(f"delete 失败: {resp.status_code} {resp.text}")
