@@ -50,8 +50,9 @@ class ChromaDBHttpClient:
 
     def _list_collections(self) -> List[Dict]:
         resp = self._session.get(f"{self._base}{_V2_BASE}/collections", timeout=10)
-        resp.raise_for_status()
-        return resp.json()
+        if resp.ok:
+            return resp.json()
+        return []
 
     def _get_collection_id(self, name: str) -> Optional[str]:
         for coll in self._list_collections():
