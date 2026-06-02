@@ -45,10 +45,7 @@ except ImportError:
     import types
     from aimod.chromadb_http import ChromaDBHttpClient
     chromadb = types.SimpleNamespace(HttpClient=ChromaDBHttpClient)
-try:
-    import ollama
-except ImportError:
-    ollama = None
+import ollama
 
 # %%
 import pathmagic
@@ -766,31 +763,29 @@ def process_notes_incremental(notebook_title: str, config: Dict, note_ids: List[
         process_notes_incremental.ollama_checked = True
         ollama_chat_model = config.get("enhance_ollama_chat_model")
         if config.get("summary_model") == "ollama" or config.get("tags_model") == "ollama":
-            if ollama is None:
-                log.warning("ollama 包未安装，跳过本地模型可用性检查")
-            else:
-                import time
-                ollama_host = config.get("ollama_host", "http://149.30.242.156:11434")
-                ollama_client = ollama.Client(host=ollama_host)
-                for attempt in range(1, 4):
-                    try:
-                        result = ollama_client.list()
-                        models_list = result.models if hasattr(result, 'models') else result.get("models", [])
-                        installed = [m.model if hasattr(m, 'model') else m["name"] for m in models_list]
-                        if ollama_chat_model in installed:
-                            log.info(f"Ollama 标签/摘要模型 {ollama_chat_model} 可用")
-                        else:
-                            log.warning(
-                                f"Ollama 模型 {ollama_chat_model} 未安装，标签/摘要将不可用。"
-                                f"安装: ollama pull {ollama_chat_model}"
-                            )
-                        break
-                    except Exception as e:
-                        if attempt < 3:
-                            log.warning(f"Ollama 连接失败 (第{attempt}次): {e}，2秒后重试...")
-                            time.sleep(2)
-                        else:
-                            log.warning(f"Ollama 连接失败 (3次重试均失败): {e}，标签/摘要将不可用")
+            import time
+            import ollama
+            ollama_host = config.get("ollama_host", "http://149.30.242.156:11434")
+            ollama_client = ollama.Client(host=ollama_host)
+            for attempt in range(1, 4):
+                try:
+                    result = ollama_client.list()
+                    models_list = result.models if hasattr(result, 'models') else result.get("models", [])
+                    installed = [m.model if hasattr(m, 'model') else m["name"] for m in models_list]
+                    if ollama_chat_model in installed:
+                        log.info(f"Ollama 标签/摘要模型 {ollama_chat_model} 可用")
+                    else:
+                        log.warning(
+                            f"Ollama 模型 {ollama_chat_model} 未安装，标签/摘要将不可用。"
+                            f"安装: ollama pull {ollama_chat_model}"
+                        )
+                    break
+                except Exception as e:
+                    if attempt < 3:
+                        log.warning(f"Ollama 连接失败 (第{attempt}次): {e}，2秒后重试...")
+                        time.sleep(2)
+                    else:
+                        log.warning(f"Ollama 连接失败 (3次重试均失败): {e}，标签/摘要将不可用")
 
     # 获取强制更新配置（需在加载状态前读取，用于决定 center_api 不可达时的策略）
     force_update = config.get("force_update", False)
