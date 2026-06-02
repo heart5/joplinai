@@ -22,6 +22,7 @@ import logging
 import os
 import sqlite3
 import tempfile
+from datetime import datetime
 from pathlib import Path
 
 from flask import Flask, jsonify, request
@@ -56,6 +57,30 @@ def _get_model():
 
 
 # %%
+def _normalize_time(val):
+    """统一转为10位unix时间戳字符串。"""
+    if val is None:
+        return ""
+    if isinstance(val, (int, float)):
+        return str(int(val))
+    try:
+        return str(int(val.timestamp()))
+    except Exception:
+        pass
+    if isinstance(val, str):
+        for fmt in ('%Y-%m-%d %H:%M:%S', '%Y-%m-%dT%H:%M:%S'):
+            try:
+                dt = datetime.strptime(val.strip(), fmt)
+                return str(int(dt.timestamp()))
+            except ValueError:
+                continue
+        try:
+            return str(int(float(val)))
+        except (ValueError, OverflowError):
+            pass
+    return str(val)
+
+
 def _save_transcription(account, msg_time, sender, text, send=0, engine="ollama", source="unknown", filepath=None):
     """写入转录结果到 v4txt_v2，INSERT OR IGNORE 保证幂等。"""
     try:
@@ -131,7 +156,8 @@ def transcribe():
 
     # 消息身份参数
     account = request.form.get("account", "")
-    msg_time = request.form.get("msg_time", "")
+    msg_time_raw = request.form.get("msg_time", "")
+    msg_time = _normalize_time(msg_time_raw)
     sender = request.form.get("sender", "")
     send = int(request.form.get("send", "0"))
     source = request.form.get("source", "unknown")
@@ -153,7 +179,8 @@ def transcribe():
 
         # 写入 v4txt_v2（如果提供了身份参数）
         if account and msg_time and sender:
-            rel_path = f"img/webchat/{msg_time[:4]}{msg_time[5:7]}{msg_time[8:10]}/{sender}_{Path(file.filename).stem}"
+            # 用原始时间拼路径（归一化后是unix时间戳，无法切分年月日）
+            rel_path = f"img/webchat/{msg_time_raw[:4]}{msg_time_raw[5:7]}{msg_time_raw[8:10]}/{sender}_{Path(file.filename).stem}"
             _save_transcription(account, msg_time, sender, text, send=send, engine="ollama", source=source, filepath=rel_path)
 
         return jsonify({"text": text, "language": info.language, "probability": info.language_probability})
