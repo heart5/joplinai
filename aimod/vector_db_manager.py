@@ -27,13 +27,7 @@ import time
 from pathlib import Path
 from typing import Dict, List, Optional
 
-try:
-    import chromadb
-except ImportError:
-    # Termux/Android 等环境无法编译 chromadb 的 C 扩展，回落纯 HTTP 薄封装
-    import types
-    from aimod.chromadb_http import ChromaDBHttpClient
-    chromadb = types.SimpleNamespace(HttpClient=ChromaDBHttpClient)
+import chromadb
 import ollama
 
 # %%
