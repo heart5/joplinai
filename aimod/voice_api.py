@@ -229,26 +229,34 @@ def chat_sync():
     if not merged_db.exists():
         return jsonify({"status": "pending", "received": len(records), "message": "合并库尚未就绪，数据未写入"})
 
+    device_source = data.get("source", "unknown")
     inserted = 0
     try:
         conn = sqlite3.connect(str(merged_db))
         table_name = f"wc_{account}"
         for r in records:
+            t, sd, sr, tp, ct = (
+                r.get("time", ""),
+                r.get("send", False),
+                r.get("sender", ""),
+                r.get("type", ""),
+                r.get("content", ""),
+            )
             try:
-                conn.execute(
-                    f"INSERT OR IGNORE INTO [{table_name}] (time, send, sender, type, content, source) VALUES (?, ?, ?, ?, ?, 'phone')",
-                    (
-                        r.get("time", ""),
-                        r.get("send", False),
-                        r.get("sender", ""),
-                        r.get("type", ""),
-                        r.get("content", ""),
-                    ),
+                # SELECT 先查是否存在，避免 INSERT OR IGNORE 消耗 AUTOINCREMENT id
+                cur = conn.execute(
+                    f"SELECT 1 FROM [{table_name}] WHERE time=? AND send=? AND sender=? AND type=? AND content IS ?",
+                    (t, sd, sr, tp, ct),
                 )
-                if conn.total_changes > 0:
-                    inserted += 1
-            except sqlite3.OperationalError:
-                pass
+                if cur.fetchone():
+                    continue
+                conn.execute(
+                    f"INSERT INTO [{table_name}] (time, send, sender, type, content, source) VALUES (?, ?, ?, ?, ?, ?)",
+                    (t, sd, sr, tp, ct, device_source),
+                )
+                inserted += 1
+            except sqlite3.IntegrityError:
+                pass  # 竞态条件，另一请求刚好插入了同一条
         conn.commit()
         conn.close()
         return jsonify({"status": "ok", "received": len(records), "inserted": inserted})
