@@ -1,0 +1,34 @@
+[Unit]
+Description=Joplinai QA Web Application (Multi-User Portal) - Gunicorn
+After=network-online.target joplinai-qa-api.service
+Wants=network-online.target joplinai-qa-api.service
+
+[Service]
+Type=simple
+User=baiyefeng
+Group=class
+Environment="PATH=/etc/miniconda3/envs/lsp/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+WorkingDirectory=/home/baiyefeng/work/joplinai
+
+ExecStart=/etc/miniconda3/envs/lsp/bin/gunicorn -w 2 \
+    --access-logfile /var/log/joplinai/web_access.log \
+    --error-logfile /var/log/joplinai/web_error.log \
+    --log-level info \
+    -b 127.0.0.1:5001 --timeout 120 joplin_web_app:app
+
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+MemoryMax=800M
+CPUQuota=60%
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/home/baiyefeng/work/joplinai
+ReadWritePaths=/var/log/joplinai
+
+[Install]
+WantedBy=multi-user.target

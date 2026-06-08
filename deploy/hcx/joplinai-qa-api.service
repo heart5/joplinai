@@ -1,0 +1,38 @@
+[Unit]
+Description=Joplinai Smart Q&A API Service (Gunicorn)
+After=network-online.target ollama.service apache2.service
+Wants=network-online.target ollama.service
+
+[Service]
+Type=simple
+User=baiyefeng
+Group=class
+Environment="PATH=/etc/miniconda3/envs/lsp/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="FLASK_ENV=production"
+WorkingDirectory=/home/baiyefeng/work/joplinai
+ExecStart=/etc/miniconda3/envs/lsp/bin/gunicorn -w 3 \
+    --access-logfile /var/log/joplinai/api_access.log \
+    --error-logfile /var/log/joplinai/api_error.log \
+    --log-level info \
+    -b 127.0.0.1:5000 --timeout 120 joplin_qa_api:app
+ExecStartPre=/usr/bin/curl -sf http://127.0.0.1:11434/api/tags
+
+Restart=always
+RestartSec=10
+StartLimitInterval=600
+StartLimitBurst=5
+
+StandardOutput=journal
+StandardError=journal
+
+MemoryMax=800M
+CPUQuota=70%
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/home/baiyefeng/work/joplinai
+ReadWritePaths=/var/log/joplinai
+
+[Install]
+WantedBy=multi-user.target

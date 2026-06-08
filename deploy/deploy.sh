@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Joplinai 统一部署脚本
 # Usage:
-#   ./deploy/deploy.sh hcx     — 部署到恒创云（本地），重启 QA_API + Web_App
+#   ./deploy/deploy.sh hcx     — 部署到恒创云（本地），rsync 代码到 work 目录后重启 QA_API + Web_App + Voice_API
 #   ./deploy/deploy.sh tc      — 部署到腾讯云，git push→git pull (直连→代理→rsync兜底)→重启 center_api
 #   ./deploy/deploy.sh hcx --dry-run   — 仅显示将执行的操作，不实际执行
 #   ./deploy/deploy.sh tc --dry-run    — 同上
@@ -15,7 +15,9 @@ TC_HOST="tc"
 TC_PATH="/home/baiyefeng/work/joplinai"
 TC_SERVICE="joplinai-center-api"
 
-HCX_SERVICES=("joplinai-qa-api" "joplinai-web-app")
+HCX_SERVICES=("joplinai-qa-api" "joplinai-web-app" "joplinai-voice-api")
+HCX_DEV_PATH="/data/codebase/joplinai"
+HCX_PROD_PATH="/home/baiyefeng/work/joplinai"
 
 RSYNC_EXCLUDE=(
     --exclude="func/"
@@ -142,6 +144,18 @@ deploy_hcx() {
     local dry="$1"
     green "=== 部署到恒创云 (hcx, 本地) ==="
 
+    # 0. 同步代码：开发目录 → 生产目录
+    echo "同步代码: $HCX_DEV_PATH → $HCX_PROD_PATH"
+    if [ "$dry" = "false" ]; then
+        rsync -avz --delete "${RSYNC_EXCLUDE[@]}" \
+            "$HCX_DEV_PATH/" "$HCX_PROD_PATH/"
+        rsync -avz --delete "$HCX_DEV_PATH/func/" "$HCX_PROD_PATH/func/"
+        green "代码同步完成"
+    else
+        yellow "[dry-run] 跳过 rsync"
+    fi
+
+    # 1. 重启服务
     for svc in "${HCX_SERVICES[@]}"; do
         echo "重启本地服务: $svc"
         if [ "$dry" = "false" ]; then
@@ -177,7 +191,7 @@ main() {
         hcx) deploy_hcx "$dry" ;;
         *)
             echo "Usage: $0 {hcx|tc} [--dry-run]"
-            echo "  hcx — 恒创云（本地），重启 QA_API + Web_App"
+            echo "  hcx — 恒创云（本地），rsync 代码到 work 目录后重启 QA_API + Web_App + Voice_API"
             echo "  tc  — 腾讯云（远程），git pull (直连→代理→rsync兜底) + 重启 center_api"
             exit 1
             ;;

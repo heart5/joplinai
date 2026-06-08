@@ -1,0 +1,18 @@
+[Unit]
+Description=Joplinai Voice API (faster-whisper speech-to-text)
+After=network.target
+
+[Service]
+Type=simple
+User=baiyefeng
+WorkingDirectory=/home/baiyefeng/work/joplinai
+Environment=PATH=/etc/miniconda3/envs/lsp/bin:/usr/local/bin:/usr/bin:/bin
+Environment=VOICE_MODEL=small
+Environment=VOICE_DEVICE=cpu
+Environment=VOICE_COMPUTE_TYPE=int8
+ExecStart=/etc/miniconda3/envs/lsp/bin/python -m aimod.voice_api --host 127.0.0.1 --port 5004
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
