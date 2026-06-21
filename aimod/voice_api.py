@@ -595,6 +595,55 @@ def sms_upload():
     return jsonify({"imported": imported, "errors": errors, "total": len(messages)})
 
 
+@app.route("/sms/query", methods=["GET"])
+def sms_query():
+    """查询短信数据（供 happyjoplin 消费端 API 调用）。
+
+    参数: date_from, date_to, limit, number
+    """
+    expected_key = _get_sms_api_key()
+    if expected_key:
+        got_key = request.headers.get("X-API-Key", "")
+        if got_key != expected_key:
+            return jsonify({"error": "unauthorized"}), 401
+
+    date_from = request.args.get("date_from", "")
+    date_to = request.args.get("date_to", "")
+    number = request.args.get("number", "")
+    limit = int(request.args.get("limit", 50000))
+
+    if not _SMS_DB.exists():
+        return jsonify({"error": "sms db not found", "records": []})
+
+    conn = sqlite3.connect(str(_SMS_DB))
+    conditions = []
+    params = []
+    if date_from:
+        conditions.append("received >= ?")
+        params.append(date_from)
+    if date_to:
+        conditions.append("received < ?")
+        params.append(date_to)
+    if number:
+        conditions.append("number = ?")
+        params.append(number)
+
+    where = " AND ".join(conditions) if conditions else "1"
+    rows = conn.execute(
+        f"SELECT sms_id, number, body, received FROM sms_messages WHERE {where} ORDER BY received ASC LIMIT ?",
+        params + [limit],
+    ).fetchall()
+    conn.close()
+
+    records = [
+        {"_id": r[0], "number": r[1], "body": r[2], "received": r[3]}
+        for r in rows
+    ]
+    log.info(f"sms 查询: {len(records)} 条 (date_from={date_from}, date_to={date_to})")
+    return jsonify({"records": records, "total": len(records)})
+
+
+
 # %%
 def main():
     parser = argparse.ArgumentParser(description="Joplinai Voice API")
