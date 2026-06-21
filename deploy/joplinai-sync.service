@@ -12,7 +12,7 @@ Environment="PATH=/usr/miniconda3/envs/newlsp/bin:/usr/local/sbin:/usr/local/bin
 WorkingDirectory=/home/baiyefeng/work/joplinai
 # 上游依赖健康检查：Docker ChromaDB, HCX Ollama, 本地 center_api
 ExecStartPre=/usr/bin/curl -sf http://localhost:8009/api/v2/heartbeat
-ExecStartPre=/usr/bin/curl -sf https://ollama.strcoder.com/api/tags
+ExecStartPre=/usr/bin/curl -sf https://ollama.qingxd.com/api/tags
 ExecStartPre=/usr/bin/curl -sf --retry 30 --retry-delay 3 --retry-max-time 120 --retry-connrefused http://localhost:5003/health
 ExecStart=/usr/miniconda3/envs/newlsp/bin/python joplinai.py
 
