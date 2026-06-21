@@ -20,8 +20,10 @@
 import argparse
 import logging
 import os
+import re
 import sqlite3
 import tempfile
+from datetime import datetime
 from pathlib import Path
 
 import pathmagic
@@ -263,6 +265,334 @@ def chat_sync():
     except Exception as e:
         log.error(f"chat/sync 失败: {e}")
         return jsonify({"error": str(e)}), 500
+
+
+# ── WeChat 数据查询端点 ──
+
+_ACCOUNT_RE = re.compile(r"^[\w一-鿿]+$")
+MERGED_DB = V4TXT_DB.parent / "wcitemsall_merged.db"
+
+
+def _ensure_merged_db() -> sqlite3.Connection:
+    if not MERGED_DB.exists():
+        raise FileNotFoundError(f"合并库不存在: {MERGED_DB}")
+    conn = sqlite3.connect(str(MERGED_DB))
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def _validate_account(account: str):
+    if not _ACCOUNT_RE.match(account):
+        raise ValueError(f"非法的账号名: {account!r}")
+
+
+def _normalize_time(val) -> str:
+    """将混合格式的 time 统一为 ISO 格式。"""
+    if val is None or val == "":
+        return ""
+    if isinstance(val, (int, float)):
+        try:
+            return datetime.fromtimestamp(val).strftime("%Y-%m-%d %H:%M:%S")
+        except (OSError, ValueError):
+            return str(val)
+    s = str(val).strip()
+    if re.match(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$", s):
+        return s
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", s):
+        return s + " 00:00:00"
+    try:
+        return datetime.fromtimestamp(int(float(s))).strftime("%Y-%m-%d %H:%M:%S")
+    except (OSError, ValueError, TypeError):
+        return s
+
+
+def _row_to_dict(r) -> dict:
+    """sqlite3.Row → dict，统一 time 格式。"""
+    return {
+        "id": r["id"],
+        "time": _normalize_time(r["time"]),
+        "send": bool(r["send"]),
+        "sender": r["sender"],
+        "type": r["type"],
+        "content": r["content"],
+        "source": r["source"],
+    }
+
+
+@app.route("/wechat/health")
+def wechat_health():
+    """合并库健康检查。"""
+    try:
+        conn = _ensure_merged_db()
+        tables = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'wc_%'").fetchall()
+        info = {}
+        for t in tables:
+            name = t["name"]
+            cnt = conn.execute(f"SELECT COUNT(*) FROM [{name}]").fetchone()[0]
+            info[name] = cnt
+        conn.close()
+        return jsonify({
+            "status": "ok",
+            "db_path": str(MERGED_DB),
+            "db_size_mb": round(MERGED_DB.stat().st_size / 1024 / 1024, 1),
+            "tables": info,
+        })
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route("/wechat/contacts")
+def wechat_contacts():
+    """联系人活跃列表。"""
+    account = request.args.get("account", "")
+    days = int(request.args.get("days", 30))
+    try:
+        _validate_account(account)
+        conn = _ensure_merged_db()
+        table = f"wc_{account}"
+        rows = conn.execute(
+            f"""SELECT sender, COUNT(*) as msg_count,
+                       SUM(CASE WHEN send=1 THEN 1 ELSE 0 END) as sent_count,
+                       MAX(time) as last_time
+                FROM [{table}]
+                WHERE time >= datetime('now', ? || ' days')
+                GROUP BY sender
+                ORDER BY msg_count DESC
+                LIMIT 200""",
+            (str(days),),
+        ).fetchall()
+        conn.close()
+        return jsonify({"account": account, "contacts": [dict(r) for r in rows]})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/wechat/stats")
+def wechat_stats():
+    """时段统计。"""
+    account = request.args.get("account", "")
+    date_from = request.args.get("date_from", "")
+    date_to = request.args.get("date_to", "")
+    try:
+        _validate_account(account)
+        conn = _ensure_merged_db()
+        table = f"wc_{account}"
+        total = conn.execute(
+            f"SELECT COUNT(*) FROM [{table}] WHERE time >= ? AND time <= ?",
+            (date_from, date_to),
+        ).fetchone()[0]
+        type_dist = conn.execute(
+            f"SELECT type, COUNT(*) as cnt FROM [{table}] WHERE time >= ? AND time <= ? GROUP BY type ORDER BY cnt DESC",
+            (date_from, date_to),
+        ).fetchall()
+        daily = conn.execute(
+            f"SELECT substr(time,1,10) as d, COUNT(*) as cnt FROM [{table}] WHERE time >= ? AND time <= ? GROUP BY d ORDER BY d",
+            (date_from, date_to),
+        ).fetchall()
+        conn.close()
+        return jsonify({
+            "account": account,
+            "date_from": date_from,
+            "date_to": date_to,
+            "total": total,
+            "type_distribution": [{"type": r[0], "count": r[1]} for r in type_dist],
+            "daily": [{"date": r[0], "count": r[1]} for r in daily],
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/wechat/conversation")
+def wechat_conversation():
+    """与特定联系人的对话详情。"""
+    account = request.args.get("account", "")
+    sender = request.args.get("sender", "")
+    date_from = request.args.get("date_from", "")
+    date_to = request.args.get("date_to", "")
+    limit = int(request.args.get("limit", 100))
+    try:
+        _validate_account(account)
+        conn = _ensure_merged_db()
+        table = f"wc_{account}"
+        conditions = ["sender LIKE ?"]
+        params = [f"%{sender}%"]
+        if date_from:
+            conditions.append("time >= ?")
+            params.append(date_from)
+        if date_to:
+            conditions.append("time <= ?")
+            params.append(date_to)
+        where = " AND ".join(conditions)
+        rows = conn.execute(
+            f"SELECT id, time, send, sender, type, content, source FROM [{table}] WHERE {where} ORDER BY id ASC LIMIT ?",
+            params + [limit],
+        ).fetchall()
+        conn.close()
+        return jsonify({
+            "account": account,
+            "sender": sender,
+            "records": [_row_to_dict(r) for r in rows],
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/wechat/query")
+def wechat_query():
+    """通用查询。"""
+    account = request.args.get("account", "")
+    date_from = request.args.get("date_from")
+    date_to = request.args.get("date_to")
+    sender = request.args.get("sender")
+    keyword = request.args.get("keyword")
+    type_filter = request.args.get("type")
+    after_id = request.args.get("after_id")
+    limit = int(request.args.get("limit", 1000))
+    try:
+        _validate_account(account)
+        conn = _ensure_merged_db()
+        table = f"wc_{account}"
+
+        conditions = []
+        params = []
+        if after_id:
+            conditions.append("id > ?")
+            params.append(int(after_id))
+        if date_from:
+            conditions.append("time >= ?")
+            params.append(date_from)
+        if date_to:
+            conditions.append("time <= ?")
+            params.append(date_to)
+        if sender:
+            conditions.append("sender LIKE ?")
+            params.append(f"%{sender}%")
+        if keyword:
+            conditions.append("content LIKE ?")
+            params.append(f"%{keyword}%")
+        if type_filter:
+            types = [t.strip() for t in type_filter.split(",")]
+            placeholders = ",".join("?" for _ in types)
+            conditions.append(f"type IN ({placeholders})")
+            params.extend(types)
+
+        where = " AND ".join(conditions) if conditions else "1"
+        rows = conn.execute(
+            f"SELECT id, time, send, sender, type, content, source FROM [{table}] WHERE {where} ORDER BY id ASC LIMIT ?",
+            params + [limit],
+        ).fetchall()
+        conn.close()
+        return jsonify({
+            "account": account,
+            "records": [_row_to_dict(r) for r in rows],
+            "returned": len(rows),
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/wechat/finance")
+def wechat_finance():
+    """财务相关消息过滤。"""
+    account = request.args.get("account", "")
+    date_from = request.args.get("date_from", "")
+    date_to = request.args.get("date_to", "")
+    try:
+        _validate_account(account)
+        conn = _ensure_merged_db()
+        table = f"wc_{account}"
+        rows = conn.execute(
+            f"""SELECT id, time, send, sender, type, content, source FROM [{table}]
+                WHERE time >= ? AND time <= ?
+                  AND (sender LIKE '%支付%' OR sender LIKE '%银行%' OR sender LIKE '%信用卡%'
+                       OR content LIKE '%￥%' OR content LIKE '%消费%'
+                       OR content LIKE '%转账%' OR content LIKE '%红包%')
+                ORDER BY id ASC""",
+            (date_from, date_to),
+        ).fetchall()
+        conn.close()
+        return jsonify({
+            "account": account,
+            "records": [_row_to_dict(r) for r in rows],
+            "returned": len(rows),
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+# ── SMS 接收端点 ──
+
+_SMS_DB = Path(__file__).parent.parent / "data" / "sms_received.db"
+
+
+def _ensure_sms_db():
+    conn = sqlite3.connect(str(_SMS_DB))
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS sms_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            sms_id INTEGER UNIQUE,
+            number TEXT,
+            body TEXT,
+            received TEXT,
+            uploaded_at TEXT,
+            source TEXT DEFAULT 'termux'
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+
+def _get_sms_api_key():
+    try:
+        from func.jpfuncs import getinivaluefromcloud
+        return getinivaluefromcloud("sms_collector", "api_key") or ""
+    except Exception:
+        return ""
+
+
+@app.route("/sms/upload", methods=["POST"])
+def sms_upload():
+    """接收 Termux 上传的短信数据。
+
+    请求体: {"messages": [{"_id": 123, "number": "95555", "body": "...", "received": "..."}], "source": "termux"}
+    """
+    expected_key = _get_sms_api_key()
+    if expected_key:
+        got_key = request.headers.get("X-API-Key", "")
+        if got_key != expected_key:
+            return jsonify({"error": "unauthorized"}), 401
+
+    data = request.get_json(silent=True)
+    if not data or "messages" not in data:
+        return jsonify({"error": "need JSON with messages field"}), 400
+
+    messages = data["messages"]
+    if not messages:
+        return jsonify({"imported": 0, "errors": 0, "total": 0})
+
+    _ensure_sms_db()
+    conn = sqlite3.connect(str(_SMS_DB))
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    imported = 0
+    errors = 0
+
+    for m in messages:
+        try:
+            conn.execute(
+                "INSERT OR IGNORE INTO sms_messages (sms_id, number, body, received, uploaded_at, source) VALUES (?,?,?,?,?,?)",
+                (int(m["_id"]), str(m.get("number", "")), str(m.get("body", "")), str(m.get("received", "")), now, data.get("source", "termux"))
+            )
+            if conn.total_changes:
+                imported += 1
+        except Exception as e:
+            log.warning(f"sms 处理失败: {e}")
+            errors += 1
+
+    conn.commit()
+    conn.close()
+    log.info(f"sms 接收: {imported} 条入库, {errors} 条错误")
+    return jsonify({"imported": imported, "errors": errors, "total": len(messages)})
 
 
 # %%
