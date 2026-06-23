@@ -42,6 +42,7 @@ with pathmagic.Context():
         from aimod.text_preprocessor import TextPreprocessor
         from aimod.text_splitter import ContextAwareSplitter
         from func.datatools import compute_content_hash
+        from func.datetimetools import normalize_chinese_dates
         from func.jpfuncs import getinivaluefromcloud
         from func.logme import log
     except ImportError as e:
@@ -831,6 +832,9 @@ class EmbeddingGenerator:
         """
         if not text:
             return []
+
+        # 预处理：将中文大写数字日期（二零二六年六月七日）转为阿拉伯数字，统一识别
+        text = normalize_chinese_dates(text)
 
         chunks = []
         # ========== 第一：统一按日期行进行一级分割 ==========
