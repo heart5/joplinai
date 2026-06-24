@@ -132,7 +132,7 @@ CONFIG = {
 
 # 硅基流动云端嵌入无 Ollama 本地瓶颈（semaphore=2），并发可调高
 if CONFIG.get("siliconflow_embedding_model"):
-    CONFIG["max_workers"] = 8
+    CONFIG["max_workers"] = 3
 
 # %% [markdown]
 # # 功能函数集
