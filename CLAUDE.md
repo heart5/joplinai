@@ -164,7 +164,7 @@ Pre-commit (`.pre-commit-config.yaml`): jupytext 误注释检测 + flake8。
 
 - **HCX 服务更新后需手动重启**: gunicorn 不自动 reload，git pull 后必须 `sudo systemctl restart joplinai-qa-api joplinai-web-app`。
 - **git push 后不自动同步 TC**: 安全考量，TC 需手动 `git pull --ff-only` + `systemctl restart --no-block`。
-- **TC 配置更新流程**：修改云端 INI → `ssh tc "source /usr/miniconda3/etc/profile.d/conda.sh && conda activate newlsp && joplin sync"` → `ssh tc "sudo systemctl restart --no-block joplinai-sync"`。
+- **TC 配置更新流程**：修改云端 INI → `ssh tc "joplin sync"` → `ssh tc "sudo systemctl restart --no-block joplinai-sync"`。（joplin sync **不要**套 conda activate/run newlsp：该环境 node v18 跑 `/usr/bin/joplin` 会 `ERR_REQUIRE_ESM`）
 - **center_api 日志查看**：TC 上 `sudo journalctl -u joplinai-center-api -f`。`aimod/center_api/__init__.py` 中 `propagate=False` 避免双重输出。
 - **ChromaDB metadata 键对**：含 `has_images`（`meta_hash` 不包含）、`estimated_date`、`chunk_summary`、`tags`、`meta_hash`。
 - **Ollama 在 HCX 以公网暴露**：TC 向量化通过 `149.30.242.156:11434` 调用 HCX Ollama。
