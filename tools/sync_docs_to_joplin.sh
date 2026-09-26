@@ -1,20 +1,18 @@
 #!/bin/bash
-# post-commit hook / 手动工具: .md 文件变更 → md2note 同步到 Joplin → TC joplin sync
+# post-commit hook: 提交后触发 TC joplin sync
 #
-# 委托给 func/tools/md2note.py（--find-files 自动扫描）
-# md2note 写入笔记后，SSH 到 TC 触发 joplin sync（md2note 不负责运维部署）
+# docs/*.md 与根目录 *.md 的 Joplin 同步归 ops 的 sync_docs_to_joplin.py，
+# 不再由本脚本用 md2note 重复写一遍——md2note --find-files 只扫 docs/ 与根目录，
+# 而 docs/ 被 gitignore，靠 commit 触发结构上就追不上，且它会另建一份标题带
+# 路径后缀的笔记，与 ops 的副本重复。本项目无 log/、data/ 生成物，故无 md2note 职责。
 #
-# 依赖：
-#   - func 子模块（func/tools/md2note.py）
-#   - SSH 免密登录 tc（~/.ssh/config 配置主机别名为 tc）
+# 依赖：SSH 免密登录 tc（~/.ssh/config 配置主机别名为 tc）
 
 PROJ_ROOT="/data/codebase/joplinai"
 LOGGER_TAG="sync-docs-joplin"
 
-echo "[$LOGGER_TAG] 同步 .md 文件到 Joplin..."
+echo "[$LOGGER_TAG] 通知 TC 触发 joplin sync..."
 cd "$PROJ_ROOT" || exit 1
-python -m func.tools.md2note --find-files --notebook joplinai --quiet
-echo "[$LOGGER_TAG] 同步完成，通知 TC 触发 joplin sync..."
 # 勿用 conda run/activate newlsp 包裹：该环境 node v18 跑 /usr/bin/joplin 会 ERR_REQUIRE_ESM
 ssh tc "joplin sync" 2>/dev/null && \
   echo "[$LOGGER_TAG] TC joplin sync 完成" || \
