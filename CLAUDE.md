@@ -27,7 +27,7 @@ Joplinai is an AI-powered knowledge retrieval and Q&A system for [Joplin](https:
 | Server | Hostname | Role |
 |--------|----------|------|
 | 腾讯云 (TC) | `tc` (122.51.102.233:2202) | Joplin Server (CLI, `joplin.xiloong.fans`), 向量数据库 (ChromaDB), 数据中心 (center_api), 定时向量化 (joplinai-sync), 用户管理 |
-| 恒创云 (HCX) | long9.org (149.30.242.156) | Joplin Server (Docker, `joplin.qingxd.com`), Ollama LLM 推理 (端口 11434), Q&A API, Web 门户 |
+| 恒创云 (HCX) | `hcxbaiyefeng` (149.30.242.156:12403) | Joplin Server (Docker, `joplin.qingxd.com`), Ollama LLM 推理 (端口 11434), Q&A API, Web 门户 |
 
 两台 Joplin Server 互为备份：HCX 运行 Docker 版（主），TC 运行 CLI 版（备）。各自通过 Apache 反代对外暴露 HTTPS 端点,本机 client 直连 localhost:41184。
 
